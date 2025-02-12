@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let result = vice::run(State, |_,store|async move{
-        tracing::trace!("Request");
+        tracing::trace!("{} {}",store.method,store.path);
 
         // headers
         {

@@ -17,6 +17,8 @@ const HEADER_COUNT: usize = 48;
 const BUF_SIZE: usize = 1024;
 
 pub struct Store {
+    pub method: &'static str,
+    pub path: &'static str,
     pub headers: &'static [httparse::Header<'static>],
     pub body: Body,
     pub res_header_buf: &'static mut Vec<u8>,
@@ -86,11 +88,26 @@ where
             }
         };
 
+        let method_ref = {
+            let method = request.method.expect("parse always complete");
+            (method.as_ptr(),method.len())
+        };
+
+        let path_ref = {
+            let path = request.path.expect("parse always complete");
+            (path.as_ptr(),path.len())
+        };
+
         // body manager
         let body = Body::new(body_offset, &mut stream, &mut req_buf, &request.headers);
 
+        use std::str::from_utf8_unchecked as b2s;
+        use std::slice::from_raw_parts as p2b;
+
         // call handler
         let store = Store {
+            method: unsafe { b2s(p2b(method_ref.0, method_ref.1)) },
+            path: unsafe { b2s(p2b(path_ref.0, path_ref.1)) },
             headers: unsafe { &*{ request.headers as *mut [httparse::Header] } },
             body,
             res_header_buf: unsafe { &mut *{ &mut res_header_buf as *mut Vec<u8> } },
