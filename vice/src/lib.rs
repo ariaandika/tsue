@@ -16,10 +16,17 @@ const ADDR: &'static str = "0.0.0.0:3000";
 const HEADER_COUNT: usize = 48;
 const BUF_SIZE: usize = 1024;
 
+pub struct Store {
+    pub headers: &'static [httparse::Header<'static>],
+    pub body: Body,
+    pub res_header_buf: &'static mut Vec<u8>,
+    pub res_body_buf: &'static mut Vec<u8>,
+}
+
 pub fn run<S,F,Fut>(state: S, handle: F) -> Result<(), Box<dyn std::error::Error>>
 where
     S: Clone + Send + 'static,
-    F: Copy + Fn(S,&'static [httparse::Header<'static>],Body,&'static mut Vec<u8>,&'static mut Vec<u8>) -> Fut + Send + 'static,
+    F: Copy + Fn(S,Store) -> Fut + Send + 'static,
     Fut: Future + Send + 'static,
 {
     let tcp = TcpListener::bind(ADDR)?;
@@ -49,7 +56,7 @@ where
 async fn connection<S,F,Fut>(state: S, handle: F, mut stream: TcpStream, _addr: SocketAddr)
 where
     S: Clone + Send + 'static,
-    F: Copy + Fn(S,&'static [httparse::Header<'static>],Body,&'static mut Vec<u8>,&'static mut Vec<u8>) -> Fut + Send + 'static,
+    F: Copy + Fn(S,Store) -> Fut + Send + 'static,
     Fut: Future + Send + 'static,
 {
     let mut req_buf = Vec::with_capacity(BUF_SIZE);
@@ -83,13 +90,13 @@ where
         let body = Body::new(body_offset, &mut stream, &mut req_buf, &request.headers);
 
         // call handler
-        handle(
-            state.clone(),
-            unsafe { &*{ request.headers as *mut [httparse::Header] } },
+        let store = Store {
+            headers: unsafe { &*{ request.headers as *mut [httparse::Header] } },
             body,
-            unsafe { &mut *{ &mut res_header_buf as *mut Vec<u8> } },
-            unsafe { &mut *{ &mut res_body_buf as *mut Vec<u8> } },
-        ).await;
+            res_header_buf: unsafe { &mut *{ &mut res_header_buf as *mut Vec<u8> } },
+            res_body_buf: unsafe { &mut *{ &mut res_body_buf as *mut Vec<u8> } },
+        };
+        handle(state.clone(),store).await;
 
         // flush buffer
         // [header, body]

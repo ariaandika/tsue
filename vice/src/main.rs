@@ -7,24 +7,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let result = vice::run(State, |_,headers,body,res_head,_|async move{
+    let result = vice::run(State, |_,store|async move{
         tracing::trace!("Request");
 
         // headers
         {
             let span = tracing::trace_span!("Header");
             let _guard = span.enter();
-            for header in headers {
+            for header in store.headers {
                 tracing::trace!("{}: {}",header.name,vice::util::display_str(header.value));
             }
         }
 
         // read body
-        if headers.iter().any(|h|h.name.eq_ignore_ascii_case("content-length")) {
+        if store.headers.iter().any(|h|h.name.eq_ignore_ascii_case("content-length")) {
             let span = tracing::trace_span!("Body");
             let _guard = span.enter();
 
-            let body = body.await.unwrap();
+            let body = store.body.await.unwrap();
             tracing::trace!("len: {}",body.len());
             if body.len() > 255 {
                 tracing::trace!("[body too large to display ({})]",body.len());
@@ -34,10 +34,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // send response
-        res_head.extend_from_slice(b"HTTP/1.1 200 OK\r\nDate: ");
+        store.res_header_buf.extend_from_slice(b"HTTP/1.1 200 OK\r\nDate: ");
         let date = HttpDate::from(SystemTime::now());
-        write!(res_head, "{date}").ok();
-        res_head.extend_from_slice(b"\r\nContent-Length: 0\r\n\r\n");
+        write!(store.res_header_buf, "{date}").ok();
+        store.res_header_buf.extend_from_slice(b"\r\nContent-Length: 0\r\n\r\n");
 
     });
 
