@@ -80,7 +80,7 @@ where
         };
 
         // body manager
-        let body = Body::new(body_offset, &mut stream, &mut req_buf, &mut headers);
+        let body = Body::new(body_offset, &mut stream, &mut req_buf, &request.headers);
 
         // call handler
         handle(
