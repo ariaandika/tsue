@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.95"
 axum = "0.8.1"
+dotenvy = "0.15.7"
 httparse = "1.10.0"
 httpdate = "1.0.3"
+sqlx = { version = "0.8.3", default-features = false, features = ["postgres", "runtime-tokio"] }
 tokio = { version = "1.43.0", features = ["io-util", "net", "rt-multi-thread", "sync"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
