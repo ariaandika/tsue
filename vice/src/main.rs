@@ -1,5 +1,5 @@
 use anyhow::Context;
-use axum::{extract::State, routing::get, Router};
+use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use std::{
     env::var,
@@ -7,6 +7,7 @@ use std::{
 };
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
+use vice::orders;
 
 const DEFAULT_HOST: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const DEFAULT_PORT: u16 = 3000;
@@ -32,16 +33,18 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let db = {
-        let db_url = var("DB_URL").context("failed to get DB_URL env")?;
+        let db_url = var("DATABASE_URL").context("failed to get DATABASE_URL env")?;
         PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_secs(4))
             .connect_lazy(&db_url)
             .expect("infallible")
     };
 
     let routes = Router::new()
-        .route("/", get(||async { "Axum Dev !" }))
-        .with_state(State(db));
+        .merge(orders::routes())
+        .with_state(db);
 
     axum::serve(tcp,routes).await.context("failed to serve")
 }
+
 

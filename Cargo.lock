@@ -1594,6 +1594,7 @@ dependencies = [
  "httpdate",
  "sqlx",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
 ]
