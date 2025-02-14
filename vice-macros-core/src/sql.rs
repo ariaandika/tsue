@@ -60,10 +60,10 @@ fn create_metadata(sql: &Sql, tokens: &mut TokenStream) {
 fn create_select(sql: &Sql, tokens: &mut TokenStream) {
     let Sql { vis, table, .. } = sql;
     tokens.extend(quote! {
-        #vis async fn select(db: #PgPool) -> sqlx::Result<Vec<Self>> {
+        #vis async fn select(db: #POOL) -> sqlx::Result<Vec<Self>> {
             sqlx::query_as::<_, Self>(concat!("select * from ",#table)).fetch_all(db).await
         }
-        #vis async fn stream(db: #PgPool) -> impl Stream<Item = sqlx::Result<Self>> {
+        #vis async fn stream<'a>(db: #POOL_LT) -> impl tokio_stream::Stream<Item = sqlx::Result<Self>> + use<'a> {
             sqlx::query_as::<_, Self>(concat!("select * from ",#table)).fetch(db)
         }
     });
@@ -71,15 +71,21 @@ fn create_select(sql: &Sql, tokens: &mut TokenStream) {
 
 
 use alias::PgPool;
+const POOL: PgPool = PgPool(false);
+const POOL_LT: PgPool = PgPool(true);
 
 mod alias {
     use super::*;
 
-    pub struct PgPool;
+    pub struct PgPool(pub bool);
 
     impl ToTokens for PgPool {
         fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-            tokens.extend(quote! { &sqlx::PgPool });
+            if self.0 {
+                tokens.extend(quote! { &'a sqlx::PgPool });
+            } else {
+                tokens.extend(quote! { &sqlx::PgPool });
+            }
         }
     }
 }
