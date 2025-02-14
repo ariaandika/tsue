@@ -1,8 +1,9 @@
 use axum::{extract::State, routing::get, Router};
 use sqlx::{prelude::FromRow, PgPool};
 use tokio_stream::StreamExt;
+use vice_macros::Sql;
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, FromRow, Sql)]
 #[allow(dead_code)]
 pub struct Order {
     name: String,

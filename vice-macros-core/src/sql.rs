@@ -1,8 +1,6 @@
-use std::rc::Rc;
-
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned, ToTokens, TokenStreamExt};
-use syn::{*, parse::{Parse, ParseStream}, spanned::Spanned};
+use quote::{quote, quote_spanned, ToTokens};
+use syn::{spanned::Spanned, token::Brace, *};
 
 
 pub struct Sql {
@@ -32,13 +30,21 @@ impl Sql {
 
 impl ToTokens for Sql {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        create_metadata(&self, tokens);
-        create_select(&self, tokens);
+        let Sql { ident, .. } = self;
+
+        tokens.extend(quote! {
+            impl #ident
+        });
+
+        Brace::default().surround(tokens, |tokens|{
+            create_metadata(self, tokens);
+            create_select(self, tokens);
+        });
     }
 }
 
 fn create_metadata(sql: &Sql, tokens: &mut TokenStream) {
-    let Sql { vis, table, fields, ident } = &*sql;
+    let Sql { vis, table, fields, ident } = sql;
 
     let fields = fields
         .iter()
@@ -47,12 +53,12 @@ fn create_metadata(sql: &Sql, tokens: &mut TokenStream) {
 
     tokens.extend(quote_spanned! {ident.span()=>
         #vis const TABLE: &'static str = #table;
-        #vis const FIELDS: &'static [&'static str] = [#(#fields)*,];
+        #vis const FIELDS: &'static [&'static str] = &[#(#fields)*,];
     });
 }
 
 fn create_select(sql: &Sql, tokens: &mut TokenStream) {
-    let Sql { vis, table, .. } = &*sql;
+    let Sql { vis, table, .. } = sql;
     tokens.extend(quote! {
         #vis async fn select(db: #PgPool) -> sqlx::Result<Vec<Self>> {
             sqlx::query_as::<_, Self>(concat!("select * from ",#table)).fetch_all(db).await

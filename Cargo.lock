@@ -1597,6 +1597,17 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "vice-macros",
+]
+
+[[package]]
+name = "vice-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "vice-macros-core",
 ]
 
 [[package]]

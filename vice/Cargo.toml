@@ -14,3 +14,4 @@ tokio = { version = "1.43.0", features = ["io-util", "net", "rt-multi-thread", "
 tokio-stream = "0.1.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+vice-macros = { path = "../vice-macros" }
