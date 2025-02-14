@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -7,8 +9,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let result = visor::run(State, |store|async move{
+    let state = State {
+        counter: Mutex::new(0),
+    };
+
+    let result = visor::run(state, |store|async move{
         tracing::trace!("{} {}",store.method,store.path);
+
+        // state
+        {
+            let state = store.state.downcast_ref::<State>().expect("asserted");
+            let mut counter = state.counter.lock().unwrap();
+            *counter = counter.wrapping_add(1);
+            store.res_header_buf.extend_from_slice(b"Count: ");
+            store.res_header_buf.extend_from_slice(itoa::Buffer::new().format(*counter).as_bytes());
+            store.res_header_buf.extend_from_slice(b"\r\n");
+        }
 
         // headers
         {
@@ -39,7 +55,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     result.inspect_err(|err|tracing::error!("{err:?}"))
 }
 
-#[derive(Clone)]
-struct State;
+struct State {
+    counter: Mutex<u8>,
+}
 
 
