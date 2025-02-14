@@ -63,6 +63,9 @@ fn create_select(sql: &Sql, tokens: &mut TokenStream) {
         #vis async fn select(db: #PgPool) -> sqlx::Result<Vec<Self>> {
             sqlx::query_as::<_, Self>(concat!("select * from ",#table)).fetch_all(db).await
         }
+        #vis async fn stream(db: #PgPool) -> impl Stream<Item = sqlx::Result<Self>> {
+            sqlx::query_as::<_, Self>(concat!("select * from ",#table)).fetch(db)
+        }
     });
 }
 
