@@ -278,7 +278,7 @@ mod body {
                     }
                     // wait for body read task
                     BodyState::Recv { mut back } => {
-                        let pin = Pin::new(&mut back);
+                        let pin = std::pin::pin!(&mut back);
                         match pin.poll(cx) {
                             Poll::Ready(result) => {
                                 return match result.expect("the spawned thread call never drop without sending msg") {
