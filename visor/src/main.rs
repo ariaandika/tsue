@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let result = visor::run(State, |_,store|async move{
+    let result = visor::run(State, |store|async move{
         tracing::trace!("{} {}",store.method,store.path);
 
         // headers

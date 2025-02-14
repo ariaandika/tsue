@@ -1,14 +1,20 @@
 use http::StatusCode;
 use httparse::EMPTY_HEADER;
 use std::{
+    any::Any,
     future::Future,
-    io::{self, Write as _, IoSlice},
-    net::{SocketAddr, TcpListener}, pin::Pin, task::Poll, time::SystemTime,
+    io::{self, IoSlice, Write as _},
+    net::{SocketAddr, TcpListener},
+    pin::Pin,
+    sync::Arc,
+    task::Poll,
+    time::SystemTime,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    runtime::Builder as Tokio, sync::oneshot,
+    runtime::Builder as Tokio,
+    sync::oneshot,
 };
 
 pub use body::Body;
@@ -19,6 +25,7 @@ const RES_STATUS_SIZE: usize = 20;
 const BUF_SIZE: usize = 1024;
 
 pub struct Store {
+    pub state: Arc<dyn Any + Send + Sync>,
     pub status: &'static mut StatusCode,
     pub method: &'static str,
     pub path: &'static str,
@@ -28,10 +35,11 @@ pub struct Store {
     pub res_body_buf: &'static mut Vec<u8>,
 }
 
+/// state is `Arc` internally
 pub fn run<S,F,Fut>(state: S, handle: F) -> Result<(), Box<dyn std::error::Error>>
 where
-    S: Clone + Send + 'static,
-    F: Copy + Fn(S,Store) -> Fut + Send + 'static,
+    S: Send + Sync + Any + 'static,
+    F: Copy + Fn(Store) -> Fut + Send + 'static,
     Fut: Future + Send + 'static,
 {
     let tcp = TcpListener::bind(ADDR)?;
@@ -40,15 +48,13 @@ where
     Tokio::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(async {
+        .block_on(async move {
             let tcp = tokio::net::TcpListener::from_std(tcp)?;
-
+            let state = Arc::new(state);
             loop {
                 match tcp.accept().await {
                     Ok((stream,addr)) => {
-                        tokio::spawn(connection::<_, _, Fut>(
-                            state.clone(), handle, stream, addr
-                        ));
+                        tokio::spawn(connection::<_, _, Fut>(state.clone(), handle, stream, addr));
                     },
                     Err(err) => {
                         tracing::debug!("failed to accept new connection: {err}");
@@ -58,10 +64,10 @@ where
         })
 }
 
-async fn connection<S,F,Fut>(state: S, handle: F, mut stream: TcpStream, _addr: SocketAddr)
+async fn connection<S,F,Fut>(state: Arc<S>, handle: F, mut stream: TcpStream, _addr: SocketAddr)
 where
-    S: Clone + Send + 'static,
-    F: Copy + Fn(S,Store) -> Fut + Send + 'static,
+    S: Send + Sync + Any + 'static,
+    F: Copy + Fn(Store) -> Fut + Send + 'static,
     Fut: Future + Send + 'static,
 {
     let mut req_buf = Vec::with_capacity(BUF_SIZE);
@@ -116,6 +122,7 @@ where
 
         // call handler
         let store = Store {
+            state: Arc::clone(&state) as _,
             status: unsafe { &mut *{ &mut status as *mut StatusCode } },
             method: unsafe { b2s(p2b(method_ref.0, method_ref.1)) },
             path: unsafe { b2s(p2b(path_ref.0, path_ref.1)) },
@@ -124,7 +131,7 @@ where
             res_header_buf: unsafe { &mut *{ &mut res_header_buf as *mut Vec<u8> } },
             res_body_buf: unsafe { &mut *{ &mut res_body_buf as *mut Vec<u8> } },
         };
-        handle(state.clone(),store).await;
+        handle(store).await;
 
         res_status_buf.extend_from_slice(b"HTTP/1.1 ");
         res_status_buf.extend_from_slice(status.as_str().as_bytes());
