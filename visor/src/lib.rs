@@ -19,7 +19,7 @@ use tokio::{
 
 pub use body::Body;
 
-const ADDR: &'static str = "0.0.0.0:3000";
+const ADDR: &str = "0.0.0.0:3000";
 const HEADER_COUNT: usize = 48;
 const RES_STATUS_SIZE: usize = 20;
 const BUF_SIZE: usize = 1024;
@@ -91,7 +91,7 @@ where
 
         let body_offset = {
             let req_buf = unsafe { &*{ &req_buf[..] as *const [u8] } };
-            match request.parse(&req_buf) {
+            match request.parse(req_buf) {
                 Ok(httparse::Status::Partial) => continue,
                 Ok(httparse::Status::Complete(end)) => end,
                 Err(err) => break Err(err.into()),
@@ -115,7 +115,7 @@ where
         res_header_buf.extend_from_slice(b"\r\n");
 
         // body manager
-        let body = Body::new(body_offset, &mut stream, &mut req_buf, &request.headers);
+        let body = Body::new(body_offset, &mut stream, &mut req_buf, request.headers);
 
         use std::str::from_utf8_unchecked as b2s;
         use std::slice::from_raw_parts as p2b;
