@@ -14,10 +14,9 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     runtime::Builder as Tokio,
-    sync::oneshot,
 };
 
-pub use body::Body;
+pub use body::Incoming;
 
 const ADDR: &str = "0.0.0.0:3000";
 const HEADER_COUNT: usize = 48;
@@ -30,7 +29,7 @@ pub struct Store {
     pub method: &'static str,
     pub path: &'static str,
     pub headers: &'static [httparse::Header<'static>],
-    pub body: Body,
+    pub body: Incoming,
     pub res_header_buf: &'static mut Vec<u8>,
     pub res_body_buf: &'static mut Vec<u8>,
 }
@@ -115,7 +114,7 @@ where
         res_header_buf.extend_from_slice(b"\r\n");
 
         // body manager
-        let body = Body::new(body_offset, &mut stream, &mut req_buf, request.headers);
+        let body = Incoming::new(body_offset, &mut stream, &mut req_buf, request.headers);
 
         use std::str::from_utf8_unchecked as b2s;
         use std::slice::from_raw_parts as p2b;
@@ -168,136 +167,90 @@ where
 mod body {
     use super::*;
 
-    pub struct Body {
+    pub struct Incoming {
         body_offset: usize,
-        /// Vec<u8>
+        stream: &'static mut TcpStream,
         req_ptr: usize,
-        inner: BodyState,
-    }
-
-    impl Body {
-        pub fn new(
-            body_offset: usize,
-            stream: &mut TcpStream,
-            req_buf: &mut Vec<u8>,
-            headers: &[httparse::Header<'static>]
-        ) -> Self {
-            let (send,recv) = oneshot::channel::<()>();
-            let (call,back) = oneshot::channel::<io::Result<()>>();
-            let req_ptr = req_buf as *mut Vec<u8> as usize;
-            tokio::spawn(body::reader(
-                body_offset,
-                stream as *mut TcpStream as usize,
-                req_ptr,
-                (headers.as_ptr() as usize, headers.len()), // slice cannot be directly usized
-                recv,
-                call,
-            ));
-            Self {
-                body_offset,
-                req_ptr,
-                inner: BodyState::Send { send, back },
-            }
-        }
+        req_buf: &'static mut Vec<u8>,
+        headers: &'static [httparse::Header<'static>],
+        inner: IncomingState,
     }
 
     #[derive(Default)]
-    enum BodyState {
-        Send { send: oneshot::Sender<()>, back: oneshot::Receiver<io::Result<()>> },
-        Recv { back: oneshot::Receiver<io::Result<()>> },
+    enum IncomingState {
+        Setup,
+        Read { expected_len: usize },
         #[default]
         End,
     }
 
-    pub async fn reader(
-        body_offset: usize,
-        stream_ptr: usize,
-        req_ptr: usize,
-        headers_ref: (usize,usize),
-        recv: oneshot::Receiver<()>,
-        call: oneshot::Sender<io::Result<()>>,
-    ) {
-        let Ok(()) = recv.await else {
-            tracing::trace!("Body never read");
-            return;
-        };
-
-        let stream = unsafe { &mut *{ stream_ptr as *mut TcpStream } };
-        let mut req_buf = unsafe { &mut *{ req_ptr as *mut Vec<u8> } };
-
-        let (headers_ptr,headers_len) = headers_ref;
-        let headers = unsafe {
-            std::slice::from_raw_parts(headers_ptr as *const httparse::Header<'_>, headers_len)
-        };
-
-        // Read Body
-        use std::str::from_utf8 as parse_str;
-
-        let expected_len = match headers.iter()
-            .find(|&e|e.name.eq_ignore_ascii_case("content-length"))
-            .and_then(|e|parse_str(e.value).ok()?.parse::<usize>().ok())
-        {
-            Some(some) => some,
-            None => {
-                let err = io::Error::new(io::ErrorKind::InvalidData, "failed to parse content length");
-                call.send(Err(err)).ok();
-                return;
-            }
-        };
-
-        // keep reading until expected len reached
-        while (req_buf.len() - body_offset) < expected_len {
-            match stream.read_buf(&mut req_buf).await {
-                Ok(0) => {
-                    call.send(Err(io::ErrorKind::UnexpectedEof.into())).ok();
-                    return;
-                }
-                Ok(_) => {}
-                Err(err) => {
-                    call.send(Err(err)).ok();
-                    return;
-                }
+    impl Incoming {
+        pub fn new(
+            body_offset: usize,
+            stream: &mut TcpStream,
+            req_buf: &mut Vec<u8>,
+            headers: &mut [httparse::Header<'static>],
+        ) -> Self {
+            Self {
+                body_offset,
+                stream: unsafe { &mut *{ stream as *mut TcpStream } },
+                req_ptr: req_buf as *mut Vec<u8> as usize,
+                req_buf: unsafe { &mut *{ req_buf as *mut Vec<u8> } },
+                headers: unsafe {
+                    std::slice::from_raw_parts(
+                        headers.as_ptr(),
+                        headers.len(),
+                    )
+                },
+                inner: IncomingState::Setup,
             }
         }
-
-        // send read ok signal
-        call.send(Ok(())).ok();
     }
 
-    impl Future for Body {
+    impl Future for Incoming {
         type Output = io::Result<&'static [u8]>;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
             loop {
                 match std::mem::take(&mut self.inner) {
-                    // body reader task is not yet polled
-                    BodyState::Send { send, back } => {
-                        send.send(()).expect("the spawned thread recv never drop before this");
-                        self.inner = BodyState::Recv { back };
+                    IncomingState::Setup => {
+                        use std::str::from_utf8 as parse_str;
+
+                        let expected_len = match self.headers.iter()
+                            .find(|&e|e.name.eq_ignore_ascii_case("content-length"))
+                            .and_then(|e|parse_str(e.value).ok()?.parse::<usize>().ok())
+                        {
+                            Some(0) => return Poll::Ready(Ok(b"")),
+                            Some(some) => some,
+                            None => {
+                                let msg = "failed to parse content length";
+                                let err = io::Error::new(io::ErrorKind::InvalidData, msg);
+                                return Poll::Ready(Err(err));
+                            }
+                        };
+
+                        self.inner = IncomingState::Read { expected_len, };
                         continue;
                     }
-                    // wait for body read task
-                    BodyState::Recv { mut back } => {
-                        let pin = std::pin::pin!(&mut back);
-                        match pin.poll(cx) {
-                            Poll::Ready(result) => {
-                                return match result.expect("the spawned thread call never drop without sending msg") {
-                                    Ok(()) => {
-                                        let buf: &'static Vec<u8> = unsafe { &mut *{ self.req_ptr as *mut Vec<u8> } };
-                                        Poll::Ready(Ok(&buf[self.body_offset..buf.len()]))
-                                    },
-                                    Err(err) => {
-                                        Poll::Ready(Err(err))
-                                    },
-                                }
-                            }
-                            Poll::Pending => {
-                                self.inner = BodyState::Recv { back };
-                                return Poll::Pending;
+                    IncomingState::Read { expected_len } => {
+                        let buf = unsafe { &mut *{ self.req_ptr as *mut Vec<u8> } };
+
+                        while (self.req_buf.len() - self.body_offset) < expected_len {
+                            let mut g = self.stream.read_buf(buf);
+                            let pin = std::pin::pin!(g);
+                            match pin.poll(cx) {
+                                Poll::Ready(Ok(0)) => return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into())),
+                                Poll::Ready(Ok(_)) => {}
+                                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                                Poll::Pending => {
+                                    self.inner = IncomingState::Read { expected_len };
+                                    return Poll::Pending;
+                                },
                             }
                         }
+                        return Poll::Ready(Ok(&buf[self.body_offset..buf.len()]));
                     }
-                    BodyState::End => unreachable!("poll should not be called after Poll::Ready"),
+                    IncomingState::End => unreachable!("poll should not be called after Poll::Ready"),
                 }
             }
         }
