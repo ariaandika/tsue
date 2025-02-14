@@ -1,5 +1,3 @@
-use std::{io::Write as _, time::SystemTime};
-use httpdate::HttpDate;
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,14 +31,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 tracing::trace!("{}", visor::util::display_str(body));
             }
+
+            store.res_body_buf.extend_from_slice(body);
         }
-
-        // send response
-        store.res_header_buf.extend_from_slice(b"HTTP/1.1 200 OK\r\nDate: ");
-        let date = HttpDate::from(SystemTime::now());
-        write!(store.res_header_buf, "{date}").ok();
-        store.res_header_buf.extend_from_slice(b"\r\nContent-Length: 0\r\n\r\n");
-
     });
 
     result.inspect_err(|err|tracing::error!("{err:?}"))

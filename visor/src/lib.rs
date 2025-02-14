@@ -1,8 +1,9 @@
+use http::StatusCode;
 use httparse::EMPTY_HEADER;
 use std::{
     future::Future,
-    io::{self, IoSlice},
-    net::{SocketAddr, TcpListener}, pin::Pin, task::Poll,
+    io::{self, Write as _, IoSlice},
+    net::{SocketAddr, TcpListener}, pin::Pin, task::Poll, time::SystemTime,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -14,9 +15,11 @@ pub use body::Body;
 
 const ADDR: &'static str = "0.0.0.0:3000";
 const HEADER_COUNT: usize = 48;
+const RES_STATUS_SIZE: usize = 20;
 const BUF_SIZE: usize = 1024;
 
 pub struct Store {
+    pub status: &'static mut StatusCode,
     pub method: &'static str,
     pub path: &'static str,
     pub headers: &'static [httparse::Header<'static>],
@@ -64,6 +67,7 @@ where
     let mut req_buf = Vec::with_capacity(BUF_SIZE);
     let mut headers = [EMPTY_HEADER;HEADER_COUNT];
 
+    let mut res_status_buf = Vec::<u8>::with_capacity(RES_STATUS_SIZE);
     let mut res_header_buf = Vec::<u8>::with_capacity(BUF_SIZE / 2);
     let mut res_body_buf = Vec::<u8>::with_capacity(BUF_SIZE);
 
@@ -98,6 +102,12 @@ where
             (path.as_ptr(),path.len())
         };
 
+        let mut status = StatusCode::OK;
+
+        res_header_buf.extend_from_slice(b"Date: ");
+        write!(&mut res_header_buf, "{}", httpdate::HttpDate::from(SystemTime::now())).ok();
+        res_header_buf.extend_from_slice(b"\r\n");
+
         // body manager
         let body = Body::new(body_offset, &mut stream, &mut req_buf, &request.headers);
 
@@ -106,6 +116,7 @@ where
 
         // call handler
         let store = Store {
+            status: unsafe { &mut *{ &mut status as *mut StatusCode } },
             method: unsafe { b2s(p2b(method_ref.0, method_ref.1)) },
             path: unsafe { b2s(p2b(path_ref.0, path_ref.1)) },
             headers: unsafe { &*{ request.headers as *mut [httparse::Header] } },
@@ -115,15 +126,29 @@ where
         };
         handle(state.clone(),store).await;
 
+        res_status_buf.extend_from_slice(b"HTTP/1.1 ");
+        res_status_buf.extend_from_slice(status.as_str().as_bytes());
+        res_status_buf.push(b' ');
+        res_status_buf.extend_from_slice(status.canonical_reason().expect("no canonical reason").as_bytes());
+        res_status_buf.extend_from_slice(b"\r\n");
+
+        res_header_buf.extend_from_slice(b"Content-Length: ");
+        res_header_buf.extend_from_slice(itoa::Buffer::new().format(res_body_buf.len()).as_bytes());
+        res_header_buf.extend_from_slice(b"\r\n\r\n");
+
         // flush buffer
-        // [header, body]
-        let vectored = [IoSlice::new(&res_header_buf), IoSlice::new(&res_body_buf)];
+        // [status, header, body]
+        let vectored = [
+            IoSlice::new(&res_status_buf),
+            IoSlice::new(&res_header_buf),
+            IoSlice::new(&res_body_buf)
+        ];
         if let Err(err) = stream.write_vectored(&vectored).await {
             break Err(err.into());
         }
-
         // request complete, clear buffer for subsequent new request
         req_buf.clear();
+        res_status_buf.clear();
         res_header_buf.clear();
         res_body_buf.clear();
     };
