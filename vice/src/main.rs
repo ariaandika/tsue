@@ -1,50 +1,40 @@
-use anyhow::Context;
-use axum::Router;
-use sqlx::postgres::PgPoolOptions;
-use std::{
-    env::var,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-};
+use std::{io, net::TcpListener as StdTcpListener};
+
 use tokio::net::TcpListener;
-use tracing_subscriber::EnvFilter;
-use vice::orders;
 
-const DEFAULT_HOST: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-const DEFAULT_PORT: u16 = 3000;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    dotenvy::dotenv().ok();
+const ADDR: &str = "0.0.0.0:3000";
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+fn main() -> Result<(), Error> {
+    let tcp = StdTcpListener::bind(ADDR).map_err(Error::Tcp)?;
 
-    let tcp = {
-        let addr = match var("ADDR").ok().and_then(|e|e.parse().ok()) {
-            Some(ok) => ok,
-            None => {
-                let host = var("HOST").ok().and_then(|e|e.parse().ok()).unwrap_or(DEFAULT_HOST);
-                let port = var("PORT").ok().and_then(|e|e.parse().ok()).unwrap_or(DEFAULT_PORT);
-                SocketAddr::new(host, port)
-            },
-        };
-        TcpListener::bind(addr).await.with_context(||format!("failed to bind {addr}"))?
-    };
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let tcp = TcpListener::from_std(tcp)?;
 
-    let db = {
-        let db_url = var("DATABASE_URL").context("failed to get DATABASE_URL env")?;
-        PgPoolOptions::new()
-            .acquire_timeout(std::time::Duration::from_secs(4))
-            .connect_lazy(&db_url)
-            .expect("infallible")
-    };
+            loop {
+                let (stream, _addr) = match tcp.accept().await {
+                    Ok(ok) => ok,
+                    Err(err) => {
+                        eprintln!("{err}");
+                        continue;
+                    },
+                };
 
-    let routes = Router::new()
-        .merge(orders::routes())
-        .with_state(db);
-
-    axum::serve(tcp,routes).await.context("failed to serve")
+                tokio::spawn(async move {
+                    let _ = stream;
+                });
+            }
+        })
 }
 
+#[derive(thiserror::Error, Debug)]
+enum Error {
+    #[error("failed to bind to tcp: {0}")]
+    Tcp(io::Error),
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
+}
 
