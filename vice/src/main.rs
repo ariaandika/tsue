@@ -1,7 +1,7 @@
 use std::{io, net::TcpListener as StdTcpListener};
 
-use tokio::{io::AsyncReadExt, net::{TcpListener, TcpStream}};
-use vice::service::{connection::Connection, service_fn, Service};
+use tokio::{io::AsyncReadExt, net::TcpListener};
+use vice::service::{connection::{Connection, ConnectionBuffer}, service_fn, Service};
 
 
 const ADDR: &str = "0.0.0.0:3000";
@@ -38,18 +38,21 @@ fn main() -> Result<(), Error> {
         })
 }
 
-async fn handle((mut stream, mut buf): (TcpStream, Vec<u8>)) -> Result<(TcpStream, Vec<u8>), Error> {
+async fn handle(mut conn: ConnectionBuffer) -> Result<Vec<u8>, Error> {
     let mut read = false;
     let mut headers = [httparse::EMPTY_HEADER;24];
+    let mut buffer = conn.buffer_handle();
+    let mut stream = conn.stream_handle();
 
-    let (_request, body_offset) = loop {
+    let (request, body_offset) = loop {
+
         if read {
-            stream.read_buf(&mut buf).await.unwrap();
+            stream.read_buf(&mut *buffer).await.unwrap();
         }
 
         let mut request = httparse::Request::new(&mut headers);
 
-        let body_offset = match request.parse(unsafe { &*{ &mut buf as *mut Vec<u8> } }).unwrap() {
+        let body_offset = match request.parse(buffer.as_static()).unwrap() {
             httparse::Status::Complete(ok) => ok,
             httparse::Status::Partial => {
                 read = true;
@@ -62,22 +65,22 @@ async fn handle((mut stream, mut buf): (TcpStream, Vec<u8>)) -> Result<(TcpStrea
 
     use std::str::from_utf8 as to_str;
 
-    dbg!(to_str(&buf[..body_offset])).ok();
+    dbg!(request.headers);
 
     if let Some(expected_len) = headers
         .iter()
         .find(|e|e.name.eq_ignore_ascii_case("content-length"))
         .and_then(|e|to_str(e.value).ok()?.parse::<usize>().ok())
     {
-        while (buf.len() - body_offset) < expected_len {
-            stream.read_buf(&mut buf).await.unwrap();
+        while (buffer.len() - body_offset) < expected_len {
+            stream.read_buf(&mut *buffer).await.unwrap();
         }
 
-        let body = &buf[body_offset..body_offset + expected_len];
+        let body = &buffer[body_offset..body_offset + expected_len];
         dbg!(to_str(body)).ok();
     }
 
-    Ok((stream,Vec::from(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")))
+    Ok(Vec::from(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
 }
 
 
