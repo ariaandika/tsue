@@ -21,11 +21,9 @@ impl Body for String {
     type Error = Infallible;
 
     fn poll_frame(&mut self) -> Poll<Option<Result<Self::Output, Self::Error>>> {
-        if !self.is_empty() {
-            let s = std::mem::take(&mut *self);
-            return Poll::Ready(Some(Ok(s.into_bytes().into())));
-        } else {
-            return Poll::Ready(None);
+        match !self.is_empty() {
+            true => Poll::Ready(Some(Ok(std::mem::take(&mut *self).into_bytes().into()))),
+            false => Poll::Ready(None),
         }
     }
 
@@ -43,11 +41,9 @@ impl Body for Vec<u8> {
     type Error = Infallible;
 
     fn poll_frame(&mut self) -> Poll<Option<Result<Self::Output, Self::Error>>> {
-        if !self.is_empty() {
-            let s = std::mem::take(&mut *self);
-            return Poll::Ready(Some(Ok(s.into())));
-        } else {
-            return Poll::Ready(None);
+        match !self.is_empty() {
+            true => Poll::Ready(Some(Ok(std::mem::take(&mut *self).into()))),
+            false => Poll::Ready(None),
         }
     }
 
