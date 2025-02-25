@@ -6,6 +6,7 @@ pub fn from_fn<F>(f: F) -> FromFn<F> {
     FromFn { inner: f }
 }
 
+#[derive(Clone)]
 pub struct FromFn<F> {
     inner: F,
 }
