@@ -1,5 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["viton", "vice-macros", "vice-macros-core", "visor", "vice"]
-default-members = ["vice"]
+members = ["vice", "vice-core"]
 

@@ -1,18 +1,29 @@
+//! the [`Service`] trait
 use std::{future::Future, task::Poll};
 
-pub mod connection;
+pub mod from_fn;
+pub use from_fn::from_fn;
 
 pub trait Service<Request> {
+    /// [`Service::call`] success result
     type Response;
 
+    /// [`Service::call`] failed result
     type Error;
 
+    /// [`Service::call`] future
     type Future: Future<Output = Result<Self::Response, Self::Error>>;
 
+    /// poll is service ready
+    ///
+    /// usually used for backpressuring
+    ///
+    /// the default implementation is always ready
     fn poll_ready(&mut self) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
+    /// execute the service
     fn call(&mut self, request: Request) -> Self::Future;
 }
 
@@ -39,36 +50,6 @@ where
 
     fn call(&mut self, request: Request) -> Self::Future {
         <T as Service<Request>>::call(&mut *self, request)
-    }
-}
-
-
-
-// Util
-
-pub fn service_fn<F,Req,Res,Err,Fut>(f: F) -> ServiceFn<F>
-where
-    F: Fn(Req) -> Fut,
-    Fut: Future<Output = Result<Res,Err>>
-{
-    ServiceFn { f }
-}
-
-pub struct ServiceFn<F> {
-    f: F
-}
-
-impl<F,Req,Res,Err,Fut> Service<Req> for ServiceFn<F>
-where
-    F: Fn(Req) -> Fut,
-    Fut: Future<Output = Result<Res,Err>>
-{
-    type Response = Res;
-    type Error = Err;
-    type Future = Fut;
-
-    fn call(&mut self, request: Req) -> Self::Future {
-        (self.f)(request)
     }
 }
 
