@@ -1,4 +1,5 @@
 [workspace]
 resolver = "2"
-members = ["vice", "vice-core"]
+members = ["vice","examples/basic"]
+default-members = ["vice"]
 
