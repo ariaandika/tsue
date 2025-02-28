@@ -1,41 +1,45 @@
+//! the [`Body`] struct
 use bytes::{Bytes, BytesMut};
-use http_body::Frame;
-use std::{
-    convert::Infallible,
-    io, mem,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{io, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::Mutex,
 };
 
+/// http request body
+// TODO: do not use arc mutex, Body is hard to construct
 pub struct Body {
     content_len: Option<usize>,
     body: BytesMut,
-    stream: Arc<Mutex<TcpStream>>,
+    stream: Arc<Mutex<dyn tokio::io::AsyncRead + Send + Unpin>>,
 }
 
 impl std::fmt::Debug for Body {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Body")
-            .field(&self.content_len)
+        f.debug_struct("Body")
+            .field("length", &self.content_len)
             .finish()
     }
 }
 
 impl Body {
-    pub fn new(content_len: Option<usize>, body: BytesMut, stream: Arc<Mutex<TcpStream>>) -> Self {
-        Self { content_len, body, stream }
+    pub(crate) fn new(content_len: Option<usize>, body: BytesMut, stream: Arc<Mutex<TcpStream>>) -> Self {
+        Self { content_len, body, stream: stream as _ }
     }
 
+    /// return a content length if any
     pub fn content_len(&self) -> Option<usize> {
         self.content_len
     }
 
+    /// consume body into [`BytesMut`]
+    ///
+    /// # Errors
+    ///
+    /// if content length is missing or invalid, an io error [`io::ErrorKind::InvalidData`] is returned
+    ///
+    /// otherwise propagate any io error
     pub async fn bytes_mut(self) -> io::Result<BytesMut> {
         let Body { content_len, mut body, stream, } = self;
 
@@ -63,66 +67,78 @@ impl Body {
         Ok(body)
     }
 
+    /// consume body into [`Bytes`]
+    ///
+    /// this is utility function that propagate [`Body::bytes_mut`]
     pub async fn bytes(self) -> io::Result<Bytes> {
         Ok(self.bytes_mut().await?.freeze())
     }
 }
 
+
+/// http response body
+///
+/// user typically does not interact with this directly,
+/// instead use implementations from [`IntoResponse`]
+///
+/// [`IntoResponse`]: crate::http::IntoResponse
 #[derive(Default)]
 pub enum ResBody {
     #[default]
     Empty,
+    Static(&'static [u8]),
     Bytes(Bytes),
 }
 
 impl ResBody {
+    /// return buffer length
     pub fn len(&self) -> usize {
         match self {
             ResBody::Empty => 0,
+            ResBody::Static(b) => b.len(),
             ResBody::Bytes(b) => b.len(),
         }
     }
 
+    /// return is buffer length empty
     pub fn is_empty(&self) -> bool {
         match self {
             ResBody::Empty => true,
+            ResBody::Static(b) => b.is_empty(),
             ResBody::Bytes(b) => b.is_empty(),
         }
     }
 
-    pub async fn write(&mut self, stream: &mut TcpStream) -> io::Result<()> {
+    pub(crate) async fn write(&mut self, stream: &mut TcpStream) -> io::Result<()> {
         match self {
-            ResBody::Empty => {},
-            ResBody::Bytes(b) => stream.write_all_buf(b).await?,
+            ResBody::Empty => Ok(()),
+            ResBody::Static(b) => stream.write_all(b).await,
+            ResBody::Bytes(b) => stream.write_all_buf(b).await,
         }
-
-        Ok(())
     }
 }
 
-impl http_body::Body for ResBody {
-    type Data = Bytes;
-    type Error = Infallible;
-
-    fn poll_frame(
-        mut self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        if self.is_empty() {
-            return Poll::Ready(None);
-        }
-        match &mut *self {
-            ResBody::Empty => Poll::Ready(None),
-            ResBody::Bytes(b) => Poll::Ready(Some(Ok(Frame::data(mem::take(b))))),
-        }
+impl From<&'static [u8]> for ResBody {
+    fn from(value: &'static [u8]) -> Self {
+        Self::Static(value)
     }
+}
 
-    fn size_hint(&self) -> http_body::SizeHint {
-        http_body::SizeHint::with_exact(self.len() as u64)
+impl From<Bytes> for ResBody {
+    fn from(value: Bytes) -> Self {
+        Self::Bytes(value)
     }
+}
 
-    fn is_end_stream(&self) -> bool {
-        self.is_empty()
+impl From<Vec<u8>> for ResBody {
+    fn from(value: Vec<u8>) -> Self {
+        Self::Bytes(value.into())
+    }
+}
+
+impl From<String> for ResBody {
+    fn from(value: String) -> Self {
+        Self::from(value.into_bytes())
     }
 }
 

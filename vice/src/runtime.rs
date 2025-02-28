@@ -1,3 +1,4 @@
+//! entry point of the server
 use crate::http::{Request, IntoResponse};
 use crate::body::Body;
 use bytes::BytesMut;
@@ -18,13 +19,14 @@ use tokio::{
 use tower::{Service, ServiceExt};
 
 macro_rules! api {
-    (async $i1:ident $($tt:tt)*) => {
-        api!(@ async fn $i1 $($tt)*);
+    ($(#[$outer:meta])* async $i1:ident $($tt:tt)*) => {
+        api!(@ $(#[$outer])* async fn $i1 $($tt)*);
     };
-    ($i1:ident $($tt:tt)*) => {
-        api!(@ fn $i1 $($tt)*);
+    ($(#[$outer:meta])* $i1:ident $($tt:tt)*) => {
+        api!(@ $(#[$outer])* fn $i1 $($tt)*);
     };
-    (@ $i1:ident $i2:ident $($i3:ident)? ($($a1:pat => $t1:ty),*) $body:expr) => {
+    (@ $(#[$outer:meta])* $i1:ident $i2:ident $($i3:ident)? ($($a1:pat => $t1:ty),*) $body:expr) => {
+        $(#[$outer])*
         #[inline]
         pub $i1 $i2 $($i3)? <S>($($a1:$t1),*) -> Result<(), SetupError>
         where
@@ -38,45 +40,12 @@ macro_rules! api {
     };
 }
 
-api!(listen_blocking(addr => impl ToSocketAddrs, service => S) {
-    let tcp = TcpStd::bind(addr).map_err(SetupError::Tcp)?;
-    tcp.set_nonblocking(true)?;
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?
-        .block_on(serve_std(
-            tcp,
-            service,
-        ))
-});
-
-api!(async listen(addr => impl TokioAddrs, service => S) {
-    serve(TcpListener::bind(addr).await.map_err(SetupError::Tcp)?, service).await
-});
-
-api!(async serve_std(tcp => TcpStd, service => S) {
-    serve(TcpListener::from_std(tcp).map_err(SetupError::Tcp)?, service).await
-});
-
-api!(async serve(tcp => TcpListener, service => S) {
-    loop {
-        let service = service.clone();
-        match tcp.accept().await {
-            Ok((stream, _)) => {
-                tokio::spawn(connection(stream, service));
-            }
-            Err(err) => {
-                tracing::debug!("{err}");
-            }
-        }
-    }
-});
+// keep above macro and `connection` close so that constraint can be
+// kept in sync
 
 // `stream` should not moved when calling service
-async fn connection<S>(
-    stream: TcpStream,
-    service: S,
-) where
+async fn connection<S>(stream: TcpStream, service: S)
+where
     S: Service<Request> + Clone,
     S::Response: IntoResponse,
     S::Error: IntoResponse,
@@ -209,5 +178,51 @@ pub enum SetupError {
     Io(#[from] io::Error),
     #[error("failed to bind tcp: {0}")]
     Tcp(io::Error),
+}
+
+api! {
+    /// create tokio runtime, tcp listener and handle with service
+    listen_blocking(addr => impl ToSocketAddrs, service => S) {
+        let tcp = TcpStd::bind(addr).map_err(SetupError::Tcp)?;
+        tcp.set_nonblocking(true)?;
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(serve_std(
+                tcp,
+                service,
+            ))
+    }
+}
+
+api! {
+    /// create e tcp listener and handle with service
+    async listen(addr => impl TokioAddrs, service => S) {
+        serve(TcpListener::bind(addr).await.map_err(SetupError::Tcp)?, service).await
+    }
+}
+
+api! {
+    /// listen to provided std tcp listener and handle with service
+    async serve_std(tcp => TcpStd, service => S) {
+        serve(TcpListener::from_std(tcp).map_err(SetupError::Tcp)?, service).await
+    }
+}
+
+api! {
+    /// listen to provided tokio tcp listener and handle with service
+    async serve(tcp => TcpListener, service => S) {
+        loop {
+            let service = service.clone();
+            match tcp.accept().await {
+                Ok((stream, _)) => {
+                    tokio::spawn(connection(stream, service));
+                }
+                Err(err) => {
+                    tracing::debug!("{err}");
+                }
+            }
+        }
+    }
 }
 
