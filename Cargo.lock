@@ -58,6 +58,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "basic-rc"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "vice-rc",
+]
+
+[[package]]
 name = "bytes"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -529,6 +537,16 @@ dependencies = [
  "thiserror",
  "tokio",
  "tower",
+ "tracing",
+]
+
+[[package]]
+name = "vice-rc"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "thiserror",
+ "tokio",
  "tracing",
 ]
 
