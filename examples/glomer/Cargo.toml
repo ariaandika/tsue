@@ -1,0 +1,8 @@
+[package]
+name = "glomer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.96"
+vice = { version = "0.1.0", path = "../../vice" }
