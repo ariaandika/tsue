@@ -1,38 +1,54 @@
-//! the [`Body`] struct
+//! request and response body struct
 use bytes::{Bytes, BytesMut};
-use std::{io, sync::Arc};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-    sync::Mutex,
-};
+use std::io;
+use tokio::sync::oneshot;
 
-/// http request body
-// TODO: do not use arc mutex, Body is hard to construct
+#[derive(Default)]
 pub struct Body {
-    content_len: Option<usize>,
-    body: BytesMut,
-    stream: Arc<Mutex<dyn tokio::io::AsyncRead + Send + Unpin>>,
+    kind: BodyKind
+}
+
+#[derive(Default)]
+/// request body
+pub enum BodyKind {
+    #[default]
+    Empty,
+    Chan {
+        content_len: usize,
+        tx: oneshot::Sender<()>,
+        recv: oneshot::Receiver<io::Result<BytesMut>>,
+    }
 }
 
 impl std::fmt::Debug for Body {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Body")
-            .field("length", &self.content_len)
-            .finish()
+        match &self.kind {
+            BodyKind::Empty => f.debug_tuple("Body").field(b"Empty").finish(),
+            BodyKind::Chan { .. } => f.debug_tuple("Body").finish_non_exhaustive(),
+        }
     }
 }
 
 impl Body {
-    pub(crate) fn new(content_len: Option<usize>, body: BytesMut, stream: Arc<Mutex<TcpStream>>) -> Self {
-        Self { content_len, body, stream: stream as _ }
+    pub(crate) fn empty() -> Body {
+        Self { kind: BodyKind::Empty }
     }
 
-    /// return a content length if any
-    pub fn content_len(&self) -> Option<usize> {
-        self.content_len
+    pub(crate) fn new(content_len: usize) -> Body {
+        let (tx,_rx) = oneshot::channel::<()>();
+        let (_send,recv) = oneshot::channel::<io::Result<BytesMut>>();
+        // TODO: spawnd task to read body
+        Self { kind: BodyKind::Chan { content_len, tx, recv } }
     }
 
+    pub(crate) fn from_content_len(content_len: Option<usize>) -> Body {
+        match content_len {
+            Some(len) => Body::new(len),
+            None => Body::empty(),
+        }
+    }
+
+    /*
     /// consume body into [`BytesMut`]
     ///
     /// # Errors
@@ -73,20 +89,13 @@ impl Body {
     pub async fn bytes(self) -> io::Result<Bytes> {
         Ok(self.bytes_mut().await?.freeze())
     }
+    */
 }
 
-
-/// http response body
-///
-/// user typically does not interact with this directly,
-/// instead use implementations from [`IntoResponse`]
-///
-/// [`IntoResponse`]: crate::http::IntoResponse
 #[derive(Default)]
 pub enum ResBody {
     #[default]
     Empty,
-    Static(&'static [u8]),
     Bytes(Bytes),
 }
 
@@ -95,7 +104,6 @@ impl ResBody {
     pub fn len(&self) -> usize {
         match self {
             ResBody::Empty => 0,
-            ResBody::Static(b) => b.len(),
             ResBody::Bytes(b) => b.len(),
         }
     }
@@ -104,23 +112,23 @@ impl ResBody {
     pub fn is_empty(&self) -> bool {
         match self {
             ResBody::Empty => true,
-            ResBody::Static(b) => b.is_empty(),
             ResBody::Bytes(b) => b.is_empty(),
         }
     }
 
-    pub(crate) async fn write(&mut self, stream: &mut TcpStream) -> io::Result<()> {
+    /*
+    pub(crate) async fn write(&mut self, stream: &mut tokio::net::TcpStream) -> io::Result<()> {
         match self {
             ResBody::Empty => Ok(()),
-            ResBody::Static(b) => stream.write_all(b).await,
-            ResBody::Bytes(b) => stream.write_all_buf(b).await,
+            ResBody::Bytes(b) => tokio::io::AsyncWriteExt::write_all_buf(stream, b).await,
         }
     }
+    */
 }
 
 impl From<&'static [u8]> for ResBody {
     fn from(value: &'static [u8]) -> Self {
-        Self::Static(value)
+        Self::Bytes(Bytes::from_static(value))
     }
 }
 
