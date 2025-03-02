@@ -1,16 +1,25 @@
 //! request and response body struct
 use bytes::{Bytes, BytesMut};
 use std::io;
-use tokio::sync::oneshot;
+use tokio::{net::TcpStream, sync::oneshot};
 
 #[derive(Default)]
 pub struct Body {
     kind: BodyKind
 }
 
+impl std::fmt::Debug for Body {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Body").field(match &self.kind {
+            BodyKind::Empty => b"Empty",
+            BodyKind::Chan { .. } => b"Channel",
+        }).finish()
+    }
+}
+
 #[derive(Default)]
 /// request body
-pub enum BodyKind {
+enum BodyKind {
     #[default]
     Empty,
     Chan {
@@ -20,35 +29,34 @@ pub enum BodyKind {
     }
 }
 
-impl std::fmt::Debug for Body {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.kind {
-            BodyKind::Empty => f.debug_tuple("Body").field(b"Empty").finish(),
-            BodyKind::Chan { .. } => f.debug_tuple("Body").finish_non_exhaustive(),
-        }
-    }
-}
-
 impl Body {
     pub(crate) fn empty() -> Body {
         Self { kind: BodyKind::Empty }
     }
 
-    pub(crate) fn new(content_len: usize) -> Body {
-        let (tx,_rx) = oneshot::channel::<()>();
-        let (_send,recv) = oneshot::channel::<io::Result<BytesMut>>();
-        // TODO: spawnd task to read body
-        Self { kind: BodyKind::Chan { content_len, tx, recv } }
+    pub(crate) fn new(content_len: usize) -> (Body,tokio::task::JoinHandle<TcpStream>) {
+        let (tx,rx) = oneshot::channel::<()>();
+        let (send,recv) = oneshot::channel::<io::Result<BytesMut>>();
+        let body = Self { kind: BodyKind::Chan { content_len, tx, recv } };
+        let handle = tokio::spawn(Body::task(content_len,rx,send));
+        (body,handle)
     }
 
     pub(crate) fn from_content_len(content_len: Option<usize>) -> Body {
-        match content_len {
-            Some(len) => Body::new(len),
-            None => Body::empty(),
+        todo!()
+        // match content_len {
+        //     Some(len) => Body::new(len),
+        //     None => Body::empty(),
+        // }
+    }
+
+    pub fn content_len(&self) -> usize {
+        match self.kind {
+            BodyKind::Empty => 0,
+            BodyKind::Chan { content_len, .. } => content_len,
         }
     }
 
-    /*
     /// consume body into [`BytesMut`]
     ///
     /// # Errors
@@ -57,7 +65,11 @@ impl Body {
     ///
     /// otherwise propagate any io error
     pub async fn bytes_mut(self) -> io::Result<BytesMut> {
-        let Body { content_len, mut body, stream, } = self;
+        let BodyKind::Chan { content_len, tx, recv } = self.kind else {
+            return Ok(BytesMut::new())
+        };
+        // let Body { content_len, mut body, stream, } = self;
+        /*
 
         let Some(expected_len) = content_len else {
             const MSG: &str = "attempt to read body without content-length";
@@ -81,8 +93,11 @@ impl Body {
 
         stream.read_exact(&mut body[read_len..]).await?;
         Ok(body)
+        */
+        todo!()
     }
 
+    /*
     /// consume body into [`Bytes`]
     ///
     /// this is utility function that propagate [`Body::bytes_mut`]
@@ -90,7 +105,22 @@ impl Body {
         Ok(self.bytes_mut().await?.freeze())
     }
     */
+    async fn task(
+        content_len: usize,
+        rx: oneshot::Receiver<()>,
+        send: oneshot::Sender<io::Result<BytesMut>>,
+    ) -> TcpStream {
+        todo!()
+    }
 }
+
+pub struct BodyFuture {
+
+}
+
+
+
+
 
 #[derive(Default)]
 pub enum ResBody {
@@ -124,6 +154,15 @@ impl ResBody {
         }
     }
     */
+}
+
+impl AsRef<[u8]> for ResBody {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            ResBody::Empty => &[],
+            ResBody::Bytes(bytes) => bytes.as_ref(),
+        }
+    }
 }
 
 impl From<&'static [u8]> for ResBody {

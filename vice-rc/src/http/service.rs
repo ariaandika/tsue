@@ -1,15 +1,26 @@
-use std::{convert::Infallible, io, mem::{self, MaybeUninit}, ops::{Deref, DerefMut}, pin::Pin, str::from_utf8, task::{Context, Poll}};
+use super::{request::ParseError, IntoResponse, Request};
+use crate::{body::{Body, ResBody}, http::request, service::Service};
+use bytes::BytesMut;
+use log::{debug, trace};
+use std::{
+    io::{self, IoSlice},
+    pin::Pin,
+    task::{Context, Poll},
+};
+use tokio::{
+    io::{AsyncRead, AsyncWrite, ReadBuf},
+    net::TcpStream,
+};
 
-use bytes::{Bytes, BytesMut};
-use tokio::{io::AsyncRead, net::TcpStream};
-use tracing::debug;
-
-use crate::{body::Body, http::parse::parse_request, service::Service};
-
-use super::{parse::ParseError, IntoResponse, Request, Response};
-
+#[derive(Clone)]
 pub struct HttpService<S> {
     inner: S,
+}
+
+impl<S> HttpService<S> {
+    pub fn new(inner: S) -> HttpService<S> {
+        HttpService { inner }
+    }
 }
 
 impl<S> Service<TcpStream> for HttpService<S>
@@ -23,66 +34,42 @@ where
     type Future = HttpFuture<S,S::Future>;
 
     fn call(&self, stream: TcpStream) -> Self::Future {
-        HttpFuture::PollReadReady {
-            state: MaybeUninit::new(HttpState {
-                inner: self.inner.clone(),
-                stream,
-                buffer: BytesMut::with_capacity(1024),
-            }),
+        trace!("connection open");
+        HttpFuture {
+            inner: self.inner.clone(),
+            buffer: BytesMut::with_capacity(1024),
+            res_buffer: BytesMut::with_capacity(1024),
+            stream,
+            state: HttpState::Read,
         }
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum HttpError {
-    #[error("io error: {0}")]
-    Io(#[from] io::Error),
-    #[error("parse error: {0}")]
-    ParseError(#[from] ParseError),
-}
-
-// pin_project_lite::pin_project! {
-//     #[derive(Default)]
-//     #[project = HttpStateProj]
-//     pub enum HttpState<Fut> {
-//         PollReady { buffer: BytesMut },
-//         Read { buffer: BytesMut },
-//         Inner { buffer: BytesMut, #[pin] inner: Fut },
-//         #[default]
-//         Invalid,
-//     }
-// }
-
 pin_project_lite::pin_project! {
-    #[project = HttpProject]
-    pub enum HttpFuture<S,F> {
-        PollReadReady {
-            state: MaybeUninit<HttpState<S>>,
-        },
-        Read {
-            state: MaybeUninit<HttpState<S>>,
-        },
-        Inner {
-            state: MaybeUninit<HttpState<S>>,
-            #[pin]
-            future: F,
-        },
-        PollWriteReady {
-            state: MaybeUninit<HttpState<S>>,
-            response: Response,
-        },
-        Write {
-            state: MaybeUninit<HttpState<S>>,
-            response: Response,
-        },
+    #[derive(Default)]
+    #[project = HttpStateProject]
+    enum HttpState<Fut> {
+        Read,
+        Parse,
+        Inner { #[pin] future: Fut },
+        Write { body: ResBody },
+        Cleanup,
+        #[default]
         Invalid,
     }
 }
 
-struct HttpState<S> {
-    inner: S,
-    stream: TcpStream,
-    buffer: BytesMut,
+pin_project_lite::pin_project! {
+    #[project = HttpProject]
+    pub struct HttpFuture<S,F> {
+        inner: S,
+        buffer: BytesMut,
+        res_buffer: BytesMut,
+        #[pin]
+        stream: TcpStream,
+        #[pin]
+        state: HttpState<F>,
+    }
 }
 
 impl<S> Future for HttpFuture<S,S::Future>
@@ -95,96 +82,104 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         use Poll::*;
-        use HttpProject::*;
+        use HttpStateProject::*;
+
+        let HttpProject { inner, buffer, mut res_buffer, mut stream, mut state } = self.as_mut().project();
+
         loop {
-            match self.as_mut().project() {
-                PollReadReady { state } => {
-                    let HttpState { stream, .. } = unsafe { state.assume_init_mut() };
-                    match stream.poll_read_ready(cx) {
-                        Ready(Ok(())) => {
-                            let state = mem::replace(state, MaybeUninit::uninit());
-                            self.set(HttpFuture::Read { state });
-                            return Pending;
-                        }
+            match state.as_mut().project() {
+                Read => {
+                    let mut readbuf = ReadBuf::uninit(buffer.spare_capacity_mut());
+                    match AsyncRead::poll_read(stream.as_mut(), cx, &mut readbuf) {
+                        Ready(Ok(())) => {}
                         Ready(Err(err)) => return Ready(Err(err.into())),
                         Pending => return Pending,
                     }
-                },
-                Read { state } => {
-                    let HttpState { inner, stream, buffer } = unsafe { state.assume_init_mut() };
-                    match stream.try_read_buf(buffer) {
-                        Ok(0) => return Ready(Ok(())),
-                        Ok(_) => { },
-                        Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                            let state = mem::replace(state, MaybeUninit::uninit());
-                            self.set(HttpFuture::PollReadReady { state });
-                            return Pending;
-                        },
-                        Err(err) => return Ready(Err(err.into())),
+
+                    let len = readbuf.filled().len();
+
+                    if len == 0 {
+                        trace!("connection closed");
+                        return Ready(Ok(()));
                     }
 
-                    let parts = match parse_request(buffer) {
+                    // SAFETY: gloomer
+                    unsafe { BytesMut::set_len(buffer, len) };
+
+                    state.set(HttpState::Parse);
+                }
+                Parse => {
+                    let parts = match request::parse(buffer) {
                         Ok(Some(ok)) => ok,
                         Ok(None) => {
                             debug!("buffer should be unique to reclaim: {:?}",buffer.try_reclaim(1024));
-                            let state = mem::replace(state, MaybeUninit::uninit());
-                            self.set(HttpFuture::Read { state });
+                            state.set(HttpState::Read);
                             continue;
                         },
                         Err(err) => return Ready(Err(err.into())),
                     };
 
-                    let content_len = parts.headers().iter().find_map(|header|{
-                        (header.name != "content-length").then_some(header.value.as_ref())
-                    });
+                    // let content_len = parts.headers().iter().find_map(|header|{
+                    //     (header.name != "content-length").then_some(header.value.as_ref())
+                    // });
+                    // let content_len = content_len.and_then(|e|from_utf8(e).ok()?.parse().ok());
+                    // let body = match content_len {
+                    //     Some(len) => Body::new(len),
+                    //     None => Body::empty(),
+                    // };
 
-                    let content_len = content_len.and_then(|e|from_utf8(e).ok()?.parse().ok());
-                    let body = Body::from_content_len(content_len);
-                    let request = Request { parts, body };
-
+                    let body = Body::empty();
+                    let request = Request::from_parts(parts,body);
                     let future = inner.call(request);
-                    let state = mem::replace(state, MaybeUninit::uninit());
-                    self.set(HttpFuture::Inner { state, future });
-                },
-                Inner { state, future } => {
-                    let response = match future.poll(cx) {
+                    state.set(HttpState::Inner { future });
+                }
+                Inner { future } => {
+                    let mut response = match future.poll(cx) {
                         Ready(res) => res.into_response(),
                         Pending => return Pending,
                     };
 
-                    let state = mem::replace(state, MaybeUninit::uninit());
-                    self.set(HttpFuture::PollWriteReady { state, response });
-                },
-                PollWriteReady { state, response } => {
-                    let HttpState { stream, .. } = unsafe { state.assume_init_mut() };
-                    match stream.poll_write_ready(cx) {
-                        Ready(Ok(())) => {}
+                    response.check();
+                    let (parts,body) = response.into_parts();
+                    parts.write(&mut res_buffer);
+                    state.set(HttpState::Write { body });
+                }
+                Write { body } => {
+                    let vectored = [IoSlice::new(&res_buffer),IoSlice::new(body.as_ref())];
+                    match AsyncWrite::poll_write_vectored(stream.as_mut(), cx, &vectored) {
+                        Ready(Ok(_)) => {}
                         Ready(Err(err)) => return Ready(Err(err.into())),
                         Pending => return Pending,
-                    };
-
-                    let response = mem::take(response);
-                    let state = mem::replace(state, MaybeUninit::uninit());
-                    self.set(HttpFuture::Write { state, response });
-                },
-                Write { state, response } => {
-                    let HttpState { inner, stream, buffer } = unsafe { state.assume_init_mut() };
-                    match stream.try_write(buffer) {
-                        Ok(0) => return Ready(Ok(())),
-                        Ok(_) => { },
-                        Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                            let state = mem::replace(state, MaybeUninit::uninit());
-                            self.set(HttpFuture::PollReadReady { state });
-                            return Pending;
-                        },
-                        Err(err) => return Ready(Err(err.into())),
                     }
 
-                    // LATEST: which function is used in low level for TcpStream
+                    state.set(HttpState::Cleanup);
+                }
+                Cleanup => {
+                    // this state will make sure all shared buffer is dropped
+                    res_buffer.clear();
+                    buffer.clear();
+
+                    if !buffer.try_reclaim(1024) {
+                        debug!("failed to reclaim buffer");
+                    }
+
+                    if !res_buffer.try_reclaim(1024) {
+                        debug!("failed to reclaim res_buffer");
+                    }
+
+                    state.set(HttpState::Read);
                 }
                 Invalid => panic!("poll after complete"),
             }
         }
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum HttpError {
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("parse error: {0}")]
+    ParseError(#[from] ParseError),
 }
 

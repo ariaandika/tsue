@@ -1,8 +1,10 @@
-use std::{io, net::{TcpListener as StdListener, ToSocketAddrs}};
-use tokio::net::{TcpListener as TokioListener, TcpStream};
-
 use crate::service::Service;
-
+use log::debug;
+use std::{
+    io,
+    net::{TcpListener as StdListener, ToSocketAddrs},
+};
+use tokio::net::{TcpListener as TokioListener, TcpStream};
 
 /// listen to tcp listener via tokio runtime
 pub fn listen_blocking<S>(addr: impl ToSocketAddrs, service: S) -> Result<(), SetupError>
@@ -23,7 +25,7 @@ where
             loop {
                 match tcp.accept().await {
                     Ok((stream,_)) => { tokio::spawn(service.clone().call(stream)); },
-                    Err(err) => { tracing::debug!("failed to accept client: {err}"); },
+                    Err(err) => { debug!("failed to accept client: {err}"); },
                 }
             }
         })

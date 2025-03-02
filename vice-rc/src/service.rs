@@ -1,4 +1,4 @@
-
+pub mod servicefn;
 
 pub trait Service<Request> {
     type Response;
@@ -7,6 +7,4 @@ pub trait Service<Request> {
 
     fn call(&self, request: Request) -> Self::Future;
 }
-
-pub mod servicefn;
 

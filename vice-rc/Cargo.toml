@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 bytes = "1.10.0"
+log = "0.4.26"
 pin-project-lite = "0.2.16"
 thiserror = "2.0.11"
 tokio = { version = "1.43.0", features = ["io-util", "sync", "net", "rt-multi-thread"] }
-tracing = "0.1.41"
