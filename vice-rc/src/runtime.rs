@@ -7,14 +7,14 @@ use std::{
 use tokio::net::{TcpListener as TokioListener, TcpStream};
 
 /// listen to tcp listener via tokio runtime
-pub fn listen_blocking<S>(addr: impl ToSocketAddrs, service: S) -> Result<(), SetupError>
+pub fn listen_blocking<S>(addr: impl ToSocketAddrs, service: S) -> io::Result<()>
 where
     S: Service<TcpStream> + Clone + Send,
     S::Response: Send + 'static,
     S::Error: Send + 'static,
     S::Future: Send + 'static,
 {
-    let tcp = StdListener::bind(addr).map_err(SetupError::Tcp)?;
+    let tcp = StdListener::bind(addr).map_err(tcp_err)?;
     tcp.set_nonblocking(true)?;
 
     tokio::runtime::Builder::new_multi_thread()
@@ -31,11 +31,7 @@ where
         })
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum SetupError {
-    #[error("failed to bind tcp: {0}")]
-    Tcp(io::Error),
-    #[error(transparent)]
-    Io(#[from] io::Error),
+fn tcp_err(err: io::Error) -> io::Error {
+    io::Error::new(err.kind(), "failed to bind tcp: {err}")
 }
 

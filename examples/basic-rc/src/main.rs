@@ -1,15 +1,12 @@
-use tokio::net::TcpStream;
+use std::io;
 use vice_rc::{
     http::{noop::Noop, service::HttpService},
-    runtime::{listen_blocking, SetupError},
+    runtime::listen_blocking,
 };
 
-fn main() -> Result<(), SetupError> {
+fn main() -> io::Result<()> {
     env_logger::init();
     let service = HttpService::new(Noop);
     listen_blocking("0.0.0.0:3000", service)
 }
 
-async fn http_service(_: TcpStream) -> Result<(), ()> {
-    Ok(())
-}
