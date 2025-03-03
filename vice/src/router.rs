@@ -1,3 +1,4 @@
+//! the [`Router`] struct
 use crate::http::{into_response::IntoResponse, Request, Response};
 use hyper::service::Service;
 use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
@@ -24,13 +25,14 @@ pub struct Router<S> {
 }
 
 impl Router<NotFoundService> {
-    /// create new 
+    /// create new `Router`
     pub fn new() -> Router<NotFoundService> {
         Router { inner: Arc::new(NotFoundService) }
     }
 }
 
 impl<S> Router<S> {
+    /// assign new route
     pub fn route<R>(self, route: R) -> Router<RouteMatch<R, S>> {
         Router {
             inner: Arc::new(RouteMatch {
@@ -40,7 +42,16 @@ impl<S> Router<S> {
             }),
         }
     }
-    pub fn route_checked<R>(self, route: R) -> Router<RouteMatch<R, S>> {
+
+    /// assign new route with early generic constraint check
+    #[inline]
+    pub fn route_checked<R>(self, route: R) -> Router<RouteMatch<R, S>>
+    where
+        R: Service<Request>,
+        R::Response: IntoResponse,
+        R::Error: IntoResponse,
+        R::Future: Future<Output = Result<R::Response,R::Error>>,
+    {
         self.route(route)
     }
 }
@@ -67,6 +78,11 @@ where
 
 #[derive(Clone)]
 #[allow(dead_code)]
+/// service that match request and delegate to either service
+///
+/// user typically does not interact with this directly, instead use [`route`] method
+///
+/// [`route`]: Router::route
 pub struct RouteMatch<S,F> {
     inner: S,
     fallback: F,

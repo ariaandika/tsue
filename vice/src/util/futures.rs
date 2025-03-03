@@ -1,11 +1,14 @@
+//! future utility types
 use crate::http::{into_response::IntoResponse, Response};
 
+/// extension trait for `Future`
 pub trait FutureExt: Future + Sized {
     fn map<M>(self, mapper: M) -> Map<Self,M>;
     fn map_into_response<M>(self) -> MapIntoResponse<Self>;
 }
 
 pin_project_lite::pin_project! {
+    /// map the output of a future
     pub struct Map<S,M> {
         #[pin]
         inner: S,
@@ -31,6 +34,9 @@ where
 }
 
 pin_project_lite::pin_project! {
+    /// map the output of a future [`IntoResponse`]
+    ///
+    /// [`IntoResponse`]: crate::http::IntoResponse
     pub struct MapIntoResponse<S> {
         #[pin]
         inner: S,

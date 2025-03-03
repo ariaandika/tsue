@@ -30,6 +30,7 @@ pub trait FromRequestParts: Sized {
 // using Pin<Box> in association type is worth it instead of impl Future,
 // because it can be referenced externally
 
+/// anything that implement `FromRequestParts` also implement `FromRequest`
 impl<F> FromRequest for F
 where
     F: FromRequestParts

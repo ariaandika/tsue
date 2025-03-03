@@ -4,7 +4,7 @@ use hyper_util::rt::TokioIo;
 use std::{convert::Infallible, fmt::Display, io, net::ToSocketAddrs};
 use tokio::net::TcpListener;
 
-
+/// entrypoint to run the server
 pub fn listen<S>(addr: impl ToSocketAddrs + Display + Clone, service: S) -> io::Result<()>
 where
     S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
