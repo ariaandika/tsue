@@ -1,18 +1,16 @@
-use anyhow::Context;
-use http_body_util::Full;
-use hyper::{
-    body::{Bytes, Incoming},
-    server::conn::http1::Builder as Hyper,
-    service::service_fn,
-    Request, Response,
-};
+use crate::http::{Request, Response};
+use hyper::{server::conn::http1::Builder as Hyper, service::Service};
 use hyper_util::rt::TokioIo;
-use std::{convert::Infallible, net::ToSocketAddrs};
+use std::{convert::Infallible, fmt::Display, io, net::ToSocketAddrs};
 use tokio::net::TcpListener;
 
 
-pub fn listen_blocking(addr: impl ToSocketAddrs) -> anyhow::Result<()> {
-    let tcp = std::net::TcpListener::bind(addr).context("failed to bind tcp")?;
+pub fn listen<S>(addr: impl ToSocketAddrs + Display + Clone, service: S) -> io::Result<()>
+where
+    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    S::Future: Future<Output = Result<Response,Infallible>> + Send + 'static,
+{
+    let tcp = std::net::TcpListener::bind(addr.clone()).map_err(|e|tcp_error(addr, e))?;
     tcp.set_nonblocking(true)?;
 
     tokio::runtime::Builder::new_multi_thread()
@@ -22,11 +20,12 @@ pub fn listen_blocking(addr: impl ToSocketAddrs) -> anyhow::Result<()> {
             let tcp = TcpListener::from_std(tcp)?;
 
             loop {
+                let service = service.clone();
                 match tcp.accept().await {
                     Ok((stream, _)) => {
                         tokio::spawn(
                             Hyper::new()
-                                .serve_connection(TokioIo::new(stream), service_fn(connection))
+                                .serve_connection(TokioIo::new(stream), service)
                                 .with_upgrades(),
                         );
                     }
@@ -38,7 +37,7 @@ pub fn listen_blocking(addr: impl ToSocketAddrs) -> anyhow::Result<()> {
         })
 }
 
-async fn connection(_: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
-    Ok(Default::default())
+fn tcp_error(addr: impl ToSocketAddrs + Display + Clone, err: io::Error) -> io::Error {
+    io::Error::new(err.kind(), format!("failed to bind \"{addr}\" :{err}"))
 }
 
