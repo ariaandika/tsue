@@ -2,9 +2,34 @@
 use crate::http::{into_response::IntoResponse, Response};
 
 /// extension trait for `Future`
-pub trait FutureExt: Future + Sized {
-    fn map<M>(self, mapper: M) -> Map<Self,M>;
-    fn map_into_response<M>(self) -> MapIntoResponse<Self>;
+pub trait FutureExt: Future {
+    fn map<M,R>(self, mapper: M) -> Map<Self,M>
+    where
+        M: FnOnce(Self::Output) -> R,
+        Self: Sized;
+    fn map_into_response<M>(self) -> MapIntoResponse<Self>
+    where
+        Self: Sized;
+}
+
+impl<F> FutureExt for F
+where
+    F: Future
+{
+    fn map<M,R>(self, mapper: M) -> Map<Self,M>
+    where
+        M: FnOnce(Self::Output) -> R,
+        Self: Sized
+    {
+        Map { inner: self, mapper: Some(mapper)  }
+    }
+
+    fn map_into_response<M>(self) -> MapIntoResponse<Self>
+    where
+        Self: Sized
+    {
+        MapIntoResponse { inner: self }
+    }
 }
 
 pin_project_lite::pin_project! {

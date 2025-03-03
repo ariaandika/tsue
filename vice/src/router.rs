@@ -1,7 +1,13 @@
 //! the [`Router`] struct
-use crate::{http::{into_response::IntoResponse, Request, Response}, util::service::NotFound};
+use crate::{
+    http::{into_response::IntoResponse, Request, Response},
+    util::{
+        futures::{FutureExt, Map},
+        service::NotFound,
+    },
+};
 use hyper::service::Service;
-use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 
 /// route builder
 ///
@@ -66,20 +72,20 @@ where
     S: Service<Request> + Clone + Send + Sync + 'static,
     S::Response: IntoResponse + Send + 'static,
     S::Error: IntoResponse + Send + 'static,
-    S::Future: Send + 'static,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response,Self::Error>> + Send + 'static>>;
+    type Future = Map<S::Future, fn(Result<S::Response,S::Error>) -> Result<Response,Infallible>>;
 
     fn call(&self, req: Request) -> Self::Future {
         let inner = Arc::clone(&self.inner);
-        Box::pin(async move {
-            Ok(inner.call(req).await.into_response())
-        })
+        FutureExt::map(inner.call(req),map_router as _)
     }
 }
 
+fn map_router<S: IntoResponse>(res: S) -> Result<Response,Infallible> {
+    Ok(res.into_response())
+}
 
 #[derive(Clone)]
 #[allow(dead_code)]
