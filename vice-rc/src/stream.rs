@@ -100,6 +100,7 @@ impl<T> Future for StreamFuture<io::Result<T>> {
 }
 
 /// clonable handle of tcp stream task
+#[derive(Clone)]
 pub struct StreamHandle {
     send: mpsc::Sender<StreamMessage>,
 }
@@ -118,7 +119,7 @@ macro_rules! send {
                     TrySendError::Closed($variant { tx, .. }) => tx,
                     _ => unreachable!(),
                 };
-                tx.send(Err(ch_err));
+                let _ = tx.send(Err(ch_err));
                 StreamFuture::new(rx)
             },
         }
