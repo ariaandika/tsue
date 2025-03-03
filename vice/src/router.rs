@@ -1,5 +1,5 @@
 //! the [`Router`] struct
-use crate::http::{into_response::IntoResponse, Request, Response};
+use crate::{http::{into_response::IntoResponse, Request, Response}, util::service::NotFound};
 use hyper::service::Service;
 use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 
@@ -24,10 +24,10 @@ pub struct Router<S> {
     inner: Arc<S>
 }
 
-impl Router<NotFoundService> {
+impl Router<NotFound> {
     /// create new `Router`
-    pub fn new() -> Router<NotFoundService> {
-        Router { inner: Arc::new(NotFoundService) }
+    pub fn new() -> Router<NotFound> {
+        Router { inner: Arc::new(NotFound) }
     }
 }
 
@@ -86,18 +86,5 @@ where
 pub struct RouteMatch<S,F> {
     inner: S,
     fallback: F,
-}
-
-#[derive(Clone)]
-pub struct NotFoundService;
-
-impl Service<Request> for NotFoundService {
-    type Response = Response;
-    type Error = Infallible;
-    type Future = std::future::Ready<Result<Response,Infallible>>;
-
-    fn call(&self, _: Request) -> Self::Future {
-        std::future::ready(Ok(http::StatusCode::NOT_FOUND.into_response()))
-    }
 }
 
