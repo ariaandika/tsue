@@ -527,9 +527,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "log",
+ "pin-project-lite",
  "thiserror",
  "tokio",
  "tracing",
