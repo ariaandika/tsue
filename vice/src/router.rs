@@ -32,6 +32,11 @@ impl Router<NotFound> {
 }
 
 impl<S> Router<S> {
+    /// create new `Router` with custom fallback
+    pub fn new_with_fallback(fallback: S) -> Router<S> {
+        Router { inner: Arc::new(fallback) }
+    }
+
     /// assign new route
     pub fn route<R>(self, route: R) -> Router<RouteMatch<R, S>> {
         Router {
