@@ -57,16 +57,17 @@ async fn task(mut stream: TcpStream, mut recv: mpsc::Receiver<StreamMessage>) {
 }
 
 pin_project_lite::pin_project! {
-    /// wrap oneshot::Recevier to map error as io error
-    pub struct StreamFuture<T> {
-        #[pin]
-        recv: oneshot::Receiver<T>,
+    /// wrap oneshot::Receiver to map error as io error
+    #[project = StreamProject]
+    pub enum StreamFuture<T> {
+        Empty,
+        Chan { #[pin] recv: oneshot::Receiver<T>, }
     }
 }
 
 impl<T> StreamFuture<T> {
     fn new(recv: oneshot::Receiver<T>) -> StreamFuture<T> {
-        Self { recv }
+        Self::Chan { recv }
     }
 }
 
@@ -76,25 +77,34 @@ macro_rules! ch_to_io_err {
     };
 }
 
-impl<T> Future for StreamFuture<io::Result<T>> {
+impl<T> Future for StreamFuture<io::Result<T>>
+where
+    T: Default
+{
     type Output = io::Result<T>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         use std::task::Poll::*;
+        use StreamProject::*;
 
-        match self.project().recv.poll(cx) {
-            std::task::Poll::Ready(result) => {
-                match result {
-                    Ok(io_result) => match io_result {
-                        Ok(ok) => Ready(Ok(ok)),
-                        Err(err) => Ready(Err(ch_to_io_err!(err)))
+        match self.project() {
+            Empty => Ready(Ok(T::default())),
+            Chan { recv } => {
+                match recv.poll(cx) {
+                    Ready(result) => {
+                        match result {
+                            Ok(io_result) => match io_result {
+                                Ok(ok) => Ready(Ok(ok)),
+                                Err(err) => Ready(Err(ch_to_io_err!(err)))
+                            }
+                            Err(err) => {
+                                Ready(Err(ch_to_io_err!(err)))
+                            },
+                        }
                     }
-                    Err(err) => {
-                        Ready(Err(ch_to_io_err!(err)))
-                    },
+                    Pending => Pending,
                 }
             }
-            Pending => Pending,
         }
     }
 }
