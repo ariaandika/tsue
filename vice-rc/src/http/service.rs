@@ -153,6 +153,8 @@ where
                         None => Body::empty(),
                     };
 
+                    // debug!("bytes body: {buffer:?}");
+
                     let request = Request::from_parts(parts,body);
                     let future = inner.call(request);
                     state.set(HttpState::Inner { future });

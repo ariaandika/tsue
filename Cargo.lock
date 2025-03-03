@@ -540,6 +540,7 @@ name = "vice-rc"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "itoa",
  "log",
  "pin-project-lite",
  "thiserror",

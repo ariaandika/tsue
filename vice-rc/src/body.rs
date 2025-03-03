@@ -49,9 +49,15 @@ impl Body {
     /// otherwise propagate any io error
     pub fn bytes_mut(self) -> StreamFuture<io::Result<BytesMut>> {
         let BodyKind::Chan { stream, buffer, content_len, } = self.kind else {
-            return StreamFuture::Empty
+            // maybe return error for no content length
+            return StreamFuture::exact(Ok(BytesMut::new()))
         };
-        stream.read_exact(content_len, buffer)
+        let read = buffer.len();
+        let read_left = content_len.saturating_sub(read);
+        if read_left == 0 {
+            return StreamFuture::exact(Ok(buffer))
+        }
+        stream.read_exact(read, read_left, buffer)
     }
 
     /// consume body into [`Bytes`]

@@ -68,7 +68,7 @@ impl Response {
     pub fn check(&mut self) {
         self.parts.insert_header(Header {
             name: ByteStr::from_static(b"content-length"),
-            value: Bytes::from_static(b"0"),
+            value: Bytes::copy_from_slice(itoa::Buffer::new().format(self.body.len()).as_bytes()),
         });
     }
 

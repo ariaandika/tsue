@@ -11,6 +11,7 @@ enum StreamMessage {
         buffer: BytesMut,
     },
     ReadExact {
+        offset: usize,
         len: usize,
         tx: oneshot::Sender<io::Result<BytesMut>>,
         buffer: BytesMut,
@@ -40,8 +41,8 @@ async fn task(mut stream: TcpStream, mut recv: mpsc::Receiver<StreamMessage>) {
                     Err(err) => tx.send(Err(err)),
                 };
             }
-            ReadExact { len, tx, mut buffer } => {
-                let _ = match stream.read_exact(&mut buffer[..len]).await {
+            ReadExact { offset, len, tx, mut buffer } => {
+                let _ = match stream.read_exact(&mut buffer[offset..offset + len]).await {
                     Ok(_) => tx.send(Ok(buffer)),
                     Err(err) => tx.send(Err(err)),
                 };
@@ -60,12 +61,17 @@ pin_project_lite::pin_project! {
     /// wrap oneshot::Receiver to map error as io error
     #[project = StreamProject]
     pub enum StreamFuture<T> {
-        Empty,
-        Chan { #[pin] recv: oneshot::Receiver<T>, }
+        Exact { value: Option<T> },
+        Chan { #[pin] recv: oneshot::Receiver<T>, },
+        Invalid,
     }
 }
 
 impl<T> StreamFuture<T> {
+    pub(crate) fn exact(value: T) -> StreamFuture<T> {
+        Self::Exact { value: Some(value) }
+    }
+
     fn new(recv: oneshot::Receiver<T>) -> StreamFuture<T> {
         Self::Chan { recv }
     }
@@ -77,10 +83,7 @@ macro_rules! ch_to_io_err {
     };
 }
 
-impl<T> Future for StreamFuture<io::Result<T>>
-where
-    T: Default
-{
+impl<T> Future for StreamFuture<io::Result<T>> {
     type Output = io::Result<T>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
@@ -88,7 +91,7 @@ where
         use StreamProject::*;
 
         match self.project() {
-            Empty => Ready(Ok(T::default())),
+            Exact { value } => return Ready(value.take().expect("poll after complete")),
             Chan { recv } => {
                 match recv.poll(cx) {
                     Ready(result) => {
@@ -104,7 +107,8 @@ where
                     }
                     Pending => Pending,
                 }
-            }
+            },
+            Invalid => panic!("poll after complete"),
         }
     }
 }
@@ -141,12 +145,22 @@ impl StreamHandle {
         send!(self,Read { buffer, })
     }
 
-    pub fn read_exact(&self, len: usize, buffer: BytesMut) -> StreamFuture<io::Result<BytesMut>> {
-        send!(self,ReadExact { len, buffer, })
+    pub fn read_exact(&self, offset: usize, len: usize, buffer: BytesMut) -> StreamFuture<io::Result<BytesMut>> {
+        send!(self,ReadExact { offset, len, buffer, })
     }
 
     pub fn write(&self, head: Bytes, body: ResBody) -> StreamFuture<io::Result<()>> {
         send!(self,Write { head, body, })
+    }
+}
+
+impl std::fmt::Debug for StreamMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read { .. } => f.debug_tuple("StreamMessage").field(&"Read").finish_non_exhaustive(),
+            Self::ReadExact { .. } => f.debug_tuple("ReadExact").field(&"ReadExact").finish_non_exhaustive(),
+            Self::Write { .. } => f.debug_tuple("Write").field(&"Write").finish_non_exhaustive(),
+        }
     }
 }
 

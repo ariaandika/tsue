@@ -9,6 +9,7 @@ pub mod from_request;
 pub mod into_response;
 pub mod service;
 pub mod noop;
+pub mod debug;
 
 pub use status::StatusCode;
 pub use request::Request;
