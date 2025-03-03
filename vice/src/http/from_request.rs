@@ -101,3 +101,62 @@ mod body_future {
     }
 }
 
+from_request! {
+    String,
+    Error = BadRequest<BodyStringError>;
+    Future = BodyStringFuture;
+    (_, body) => BodyStringFuture::new(body.collect())
+}
+
+#[doc(inline)]
+pub use body_string_future::{BodyStringFuture, BodyStringError};
+
+mod body_string_future {
+    use super::*;
+    use http_body_util::combinators::Collect;
+    use std::string::FromUtf8Error;
+
+    pin_project_lite::pin_project! {
+        /// future returned from [`FromRequest`] implementation of [`String`]
+        ///
+        /// [`FromRequest`]: super::FromRequest
+        pub struct BodyStringFuture {
+            #[pin]
+            inner: Collect<ReqBody>,
+        }
+    }
+
+    impl BodyStringFuture {
+        pub(crate) fn new(inner: Collect<ReqBody>) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl Future for BodyStringFuture {
+        type Output = Result<String, BadRequest<BodyStringError>>;
+
+        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+            use std::task::Poll::*;
+            match self.project().inner.poll(cx) {
+                Ready(Ok(ok)) => match String::from_utf8(Vec::from(ok.to_bytes())) {
+                    Ok(ok) => Ready(Ok(ok)),
+                    Err(err) => Ready(Err(BodyStringError::Utf8(err).into())),
+                },
+                Ready(Err(err)) => Ready(Err(BodyStringError::Hyper(err).into())),
+                Pending => Pending
+            }
+        }
+    }
+
+    /// error returned from [`FromRequest`] implementation of [`String`]
+    ///
+    /// [`FromRequest`]: super::FromRequest
+    #[derive(thiserror::Error, Debug)]
+    pub enum BodyStringError {
+        #[error(transparent)]
+        Hyper(hyper::Error),
+        #[error(transparent)]
+        Utf8(FromUtf8Error),
+    }
+}
+
