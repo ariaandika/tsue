@@ -1,5 +1,6 @@
 //! the [`FromRequest`] and [`FromRequestParts`] trait
 use super::{into_response::IntoResponse, ReqBody};
+use crate::util::response::BadRequest;
 use bytes::Bytes;
 use http::request;
 use http_body_util::BodyExt;
@@ -57,7 +58,7 @@ macro_rules! from_request {
 
 from_request! {
     Bytes,
-    Error = hyper::Error;
+    Error = BadRequest<hyper::Error>;
     Future = BodyFuture;
     (_, body) => BodyFuture::new(body.collect())
 }
@@ -67,7 +68,6 @@ pub use body_future::BodyFuture;
 
 mod body_future {
     use super::*;
-    use bytes::Bytes;
     use http_body_util::combinators::Collect;
 
     pin_project_lite::pin_project! {
@@ -88,24 +88,16 @@ mod body_future {
     }
 
     impl Future for BodyFuture {
-        type Output = Result<Bytes, hyper::Error>;
+        type Output = Result<Bytes, BadRequest<hyper::Error>>;
 
         fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
             use std::task::Poll::*;
             match self.project().inner.poll(cx) {
                 Ready(Ok(ok)) => Ready(Ok(ok.to_bytes())),
-                Ready(Err(err)) => Ready(Err(err)),
+                Ready(Err(err)) => Ready(Err(err.into())),
                 Pending => Pending
             }
         }
     }
 }
 
-impl IntoResponse for hyper::Error {
-    fn into_response(self) -> super::Response {
-        (
-            http::StatusCode::BAD_REQUEST,
-            self.to_string(),
-        ).into_response()
-    }
-}
