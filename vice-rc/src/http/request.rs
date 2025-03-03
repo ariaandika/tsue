@@ -53,6 +53,25 @@ impl Request {
     }
 }
 
+/// delegate method
+impl Request {
+    pub fn method(&self) -> &Method {
+        self.parts.method()
+    }
+
+    pub fn headers(&self) -> &[Header] {
+        self.parts.headers()
+    }
+
+    pub fn path(&self) -> &ByteStr {
+        self.parts.path()
+    }
+
+    pub fn version(&self) -> &Version {
+        self.parts.version()
+    }
+}
+
 
 /// parse request
 ///
