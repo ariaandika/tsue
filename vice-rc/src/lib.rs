@@ -30,6 +30,7 @@
 // - cannot have double implementation
 pub mod bytestring;
 pub mod actor;
+pub mod stream;
 pub mod service;
 pub mod runtime;
 
