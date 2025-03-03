@@ -56,6 +56,49 @@ async fn task(mut stream: TcpStream, mut recv: mpsc::Receiver<StreamMessage>) {
     }
 }
 
+pin_project_lite::pin_project! {
+    /// wrap oneshot::Recevier to map error as io error
+    pub struct StreamFuture<T> {
+        #[pin]
+        recv: oneshot::Receiver<T>,
+    }
+}
+
+impl<T> StreamFuture<T> {
+    fn new(recv: oneshot::Receiver<T>) -> StreamFuture<T> {
+        Self { recv }
+    }
+}
+
+macro_rules! ch_to_io_err {
+    ($err:ident) => {
+        io::Error::new(io::ErrorKind::Other, format!("stream task error: {}",$err))
+    };
+}
+
+impl<T> Future for StreamFuture<io::Result<T>> {
+    type Output = io::Result<T>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        use std::task::Poll::*;
+
+        match self.project().recv.poll(cx) {
+            std::task::Poll::Ready(result) => {
+                match result {
+                    Ok(io_result) => match io_result {
+                        Ok(ok) => Ready(Ok(ok)),
+                        Err(err) => Ready(Err(ch_to_io_err!(err)))
+                    }
+                    Err(err) => {
+                        Ready(Err(ch_to_io_err!(err)))
+                    },
+                }
+            }
+            Pending => Pending,
+        }
+    }
+}
+
 /// clonable handle of tcp stream task
 pub struct StreamHandle {
     send: mpsc::Sender<StreamMessage>,
@@ -67,31 +110,31 @@ macro_rules! send {
 
         let (tx,rx) = oneshot::channel();
         match $self.send.try_send($variant { tx, $($args,)* }) {
-            Ok(()) => rx,
+            Ok(()) => StreamFuture::new(rx),
             Err(err) => {
-                let msg = format!("stream task error: {}",err);
+                let ch_err = ch_to_io_err!(err);
                 let tx = match err {
                     TrySendError::Full($variant { tx, .. }) => tx,
                     TrySendError::Closed($variant { tx, .. }) => tx,
                     _ => unreachable!(),
                 };
-                tx.send(Err(io::Error::new(io::ErrorKind::Other, msg)));
-                rx
+                tx.send(Err(ch_err));
+                StreamFuture::new(rx)
             },
         }
     }};
 }
 
 impl StreamHandle {
-    pub fn read(&self, buffer: BytesMut) -> oneshot::Receiver<io::Result<(usize, BytesMut)>> {
+    pub fn read(&self, buffer: BytesMut) -> StreamFuture<io::Result<(usize, BytesMut)>> {
         send!(self,Read { buffer, })
     }
 
-    pub fn read_exact(&self, len: usize, buffer: BytesMut) -> oneshot::Receiver<io::Result<BytesMut>> {
+    pub fn read_exact(&self, len: usize, buffer: BytesMut) -> StreamFuture<io::Result<BytesMut>> {
         send!(self,ReadExact { len, buffer, })
     }
 
-    pub fn write(&self, head: Bytes, body: ResBody) -> oneshot::Receiver<io::Result<()>> {
+    pub fn write(&self, head: Bytes, body: ResBody) -> StreamFuture<io::Result<()>> {
         send!(self,Write { head, body, })
     }
 }
