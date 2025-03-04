@@ -1,5 +1,7 @@
 //! future utility types
-use std::task::{ready, Poll};
+use std::{marker::PhantomData, task::{ready, Poll}};
+
+use super::Either;
 
 /// extension trait for `Future` trait
 pub trait FutureExt: Future {
@@ -109,6 +111,54 @@ where
                 },
                 AndThenOrProj::Second { f } => return f.poll(cx),
             }
+        }
+    }
+}
+
+pin_project_lite::pin_project! {
+    #[project = EitherProj]
+    pub enum EitherFuture<L,R> {
+        Left { #[pin] left: L },
+        Right { #[pin] right: R },
+    }
+}
+
+impl<L,R> Future for EitherFuture<L,R>
+where
+    L: Future,
+    R: Future,
+{
+    type Output = Either<L::Output,R::Output>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.as_mut().project() {
+            EitherProj::Left { left } => Poll::Ready(Either::Left(ready!(left.poll(cx)))),
+            EitherProj::Right { right } => Poll::Ready(Either::Right(ready!(right.poll(cx)))),
+        }
+    }
+}
+
+pin_project_lite::pin_project! {
+    #[project = EitherIntoProj]
+    pub enum EitherInto<L,R,O> {
+        Left { #[pin] left: L, _p: PhantomData<O> },
+        Right { #[pin] right: R },
+    }
+}
+
+impl<L,R,O> Future for EitherInto<L,R,O>
+where
+    L: Future,
+    R: Future,
+    L::Output: Into<O>,
+    R::Output: Into<O>,
+{
+    type Output = O;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.as_mut().project() {
+            EitherIntoProj::Left { left, .. } => Poll::Ready(ready!(left.poll(cx)).into()),
+            EitherIntoProj::Right { right } => Poll::Ready(ready!(right.poll(cx)).into()),
         }
     }
 }
