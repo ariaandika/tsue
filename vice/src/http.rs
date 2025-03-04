@@ -13,9 +13,15 @@ pub use http::header;
 pub use http::status;
 
 pub use hyper::body::Incoming as ReqBody;
+
+#[doc(inline)]
 pub use from_request::{FromRequest, FromRequestParts};
+#[doc(inline)]
 pub use into_response::{IntoResponse, IntoResponseParts};
 
+/// Represents an HTTP request
 pub type Request<T = ReqBody> = hyper::http::Request<T>;
+/// Represents an HTTP response
 pub type Response<T = ResBody> = hyper::http::Response<T>;
+/// Represents a response body
 pub type ResBody = Full<Bytes>;

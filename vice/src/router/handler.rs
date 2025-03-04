@@ -12,6 +12,7 @@ pub fn get<F,S>(f: F) -> FnService<F, S> {
     FnService { inner: f, _s: PhantomData }
 }
 
+/// the concrete type of functional handler service
 #[derive(Clone)]
 pub struct FnService<F,S> {
     inner: F,
@@ -31,6 +32,7 @@ where
     }
 }
 
+/// a functional handler
 pub trait FnHandler<S> {
     type Future: Future<Output = Response>;
     fn call(&self, req: Request) -> Self::Future;
@@ -155,6 +157,28 @@ fn_handler! {
 mod arg_future {
     use crate::http::{ReqBody, FromRequest, FromRequestParts, IntoResponse, Response};
     use http::request;
+
+    pin_project_lite::pin_project! {
+        pub struct MapIntoResponse<F> {
+            #[pin]
+            inner: F
+        }
+    }
+
+    impl<F> Future for MapIntoResponse<F>
+    where
+        F: Future,
+        F::Output: IntoResponse
+    {
+        type Output = F::Output;
+
+        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+            match self.project().inner.poll(cx) {
+                std::task::Poll::Ready(ok) => ok.into_response(req_parts)
+                std::task::Poll::Pending => todo!(),
+            }
+        }
+    }
 
     // ---
 

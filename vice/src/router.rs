@@ -1,4 +1,17 @@
-//! the [`Router`] struct
+//! request routing
+//!
+//! ```
+//! use vice::router::{Router, get};
+//! fn main() -> std::io::Result<()> {
+//!     let route = Router::new()
+//!         .route("/", get(||async { String::from("Vice Dev") }));
+//!     vice::listen("0.0.0.0:3000", route)
+//! }
+//! ```
+//!
+//! # Example
+//!
+//!
 use crate::{
     http::{Request, Response},
     util::{futures::EitherInto, service::NotFound, Either},
@@ -6,9 +19,14 @@ use crate::{
 use hyper::service::Service;
 use std::{convert::Infallible, sync::Arc};
 
+#[doc(inline)]
+pub use handler::get;
+
 pub mod handler;
 
 /// route builder
+///
+/// see [module level documentation](self) for more on routing
 ///
 /// # Service
 ///
@@ -18,7 +36,8 @@ pub mod handler;
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run
+/// use vice::router::Router;
 /// fn main() -> std::io::Result<()> {
 ///     let route = Router::new();
 ///     vice::listen("0.0.0.0:3000", route)
@@ -114,7 +133,20 @@ where
     }
 }
 
-#[derive(Clone)]
+/// partially match request
+///
+/// # Example
+///
+/// ```
+/// use vice::router::RequestMatcher;
+/// use http::{Request, Method};
+/// assert_eq!(RequestMatcher::default(),Request::new(()));
+/// assert_eq!(RequestMatcher::from("/"),Request::new(()));
+/// assert_eq!(RequestMatcher::from(Method::GET),Request::new(()));
+/// assert_eq!(RequestMatcher::from(("/",Method::GET)),Request::new(()));
+/// assert_ne!(RequestMatcher::from(("/",Method::POST)),Request::new(()));
+/// ```
+#[derive(Clone,Default,Debug)]
 pub struct RequestMatcher {
     path: Option<&'static str>,
     method: Option<http::Method>,
@@ -122,11 +154,15 @@ pub struct RequestMatcher {
 
 impl<T> PartialEq<Request<T>> for RequestMatcher {
     fn eq(&self, other: &Request<T>) -> bool {
-        if matches!(self.path,Some(path) if path != other.uri().path()) {
-            return false;
+        if let Some(path) = self.path {
+            if path != other.uri().path() {
+                return false;
+            }
         }
-        if matches!(&self.method,Some(method) if method != other.method()) {
-            return false;
+        if let Some(method) = &self.method {
+            if method != other.method() {
+                return false;
+            }
         }
         true
     }
@@ -135,6 +171,18 @@ impl<T> PartialEq<Request<T>> for RequestMatcher {
 impl From<&'static str> for RequestMatcher {
     fn from(value: &'static str) -> Self {
         Self { path: Some(value), method: None }
+    }
+}
+
+impl From<http::Method> for RequestMatcher {
+    fn from(value: http::Method) -> Self {
+        Self { path: None, method: Some(value) }
+    }
+}
+
+impl From<(&'static str,http::Method)> for RequestMatcher {
+    fn from((path,method): (&'static str,http::Method)) -> Self {
+        Self { path: Some(path), method: Some(method) }
     }
 }
 

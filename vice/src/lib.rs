@@ -1,6 +1,8 @@
 //! http server framework
 pub mod http;
-pub mod runtime;
-pub mod util;
 pub mod router;
+pub mod util;
+pub mod runtime;
+
+#[doc(inline)]
 pub use runtime::listen;
