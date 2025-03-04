@@ -1,13 +1,13 @@
 //! the [`IntoResponse`] and [`IntoResponseParts`] trait
 use super::Response;
 use bytes::Bytes;
-use http::{response, HeaderMap, HeaderValue, StatusCode};
+use http::{request, response, HeaderMap, HeaderValue, StatusCode};
 
 /// a type that can be converted into response
 ///
 /// this trait is used as request handler return type
 pub trait IntoResponse {
-    fn into_response(self) -> Response;
+    fn into_response(self, req_parts: &mut request::Parts) -> Response;
 }
 
 /// a type that can be converted into response parts
@@ -21,7 +21,7 @@ impl<R> IntoResponse for R
 where
     R: IntoResponseParts,
 {
-    fn into_response(self) -> Response {
+    fn into_response(self, _: &mut request::Parts) -> Response {
         let (mut parts,body) = Response::default().into_parts();
         parts = self.into_response_parts(parts);
         Response::from_parts(parts, body)
@@ -33,10 +33,10 @@ where
     T: IntoResponse,
     E: IntoResponse,
 {
-    fn into_response(self) -> Response {
+    fn into_response(self, req_parts: &mut request::Parts) -> Response {
         match self {
-            Ok(ok) => ok.into_response(),
-            Err(err) => err.into_response(),
+            Ok(ok) => ok.into_response(req_parts),
+            Err(err) => err.into_response(req_parts),
         }
     }
 }
@@ -44,25 +44,25 @@ where
 // NOTE: foreign implementation
 
 macro_rules! res {
-    ($target:ty, $self:ident => $body:expr) => {
+    ($target:ty, $self:ident, $req:pat => $body:expr) => {
         impl IntoResponse for $target {
-            fn into_response($self) -> Response {
+            fn into_response($self, $req: &mut request::Parts) -> Response {
                 $body
             }
         }
     };
 }
 
-res!((), self => <_>::default());
-res!(std::convert::Infallible, self => match self { });
-res!(Bytes, self => Response::new(self.into()));
-res!(Response, self => self);
-res!(&'static str, self => IntoResponse::into_response((
+res!((), self, _ => <_>::default());
+res!(std::convert::Infallible, self, _ => match self { });
+res!(Bytes, self, _ => Response::new(self.into()));
+res!(Response, self, _ => self);
+res!(&'static str, self, parts => IntoResponse::into_response((
     ("Content-Type","text/plain"), Bytes::from_static(self.as_bytes())
-)));
-res!(String, self => IntoResponse::into_response((
+),parts));
+res!(String, self, parts => IntoResponse::into_response((
     ("Content-Type","text/plain"), Bytes::from(self)
-)));
+),parts));
 
 impl IntoResponseParts for StatusCode {
     fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
@@ -100,10 +100,10 @@ macro_rules! into_response_tuple {
             $($r: IntoResponseParts,)*
             R: IntoResponse,
         {
-            fn into_response(self) -> Response {
+            fn into_response(self, req_parts: &mut request::Parts) -> Response {
                 #![allow(non_snake_case)]
                 let ($($r,)*r) = self;
-                let (mut parts,body) = r.into_response().into_parts();
+                let (mut parts,body) = r.into_response(req_parts).into_parts();
                 $(parts = $r.into_response_parts(parts);)*
                 Response::from_parts(parts, body)
             }
