@@ -75,15 +75,24 @@ macro_rules! from_request {
     };
 }
 
+
+#[doc(inline)]
+pub use body_future::BodyFuture;
 from_request! {
     Bytes,
     Error = BadRequest<hyper::Error>;
     Future = BodyFuture;
-    (_, body) => BodyFuture::new(body.collect())
+    (_, body) => BodyFuture::new(body)
 }
 
 #[doc(inline)]
-pub use body_future::BodyFuture;
+pub use body_string_future::{BodyStringFuture, BodyStringError};
+from_request! {
+    String,
+    Error = BadRequest<BodyStringError>;
+    Future = BodyStringFuture;
+    (_, body) => BodyStringFuture::new(body)
+}
 
 mod body_future {
     use super::*;
@@ -101,8 +110,8 @@ mod body_future {
     }
 
     impl BodyFuture {
-        pub(crate) fn new(inner: Collect<ReqBody>) -> BodyFuture {
-            Self { inner }
+        pub(crate) fn new(inner: ReqBody) -> BodyFuture {
+            Self { inner: inner.collect() }
         }
     }
 
@@ -120,16 +129,6 @@ mod body_future {
     }
 }
 
-from_request! {
-    String,
-    Error = BadRequest<BodyStringError>;
-    Future = BodyStringFuture;
-    (_, body) => BodyStringFuture::new(body.collect())
-}
-
-#[doc(inline)]
-pub use body_string_future::{BodyStringFuture, BodyStringError};
-
 mod body_string_future {
     use super::*;
     use http_body_util::combinators::Collect;
@@ -146,8 +145,8 @@ mod body_string_future {
     }
 
     impl BodyStringFuture {
-        pub(crate) fn new(inner: Collect<ReqBody>) -> Self {
-            Self { inner }
+        pub(crate) fn new(inner: ReqBody) -> Self {
+            Self { inner: inner.collect() }
         }
     }
 

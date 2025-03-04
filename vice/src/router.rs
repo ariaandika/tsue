@@ -81,6 +81,12 @@ where
     }
 }
 
+impl Default for Router<NotFound> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone)]
 #[allow(dead_code)]
 /// service that match request and delegate to either service

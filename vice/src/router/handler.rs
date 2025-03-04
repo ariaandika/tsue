@@ -267,9 +267,9 @@ mod arg_future {
                             Pending => return Pending,
                         }
                     }
-                    FdProj::Second { f, mut parts } => {
+                    FdProj::Second { f, parts } => {
                         return match f.poll(cx) {
-                            Ready(res) => Ready(res.into_response(&mut parts)),
+                            Ready(res) => Ready(res.into_response(parts)),
                             Pending => Pending,
                         }
                     }
@@ -331,7 +331,7 @@ mod arg_future {
                 match me.state.as_mut().project() {
                     FrMapStateProj::Init => me.state.set(FrMapState::Fut {
                         f: Fr::from_request(
-                           &mut me.parts.as_mut().expect("poll after complete"),
+                           me.parts.as_mut().expect("poll after complete"),
                            me.body.take().expect("poll after complete")
                         ),
                     }),
@@ -470,7 +470,7 @@ mod arg_future {
             loop {
                 match me.state.as_mut().project() {
                     FrpMapStateProj::Init => me.state.set(FrpMapState::Fut {
-                        f: Frp1::from_request_parts(&mut me.parts.as_mut().expect("poll after complete")),
+                        f: Frp1::from_request_parts(me.parts.as_mut().expect("poll after complete")),
                     }),
                     FrpMapStateProj::Fut { f } => match f.poll(cx) {
                         Ready(ok) => {
