@@ -5,6 +5,13 @@ use http_body_util::Full;
 pub mod from_request;
 pub mod into_response;
 
+pub use http::Method;
+pub use http::StatusCode;
+pub use http::request;
+pub use http::response;
+pub use http::header;
+pub use http::status;
+
 pub use hyper::body::Incoming as ReqBody;
 pub use from_request::{FromRequest, FromRequestParts};
 pub use into_response::{IntoResponse, IntoResponseParts};
