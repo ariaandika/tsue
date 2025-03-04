@@ -1,6 +1,7 @@
 use crate::http::{Request, Response};
 use hyper::{server::conn::http1::Builder as Hyper, service::Service};
 use hyper_util::rt::TokioIo;
+use log::error;
 use std::{convert::Infallible, fmt::Display, io, net::ToSocketAddrs};
 use tokio::net::TcpListener;
 
@@ -30,7 +31,7 @@ where
                         );
                     }
                     Err(err) => {
-                        tracing::error!("{err}");
+                        error!("{err}");
                     }
                 }
             }
