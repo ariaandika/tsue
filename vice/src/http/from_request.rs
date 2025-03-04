@@ -43,6 +43,24 @@ where
     }
 }
 
+impl FromRequestParts for () {
+    type Error = std::convert::Infallible;
+    type Future = std::future::Ready<Result<Self,Self::Error>>;
+
+    fn from_request_parts(_: &mut request::Parts) -> Self::Future {
+        std::future::ready(Ok(()))
+    }
+}
+
+impl FromRequestParts for http::Method {
+    type Error = std::convert::Infallible;
+    type Future = std::future::Ready<Result<Self,Self::Error>>;
+
+    fn from_request_parts(parts: &mut request::Parts) -> Self::Future {
+        std::future::ready(Ok(parts.method.clone()))
+    }
+}
+
 macro_rules! from_request {
     ($self:ty, $($id:ident = $t:ty;)* ($parts:ident) => $body: expr) => {
         from_request!($self, $($id = $t;)* ($parts, _) => $body);
