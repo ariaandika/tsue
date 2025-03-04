@@ -1,13 +1,12 @@
 //! the [`Router`] struct
 use crate::{
     http::{into_response::IntoResponse, Request, Response},
-    util::{
-        futures::{FutureExt, Map},
-        service::NotFound,
-    },
+    util::service::NotFound,
 };
 use hyper::service::Service;
 use std::{convert::Infallible, future::Future, sync::Arc};
+
+pub mod handler;
 
 /// route builder
 ///
@@ -69,22 +68,17 @@ impl<S> Router<S> {
 
 impl<S> Service<Request> for Router<S>
 where
-    S: Service<Request> + Clone + Send + Sync + 'static,
-    S::Response: IntoResponse + Send + 'static,
-    S::Error: IntoResponse + Send + 'static,
+    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
+    // S::Response: IntoResponse + Send + 'static,
+    // S::Error: IntoResponse + Send + 'static,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Map<S::Future, fn(Result<S::Response,S::Error>) -> Result<Response,Infallible>>;
+    type Future = S::Future;
 
     fn call(&self, req: Request) -> Self::Future {
-        let inner = Arc::clone(&self.inner);
-        FutureExt::map(inner.call(req),map_router as _)
+        Arc::clone(&self.inner).call(req)
     }
-}
-
-fn map_router<S: IntoResponse>(res: S) -> Result<Response,Infallible> {
-    Ok(res.into_response())
 }
 
 #[derive(Clone)]
