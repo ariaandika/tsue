@@ -14,9 +14,8 @@ impl Service<Request> for NotFound {
     type Error = Infallible;
     type Future = std::future::Ready<Result<Response,Infallible>>;
 
-    fn call(&self, req: Request) -> Self::Future {
-        let (mut parts,_) = req.into_parts();
-        std::future::ready(Ok(http::StatusCode::NOT_FOUND.into_response(&mut parts)))
+    fn call(&self, _: Request) -> Self::Future {
+        std::future::ready(Ok(http::StatusCode::NOT_FOUND.into_response()))
     }
 }
 

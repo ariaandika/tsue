@@ -16,11 +16,9 @@ use crate::{
     http::{Request, Response},
     util::{futures::EitherInto, service::NotFound, Either},
 };
+use handler::{Handler, HandlerService};
 use hyper::service::Service;
 use std::{convert::Infallible, sync::Arc};
-
-#[doc(inline)]
-pub use handler::get;
 
 pub mod handler;
 
@@ -102,6 +100,13 @@ impl Default for Router<NotFound> {
     }
 }
 
+/// setup a handler service for `GET` method
+pub fn get<F,S>(f: F) -> HandlerService<F, S>
+where
+    F: Handler<S>,
+{
+    HandlerService::new(f)
+}
 
 #[derive(Clone)]
 #[allow(dead_code)]

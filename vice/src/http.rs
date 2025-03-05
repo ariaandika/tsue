@@ -3,9 +3,7 @@ use bytes::Bytes;
 use http_body_util::Full;
 
 pub mod from_request;
-pub mod from_request_v2;
 pub mod into_response;
-pub mod into_response_v2;
 
 pub use http::Method;
 pub use http::StatusCode;

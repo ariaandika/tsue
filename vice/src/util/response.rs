@@ -1,6 +1,5 @@
 //! respones utility types
 use crate::http::into_response::IntoResponse;
-use http::request;
 
 pub struct BadRequest<E>(E);
 
@@ -23,8 +22,8 @@ impl<E> IntoResponse for BadRequest<E>
 where
     E: std::fmt::Display
 {
-    fn into_response(self, req_parts: &mut request::Parts) -> crate::http::Response {
-        (http::StatusCode::BAD_REQUEST, self.0.to_string()).into_response(req_parts)
+    fn into_response(self) -> crate::http::Response {
+        (http::StatusCode::BAD_REQUEST, self.0.to_string()).into_response()
     }
 }
 

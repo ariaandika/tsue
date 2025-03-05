@@ -1,376 +1,234 @@
 //! functional route
 use crate::{
-    http::{FromRequest, FromRequestParts, IntoResponse, Request, Response},
+    http::{FromRequest, FromRequestParts, IntoResponse, Request, Response, ReqBody},
     util::futures::{FutureExt, MapInfallible},
 };
 use hyper::service::Service;
 use std::{convert::Infallible, marker::PhantomData};
 
-pub use arg_future::{Fd, FdMap, Fr, FrMap, Frp, FrpMap};
+#[cfg(test)]
+mod test {
+    use super::Handler;
+    use http::Method;
 
-pub fn get<F,S>(f: F) -> FnService<F, S> {
-    FnService { inner: f, _s: PhantomData }
+    #[test]
+    fn assert_handler() {
+        assert(ap1);
+        assert(ap2);
+        assert(ap3);
+        assert(ap4);
+        assert(ap5);
+        assert(ap6);
+    }
+
+    pub fn assert<F,S>(_: F) where F: Handler<S>, { }
+
+    async fn ap1(_: Method) { }
+    async fn ap2(_: Method, _: String) { }
+    async fn ap3(_: Method, _: Method, _: String) { }
+    async fn ap4(_: Method, _: Method, _: Method, _: String) { }
+    async fn ap5(_: Method, _: Method, _: Method, _: Method, _: String) { }
+    async fn ap6(_: Method, _: Method, _: Method, _: Method, _: Method, _: String) { }
 }
 
 /// the concrete type of functional handler service
 #[derive(Clone)]
-pub struct FnService<F,S> {
+pub struct HandlerService<F,S> {
     inner: F,
     _s: PhantomData<S>
 }
 
-impl<F,S> Service<Request> for FnService<F,S>
+impl<F, S> HandlerService<F, S> {
+    pub fn new(inner: F) -> Self {
+        Self { inner, _s: PhantomData  }
+    }
+}
+
+
+impl<F,S> Service<Request> for HandlerService<F,S>
 where
-    F: FnHandler<S>,
+    F: Handler<S>,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = MapInfallible<<F as FnHandler<S>>::Future>;
+    type Future = MapInfallible<<F as Handler<S>>::Future>;
 
     fn call(&self, req: Request) -> Self::Future {
-        self.inner.call(req).map_infallible()
+        self.inner.handle(req).map_infallible()
     }
 }
 
 /// a functional handler
-pub trait FnHandler<S> {
+pub trait Handler<S> {
     type Future: Future<Output = Response>;
-    fn call(&self, req: Request) -> Self::Future;
+    fn handle(&self, req: Request) -> Self::Future;
 }
 
-impl<F,A,R> FnHandler<(A,)> for F
+#[doc(inline)]
+pub use future::{Fd, Fr, FrCall, Frp, FrpCall};
+
+impl<F,A,Fut> Handler<(A,)> for F
 where
-    F: Clone + Send + 'static + Fn(A),
-    F::Output: Future<Output = R>,
-    R: IntoResponse,
+    F: FnOnce(A) -> Fut + Clone,
+    Fut: Future,
+    Fut::Output: IntoResponse,
     A: FromRequest,
 {
-    type Future = Fd<FrMap<A>, A, F, F::Output>;
-    fn call(&self, req: Request) -> Self::Future {
-        fn map<A,F,Fut>(a: A, me: F) -> Fut where F: FnOnce(A) -> Fut { me(a) }
+    type Future = Fd<FrCall<A>, fn(A, F) -> Fut, Fut, F>;
+
+    fn handle(&self, req: Request) -> Self::Future {
+        fn mapper<A,F,Fut>(a: A, inner: F) -> Fut where F: FnOnce(A) -> Fut, { inner(a) }
+        Fd::new(FrCall::new(req), self.clone(), mapper)
+    }
+}
+
+impl<F,A1,A,Fut> Handler<(A1,A)> for F
+where
+    F: FnOnce(A1,A) -> Fut + Clone,
+    Fut: Future,
+    Fut::Output: IntoResponse,
+    A1: FromRequestParts,
+    A: FromRequest,
+{
+    type Future = Fd<Fr<FrpCall<A1>, A1, A>, fn((A1, A), F) -> Fut, Fut, F>;
+
+    fn handle(&self, req: Request) -> Self::Future {
         let (parts,body) = req.into_parts();
-        Fd::new(FrMap::new(parts, body), self.clone(), map)
+        fn mapper<A1,A,F,Fut>((a1,a): (A1,A), inner: F) -> Fut where F: FnOnce(A1,A) -> Fut, { inner(a1,a) }
+        Fd::new(Fr::new(FrpCall::new(parts), body), self.clone(), mapper)
     }
 }
 
-macro_rules! fn_handler {
-    {
-        [$($a:ident,)*]
-        [$($aa:ident,)*]
-        [$($t:tt)*]
-        [$($tt:tt)*]
-        type Future = $type:ty;
-        ($self:ident,$parts:ident,$b:ident,$map:ident) => $body:expr
-    } => {
-        impl<F,$($aa,)*A,Fut,R> FnHandler<($($aa,)*A,)> for F
+impl<F,A1,A2,A,Fut> Handler<(A1,A2,A)> for F
+where
+    F: FnOnce(A1,A2,A) -> Fut + Clone,
+    Fut: Future,
+    Fut::Output: IntoResponse,
+    A1: FromRequestParts,
+    A2: FromRequestParts,
+    A: FromRequest,
+{
+    type Future = Fd<Fr<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A>, fn(((A1, A2), A), F) -> Fut, Fut, F>;
+
+    fn handle(&self, req: Request) -> Self::Future {
+        let (parts,body) = req.into_parts();
+        fn mapper<A1,A2,A,F,Fut>(((a1,a2),a): ((A1,A2),A), inner: F) -> Fut
+        where F: FnOnce(A1,A2,A) -> Fut, { inner(a1,a2,a) }
+        Fd::new(Fr::new(Frp::new(FrpCall::new(parts)), body), self.clone(), mapper)
+    }
+}
+
+impl<F,A1,A2,A3,A,Fut> Handler<(A1,A2,A3,A)> for F
+where
+    F: FnOnce(A1,A2,A3,A) -> Fut + Clone,
+    Fut: Future,
+    Fut::Output: IntoResponse,
+    A1: FromRequestParts,
+    A2: FromRequestParts,
+    A3: FromRequestParts,
+    A: FromRequest,
+{
+    type Future = Fd<Fr<Frp<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A3>, ((A1, A2), A3), A>, fn((((A1, A2), A3), A), F) -> Fut, Fut, F>;
+
+    fn handle(&self, req: Request) -> Self::Future {
+        let (parts,body) = req.into_parts();
+        fn mapper<A1,A2,A3,A,F,Fut>((((a1,a2),a3),a): (((A1,A2),A3),A), inner: F) -> Fut
         where
-            F: Clone + Send + 'static + Fn($($aa,)*A) -> Fut,
-            Fut: Future<Output = R>,
-            R: IntoResponse,
-            $($aa: FromRequestParts,)*
-            A: FromRequest,
+            F: FnOnce(A1,A2,A3,A) -> Fut,
         {
-            type Future = $type;
-            fn call(&$self, req: Request) -> Self::Future {
-                fn $map<$($aa,)*A,F,Fut>(($($t)*,a): ($($tt)*,A), me: F) -> Fut
-                where
-                    F: FnOnce($($aa,)*A) -> Fut,
-                {
-                    me($($a,)*a)
-                }
-                let ($parts,$b) = req.into_parts();
-                $body
-            }
+            inner(a1,a2,a3,a)
         }
-    };
+        Fd::new(Fr::new(Frp::new(Frp::new(FrpCall::new(parts))), body), self.clone(), mapper)
+    }
 }
 
-fn_handler! {
-    [a1,] [A1,] [a1] [A1]
-    type Future = Fd<
-        Fr<A1, FrpMap<A1>, A>,
-        (A1, A), F, Fut
-    >;
-    (self,parts,body,map) => Fd::new(Fr::new(FrpMap::new(parts), body), self.clone(), map)
+impl<F,A1,A2,A3,A4,A,Fut> Handler<(A1,A2,A3,A4,A)> for F
+where
+    F: FnOnce(A1,A2,A3,A4,A) -> Fut + Clone,
+    Fut: Future,
+    Fut::Output: IntoResponse,
+    A1: FromRequestParts,
+    A2: FromRequestParts,
+    A3: FromRequestParts,
+    A4: FromRequestParts,
+    A: FromRequest,
+{
+    type Future = Fd<Fr<Frp<Frp<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A3>, ((A1, A2), A3), A4>, (((A1, A2), A3), A4), A>, fn(((((A1, A2), A3), A4), A), F) -> Fut, Fut, F>;
+
+    fn handle(&self, req: Request) -> Self::Future {
+        let (parts,body) = req.into_parts();
+        fn mapper<A1,A2,A3,A4,A,F,Fut>(((((a1,a2),a3),a4),a): ((((A1,A2),A3),A4),A), inner: F) -> Fut
+        where
+            F: FnOnce(A1,A2,A3,A4,A) -> Fut,
+        {
+            inner(a1,a2,a3,a4,a)
+        }
+        Fd::new(Fr::new(Frp::new(Frp::new(Frp::new(FrpCall::new(parts)))), body), self.clone(), mapper)
+    }
 }
 
-fn_handler! {
-    [a1,a2,] [A1,A2,] [(a1,a2)] [(A1,A2)]
-    type Future = Fd<
-        Fr<(A1, A2), Frp<A1, FrpMap<A1>, A2>, A>,
-        ((A1, A2), A), F, Fut
-    >;
-    (self,parts,body,map) => Fd::new(Fr::new(Frp::new(FrpMap::new(parts)), body), self.clone(), map)
+impl<F,A1,A2,A3,A4,A5,A,Fut> Handler<(A1,A2,A3,A4,A5,A)> for F
+where
+    F: FnOnce(A1,A2,A3,A4,A5,A) -> Fut + Clone,
+    Fut: Future,
+    Fut::Output: IntoResponse,
+    A1: FromRequestParts,
+    A2: FromRequestParts,
+    A3: FromRequestParts,
+    A4: FromRequestParts,
+    A5: FromRequestParts,
+    A: FromRequest,
+{
+    type Future = Fd<Fr<Frp<Frp<Frp<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A3>, ((A1, A2), A3), A4>, (((A1, A2), A3), A4), A5>, ((((A1, A2), A3), A4), A5), A>, fn((((((A1, A2), A3), A4), A5), A), F) -> Fut, Fut, F>;
+
+    fn handle(&self, req: Request) -> Self::Future {
+        let (parts,body) = req.into_parts();
+        fn mapper<A1,A2,A3,A4,A5,A,F,Fut>((((((a1,a2),a3),a4),a5),a): (((((A1,A2),A3),A4),A5),A), inner: F) -> Fut
+        where
+            F: FnOnce(A1,A2,A3,A4,A5,A) -> Fut,
+        {
+            inner(a1,a2,a3,a4,a5,a)
+        }
+        Fd::new(Fr::new(Frp::new(Frp::new(Frp::new(Frp::new(FrpCall::new(parts))))), body), self.clone(), mapper)
+    }
 }
 
-fn_handler! {
-    [a1,a2,a3,] [A1,A2,A3,] [((a1,a2),a3)] [((A1,A2),A3)]
-    type Future = Fd<
-        Fr<
-            ((A1, A2), A3),
-            Frp<
-                (A1, A2),
-                Frp<A1, FrpMap<A1>, A2>,
-                A3
-            >,
-            A
-        >,
-        (((A1, A2), A3), A), F, Fut
-    >;
-    (self,parts,body,map) => Fd::new(Fr::new(Frp::new(Frp::new(FrpMap::new(parts))), body), self.clone(), map)
-}
-
-fn_handler! {
-    [a1,a2,a3,a4,] [A1,A2,A3,A4,] [(((a1,a2),a3),a4)] [(((A1,A2),A3),A4)]
-    type Future = Fd<
-        Fr<
-            (((A1, A2), A3), A4),
-            Frp<((A1, A2), A3), Frp<(A1, A2), Frp<A1, FrpMap<A1>, A2>, A3>, A4>,
-            A,
-        >,
-        ((((A1, A2), A3), A4), A),
-        F,
-        Fut,
-    >;
-    (self,parts,body,map) => Fd::new(Fr::new(Frp::new(Frp::new(Frp::new(FrpMap::new(parts)))), body), self.clone(), map)
-}
-
-fn_handler! {
-    [a1,a2,a3,a4,a5,] [A1,A2,A3,A4,A5,] [((((a1,a2),a3),a4),a5)] [((((A1,A2),A3),A4),A5)]
-    type Future = Fd<
-        Fr<
-            ((((A1, A2), A3), A4), A5),
-            Frp<
-                (((A1, A2), A3), A4),
-                Frp<((A1, A2), A3), Frp<(A1, A2), Frp<A1, FrpMap<A1>, A2>, A3>, A4>,
-                A5,
-            >,
-            A,
-        >,
-        (((((A1, A2), A3), A4), A5), A),
-        F,
-        Fut,
-    >;
-    (self,parts,body,map) => Fd::new(Fr::new(Frp::new(Frp::new(Frp::new(Frp::new(FrpMap::new(parts))))), body), self.clone(), map)
-}
-
-mod arg_future {
-    use crate::http::{ReqBody, FromRequest, FromRequestParts, IntoResponse, Response};
+mod future {
+    use std::task::{ready, Poll::{self, *}};
     use http::request;
+    use super::*;
 
     pin_project_lite::pin_project! {
-        pub struct MapIntoResponse<F> {
-            #[pin]
-            inner: F
-        }
-    }
-
-    impl<F> Future for MapIntoResponse<F>
-    where
-        F: Future,
-        F::Output: IntoResponse
-    {
-        type Output = F::Output;
-
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            match self.project().inner.poll(cx) {
-                std::task::Poll::Ready(ok) => ok.into_response(req_parts)
-                std::task::Poll::Pending => todo!(),
-            }
-        }
-    }
-
-    // ---
-
-    pin_project_lite::pin_project! {
-        /// call handler with captured Parts
-        pub struct FdMap<Fd,Args,Fut> {
-            parts: request::Parts,
-            args: Option<Args>,
-            inner: Option<Fd>,
-            #[pin]
-            state: FdMapState<Fut>,
-        }
-
-    }
-
-    pin_project_lite::pin_project! {
-        #[project = FdMapStateProj]
-        enum FdMapState<Fut> {
-            Init,
-            Fut {
-                #[pin] f: Fut,
-            },
-        }
-    }
-
-    impl<Fd, Args, Fut> FdMap<Fd, Args, Fut> {
-        pub fn new(parts: request::Parts, args: Args, inner: Fd) -> FdMap<Fd, Args, Fut> {
-            FdMap { parts, args: Some(args), inner: Some(inner), state: FdMapState::Init }
-        }
-    }
-
-    impl<Fd,Args,Fut> Future for FdMap<Fd,Args,Fut>
-    where
-        Fd: FnOnce(Args) -> Fut,
-        Fut: Future,
-        Fut::Output: IntoResponse,
-    {
-        type Output = Response;
-
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            let mut me = self.as_mut().project();
-            loop {
-                match me.state.as_mut().project() {
-                    FdMapStateProj::Init => me.state.set(FdMapState::Fut {
-                        f: (me.inner.take().expect("poll after complete"))
-                            (me.args.take().expect("poll after complete")),
-                    }),
-                    FdMapStateProj::Fut { f } => match f.poll(cx) {
-                        Ready(ok) => {
-                            let res = ok.into_response(me.parts);
-                            return Ready(res)
-                        }
-                        Pending => return Pending,
-                    },
-                }
-            }
-        }
-    }
-
-    // ---
-
-    pin_project_lite::pin_project! {
-        #[project = FdProj]
-        #[project_replace = FdRepl]
-        pub enum Fd<Fargs,Args,Fd1,Fut>
+        /// future that wrap FromRequestParts future
+        pub struct FrpCall<Frp>
         where
-            Fargs: Future<Output = (request::Parts,Result<Args, Response>)>,
+            Frp: FromRequestParts,
         {
-            First { #[pin] f: Fargs, inner: Fd1, mapper: fn(Args,Fd1) -> Fut },
-            Second { #[pin] f: Fut, parts: request::Parts },
-            Invalid,
-        }
-    }
-
-    impl<Fargs,Args,Fd1,Fut> Fd<Fargs,Args,Fd1,Fut>
-    where
-        Fargs: Future<Output = (request::Parts,Result<Args, Response>)>,
-        Fut: Future,
-        Fut::Output: IntoResponse,
-    {
-        pub fn new(f: Fargs, inner: Fd1, mapper: fn(Args,Fd1) -> Fut) -> Fd<Fargs, Args, Fd1, Fut> {
-            Fd::First { f, inner, mapper }
-        }
-    }
-
-    impl<Fargs,Args,Fd1,Fut> Future for Fd<Fargs,Args,Fd1,Fut>
-    where
-        Fargs: Future<Output = (request::Parts,Result<Args, Response>)>,
-        Fut: Future,
-        Fut::Output: IntoResponse,
-    {
-        type Output = Response;
-
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            loop {
-                match self.as_mut().project() {
-                    FdProj::First { f, .. } => {
-                        match f.poll(cx) {
-                            Ready((parts,args)) => {
-                                let args = match args {
-                                    Ok(args) => args,
-                                    Err(err) => return Ready(err),
-                                };
-                                let FdRepl::First { inner, mapper, .. } = self.as_mut().project_replace(Fd::Invalid)
-                                else { unreachable!() };
-                                self.set(Fd::Second { f: mapper(args,inner), parts });
-                            },
-                            Pending => return Pending,
-                        }
-                    }
-                    FdProj::Second { f, parts } => {
-                        return match f.poll(cx) {
-                            Ready(res) => Ready(res.into_response(parts)),
-                            Pending => Pending,
-                        }
-                    }
-                    _ => todo!()
-                }
-            }
-        }
-    }
-
-    // ---
-
-    pin_project_lite::pin_project! {
-        /// call FromRequest with captured Parts
-        pub struct FrMap<Fr>
-        where
-            Fr: FromRequest,
-        {
+            #[pin] f: Frp::Future,
             parts: Option<request::Parts>,
-            body: Option<ReqBody>,
-            #[pin]
-            state: FrMapState<Fr>,
         }
     }
 
-    // NOTE: Init state is required to use pinned `Parts`
-
-    pin_project_lite::pin_project! {
-        #[project = FrMapStateProj]
-        enum FrMapState<Fr>
-        where
-            Fr: FromRequest,
-        {
-            Init,
-            Fut {
-                #[pin] f: Fr::Future,
-            },
-        }
-    }
-
-    impl<Fr> FrMap<Fr>
+    impl<Frp> FrpCall<Frp>
     where
-        Fr: FromRequest,
+        Frp: FromRequestParts,
     {
-        pub fn new(parts: request::Parts, body: ReqBody) -> FrMap<Fr> {
-            FrMap { parts: Some(parts), state: FrMapState::Init, body: Some(body) }
+        pub fn new(mut parts: request::Parts) -> Self {
+            Self { f: Frp::from_request_parts(&mut parts), parts: Some(parts) }
         }
     }
 
-    impl<Fr> Future for FrMap<Fr>
+    impl<Frp> Future for FrpCall<Frp>
     where
-        Fr: FromRequest,
+        Frp: FromRequestParts,
     {
-        type Output = (request::Parts,Result<Fr,Response>);
+        type Output = Result<(request::Parts,Frp),Response>;
 
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            let mut me = self.as_mut().project();
-            loop {
-                match me.state.as_mut().project() {
-                    FrMapStateProj::Init => me.state.set(FrMapState::Fut {
-                        f: Fr::from_request(
-                           me.parts.as_mut().expect("poll after complete"),
-                           me.body.take().expect("poll after complete")
-                        ),
-                    }),
-                    FrMapStateProj::Fut { f } => match f.poll(cx) {
-                        Ready(ok) => {
-                            let mut parts = me.parts.take().expect("poll after complete");
-                            let result = match ok {
-                                Ok(ok) => Ok(ok),
-                                Err(err) => Err(err.into_response(&mut parts)),
-                            };
-                            return Ready((parts,result))
-                        }
-                        Pending => return Pending,
-                    },
-                }
+        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+            let me = self.project();
+            match ready!(me.f.poll(cx)) {
+                Ok(frp) => Ready(Ok((me.parts.take().unwrap(),frp))),
+                Err(err) => Ready(Err(err.into_response())),
             }
         }
     }
@@ -378,205 +236,185 @@ mod arg_future {
     // ---
 
     pin_project_lite::pin_project! {
-        #[project = FrProj]
-        #[project_replace = FrRepl]
-        pub enum Fr<Frp1,FutMap,Fr1>
-        where
-            Fr1: FromRequest,
-            FutMap: Future<Output = (request::Parts,Result<Frp1,Response>)>
-        {
-            First { #[pin] f: FutMap, body: Option<ReqBody>, },
-            Second { #[pin] f: FrMap<Fr1>, frp1: Frp1, },
-            Invalid,
-        }
-    }
-
-    impl<Frp1, FutMap, Fr1> Fr<Frp1, FutMap, Fr1>
-    where
-        Fr1: FromRequest,
-        FutMap: Future<Output = (request::Parts, Result<Frp1, Response>)>,
-    {
-        pub fn new(f: FutMap, body: ReqBody) -> Fr<Frp1, FutMap, Fr1> {
-            Fr::First { f, body: Some(body) }
-        }
-    }
-
-    impl<Frp1,FutMap,Fr1> Future for Fr<Frp1,FutMap,Fr1>
-    where
-        Fr1: FromRequest,
-        FutMap: Future<Output = (request::Parts,Result<Frp1,Response>)>,
-    {
-        type Output = (request::Parts,Result<(Frp1,Fr1),Response>);
-
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            loop {
-                match self.as_mut().project() {
-                    FrProj::First { f, body } => {
-                        match f.poll(cx) {
-                            Ready((parts,frp1result)) => {
-                                let frp1 = match frp1result {
-                                    Ok(frp1) => frp1,
-                                    Err(err) => return Ready((parts,Err(err))),
-                                };
-                                let body = body.take().expect("poll after complete");
-                                self.set(Fr::Second { f: FrMap::new(parts, body), frp1 });
-                            }
-                            Pending => return Pending,
-                        }
-                    }
-                    FrProj::Second { f, .. } => {
-                        match f.poll(cx) {
-                            Ready((parts,fr1result)) => {
-                                let fr1 = match fr1result {
-                                    Ok(fr1) => fr1,
-                                    Err(err) => return Ready((parts,Err(err))),
-                                };
-                                let FrRepl::Second { frp1, .. } = self.as_mut().project_replace(Fr::Invalid) else {
-                                    unreachable!()
-                                };
-                                return Ready((parts,Ok((frp1,fr1))))
-                            }
-                            Pending => return Pending,
-                        }
-                    }
-                    FrProj::Invalid => panic!("poll after complete")
-                }
-            }
-        }
-    }
-
-    // ---
-
-    pin_project_lite::pin_project! {
-        /// call FromRequestParts with captured Parts
-        pub struct FrpMap<Frp1>
-        where
-            Frp1: FromRequestParts,
-        {
-            parts: Option<request::Parts>,
-            #[pin]
-            state: FrpMapState<Frp1>,
-        }
-    }
-
-    pin_project_lite::pin_project! {
-        #[project = FrpMapStateProj]
-        enum FrpMapState<Frp1>
-        where
-            Frp1: FromRequestParts,
-        {
-            Init,
-            Fut {
-                #[pin] f: Frp1::Future,
-            },
-        }
-    }
-
-    impl<Frp1> FrpMap<Frp1>
-    where
-        Frp1: FromRequestParts,
-    {
-        pub fn new(parts: request::Parts) -> FrpMap<Frp1> {
-            FrpMap { parts: Some(parts), state: FrpMapState::Init }
-        }
-    }
-
-    impl<Frp1> Future for FrpMap<Frp1>
-    where
-        Frp1: FromRequestParts,
-    {
-        type Output = (request::Parts,Result<Frp1,Response>);
-
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            let mut me = self.as_mut().project();
-            loop {
-                match me.state.as_mut().project() {
-                    FrpMapStateProj::Init => me.state.set(FrpMapState::Fut {
-                        f: Frp1::from_request_parts(me.parts.as_mut().expect("poll after complete")),
-                    }),
-                    FrpMapStateProj::Fut { f } => match f.poll(cx) {
-                        Ready(ok) => {
-                            let mut parts = me.parts.take().expect("poll after complete");
-                            let result = match ok {
-                                Ok(ok) => Ok(ok),
-                                Err(err) => Err(err.into_response(&mut parts)),
-                            };
-                            return Ready((parts,result))
-                        }
-                        Pending => return Pending,
-                    },
-                }
-            }
-        }
-    }
-
-    // ---
-
-    pin_project_lite::pin_project! {
+        /// future that wrap subsequent FromRequestParts future
         #[project = FrpProj]
-        #[project_replace = FrpRepl]
-        pub enum Frp<Frp1,FutMap,Frp2>
+        pub enum Frp<Fut,Frp1,Frp2>
         where
             Frp2: FromRequestParts,
-            FutMap: Future<Output = (request::Parts,Result<Frp1,Response>)>
         {
-            First { #[pin] f: FutMap, },
-            Second { #[pin] f: FrpMap<Frp2>, frp1: Frp1, },
-            Invalid,
+            Frp1 { #[pin] f: Fut, },
+            Frp2 { #[pin] f: Frp2::Future, parts: Option<request::Parts>, frp1: Option<Frp1>, },
         }
     }
 
-    impl<Frp1,FutMap,Frp2> Frp<Frp1,FutMap,Frp2>
+    impl<Fut,Frp1,Frp2> Frp<Fut,Frp1,Frp2>
     where
         Frp2: FromRequestParts,
-        FutMap: Future<Output = (request::Parts,Result<Frp1,Response>)>
     {
-        pub fn new(f: FutMap) -> Frp<Frp1, FutMap, Frp2> {
-            Frp::First { f }
+        pub fn new(f: Fut) -> Self {
+            Self::Frp1 { f }
         }
     }
 
-    impl<Frp1,FutMap,Frp2> Future for Frp<Frp1,FutMap,Frp2>
+    impl<Fut,Frp1,Frp2> Future for Frp<Fut,Frp1,Frp2>
     where
+        Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
         Frp2: FromRequestParts,
-        FutMap: Future<Output = (request::Parts,Result<Frp1,Response>)>
     {
-        type Output = (request::Parts,Result<(Frp1,Frp2),Response>);
+        type Output = Result<(request::Parts,(Frp1,Frp2)),Response>;
 
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
+        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
             loop {
                 match self.as_mut().project() {
-                    FrpProj::First { f } => {
-                        match f.poll(cx) {
-                            Ready((parts,frp1result)) => {
-                                let frp1 = match frp1result {
-                                    Ok(fr1) => fr1,
-                                    Err(err) => return Ready((parts,Err(err))),
-                                };
-                                self.set(Frp::Second { f: FrpMap::new(parts), frp1 });
-                            }
-                            Pending => return Pending,
-                        }
+                    FrpProj::Frp1 { f } => match ready!(f.poll(cx)) {
+                        Ok((mut parts,frp1)) => self.set(Frp::Frp2 {
+                            f: Frp2::from_request_parts(&mut parts),
+                            frp1: Some(frp1),
+                            parts: Some(parts),
+                        }),
+                        Err(err) => return Ready(Err(err)),
+                    },
+                    FrpProj::Frp2 { f, parts, frp1, } => return match ready!(f.poll(cx)) {
+                        Ok(frp2) => Ready(Ok((parts.take().unwrap(),(frp1.take().unwrap(),frp2)))),
+                        Err(err) => Ready(Err(err.into_response())),
                     }
-                    FrpProj::Second { f, .. } => {
-                        match f.poll(cx) {
-                            Ready((parts,frp2result)) => {
-                                let frp2 = match frp2result {
-                                    Ok(frp2) => frp2,
-                                    Err(err) => return Ready((parts,Err(err))),
-                                };
-                                let FrpRepl::Second { frp1, .. } = self.as_mut().project_replace(Frp::Invalid) else {
-                                    unreachable!()
-                                };
-                                return Ready((parts,Ok((frp1,frp2))))
-                            }
-                            Pending => return Pending,
-                        }
+                }
+            }
+        }
+    }
+
+    // ---
+
+    pin_project_lite::pin_project! {
+        /// future that wrap FromRequest future
+        pub struct FrCall<Fr>
+        where
+            Fr: FromRequest,
+        {
+            #[pin] f: Fr::Future,
+        }
+    }
+
+    impl<Fr> FrCall<Fr>
+    where
+        Fr: FromRequest,
+    {
+        pub fn new(req: Request) -> Self {
+            Self { f: Fr::from_request(req) }
+        }
+    }
+
+    impl<Fr> Future for FrCall<Fr>
+    where
+        Fr: FromRequest,
+    {
+        type Output = Result<Fr,Response>;
+
+        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+            match ready!(self.project().f.poll(cx)) {
+                Ok(fr) => Ready(Ok(fr)),
+                Err(err) => Ready(Err(err.into_response())),
+            }
+        }
+    }
+
+    // ---
+
+    pin_project_lite::pin_project! {
+        /// future that wrap subsequent FromRequest future
+        #[project = FrProj]
+        pub enum Fr<Fut,Frp1,Fr1>
+        where
+            Fr1: FromRequest,
+        {
+            Frp { #[pin] f: Fut, body: Option<ReqBody>, },
+            Fr { #[pin] f: Fr1::Future, frp: Option<Frp1>, },
+        }
+    }
+
+    impl<Fut,Frp1,Fr1> Fr<Fut,Frp1,Fr1>
+    where
+        Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
+        Fr1: FromRequest,
+    {
+        pub fn new(f: Fut, body: ReqBody) -> Self {
+            Self::Frp { f, body: Some(body) }
+        }
+    }
+
+    impl<Fut,Frp1,Fr1> Future for Fr<Fut,Frp1,Fr1>
+    where
+        Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
+        Fr1: FromRequest,
+    {
+        type Output = Result<(Frp1,Fr1),Response>;
+
+        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+            loop {
+                match self.as_mut().project() {
+                    FrProj::Frp { f, body } => match ready!(f.poll(cx)) {
+                        Ok((parts,frp)) => {
+                            let req = Request::from_parts(parts, body.take().unwrap());
+                            self.set(Fr::Fr {
+                                f: Fr1::from_request(req),
+                                frp: Some(frp)
+                            })
+                        },
+                        Err(err) => return Ready(Err(err)),
+                    },
+                    FrProj::Fr { f, frp } => return match ready!(f.poll(cx)) {
+                        Ok(fr) => Ready(Ok((frp.take().unwrap(),fr))),
+                        Err(err) => Ready(Err(err.into_response())),
                     }
-                    FrpProj::Invalid => panic!("poll after complete")
+                }
+            }
+        }
+    }
+
+    // ---
+
+    pin_project_lite::pin_project! {
+        /// future that wrap subsequent FromRequest future
+        #[project = FProj]
+        pub enum Fd<Fut,M,MFut,F1> {
+            Fr { #[pin] f: Fut, inner: Option<F1>, mapper: Option<M>, },
+            F { #[pin] f: MFut, },
+        }
+    }
+
+    impl<Fr1,Fut,M,MFut,F1> Fd<Fut,M,MFut,F1>
+    where
+        Fut: Future<Output = Result<Fr1,Response>>,
+        M: FnOnce(Fr1,F1) -> MFut + Clone,
+        MFut: Future,
+        MFut::Output: IntoResponse,
+    {
+        pub fn new(f: Fut, inner: F1, mapper: M) -> Self {
+            Self::Fr { f, inner: Some(inner), mapper: Some(mapper) }
+        }
+    }
+
+    impl<Fr1,Fut,M,MFut,F1> Future for Fd<Fut,M,MFut,F1>
+    where
+        Fut: Future<Output = Result<Fr1,Response>>,
+        M: FnOnce(Fr1,F1) -> MFut,
+        MFut: Future,
+        MFut::Output: IntoResponse,
+    {
+        type Output = Response;
+
+        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+            loop {
+                match self.as_mut().project() {
+                    FProj::Fr { f, inner, mapper } => match ready!(f.poll(cx)) {
+                        Ok(fr) => {
+                            let inner = inner.take().unwrap();
+                            let mapper = mapper.take().unwrap();
+                            self.set(Fd::F { f: (mapper)(fr,inner), });
+                        },
+                        Err(err) => return Ready(err),
+                    }
+                    FProj::F { f } => return Ready(ready!(f.poll(cx)).into_response())
                 }
             }
         }
