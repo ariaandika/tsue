@@ -1,15 +1,16 @@
 //! request routing
 //!
+//! # Example
+//!
 //! ```
 //! use vice::router::{Router, get};
+//!
 //! fn main() -> std::io::Result<()> {
 //!     let route = Router::new()
 //!         .route("/", get(||async { String::from("Vice Dev") }));
 //!     vice::listen("0.0.0.0:3000", route)
 //! }
 //! ```
-//!
-//! # Example
 //!
 //!
 use crate::{
@@ -36,6 +37,7 @@ pub mod handler;
 ///
 /// ```no_run
 /// use vice::router::Router;
+///
 /// fn main() -> std::io::Result<()> {
 ///     let route = Router::new();
 ///     vice::listen("0.0.0.0:3000", route)
@@ -145,6 +147,7 @@ where
 /// ```
 /// use vice::router::RequestMatcher;
 /// use http::{Request, Method};
+///
 /// assert_eq!(RequestMatcher::default(),Request::new(()));
 /// assert_eq!(RequestMatcher::from("/"),Request::new(()));
 /// assert_eq!(RequestMatcher::from(Method::GET),Request::new(()));

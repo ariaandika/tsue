@@ -1,3 +1,4 @@
+//! entrypoint of the server
 use crate::http::{Request, Response};
 use hyper::{server::conn::http1::Builder as Hyper, service::Service};
 use hyper_util::rt::TokioIo;

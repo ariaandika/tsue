@@ -1,16 +1,16 @@
-//! the [`IntoResponse`] and [`IntoResponseParts`] trait
+//! [`IntoResponse`] and [`IntoResponseParts`] trait
 use super::Response;
 use bytes::Bytes;
 use http::{response, HeaderMap, HeaderValue, StatusCode};
 
-/// a type that can be converted into response
+/// Type that can be converted into response
 ///
 /// this trait is used as request handler return type
 pub trait IntoResponse {
     fn into_response(self) -> Response;
 }
 
-/// a type that can be converted into response parts
+/// Type that can be converted into response parts
 ///
 /// this trait is used as request handler return type
 pub trait IntoResponseParts {

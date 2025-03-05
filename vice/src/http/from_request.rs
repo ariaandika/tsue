@@ -1,4 +1,4 @@
-//! the [`FromRequest`] and [`FromRequestParts`] trait
+//! [`FromRequest`] and [`FromRequestParts`] trait
 use std::{convert::Infallible, future::{ready, Ready}};
 use super::{into_response::IntoResponse, ReqBody, Request};
 use crate::util::response::BadRequest;
@@ -17,7 +17,7 @@ use http::request;
 // because it can be referenced externally
 // [issue](#63063 <https://github.com/rust-lang/rust/issues/63063>)
 
-/// a type that can be constructed from request
+/// Type that can be constructed from request
 ///
 /// this trait is used as request handler parameters
 pub trait FromRequest: Sized {
@@ -26,7 +26,7 @@ pub trait FromRequest: Sized {
     fn from_request(req: Request) -> Self::Future;
 }
 
-/// a type that can be constructed from request parts
+/// Type that can be constructed from request parts
 ///
 /// this trait is used as request handler parameters
 pub trait FromRequestParts: Sized {
