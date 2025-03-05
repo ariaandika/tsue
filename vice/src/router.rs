@@ -92,7 +92,7 @@ where
     type Future = S::Future;
 
     fn call(&self, req: Request) -> Self::Future {
-        Arc::clone(&self.inner).call(req)
+        self.inner.call(req)
     }
 }
 
