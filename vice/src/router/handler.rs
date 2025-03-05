@@ -13,6 +13,7 @@ mod test {
 
     #[test]
     fn assert_handler() {
+        assert(ap0);
         assert(ap1);
         assert(ap2);
         assert(ap3);
@@ -23,6 +24,7 @@ mod test {
 
     pub fn assert<F,S>(_: F) where F: Handler<S>, { }
 
+    async fn ap0() { }
     async fn ap1(_: Method) { }
     async fn ap2(_: Method, _: String) { }
     async fn ap3(_: Method, _: Method, _: String) { }
@@ -59,13 +61,29 @@ where
 }
 
 /// a functional handler
+///
+/// this trait exists because multiple blanket implementation on `Service`
+/// directly for multiple function with different arguments is impossible
 pub trait Handler<S> {
     type Future: Future<Output = Response>;
     fn handle(&self, req: Request) -> Self::Future;
 }
 
 #[doc(inline)]
-pub use future::{Fd, Fr, FrCall, Frp, FrpCall};
+pub use future::{Ft, Fd, Fr, FrCall, Frp, FrpCall};
+
+impl<F,Fut> Handler<()> for F
+where
+    F: FnOnce() -> Fut + Clone,
+    Fut: Future,
+    Fut::Output: IntoResponse,
+{
+    type Future = Ft<Fut>;
+
+    fn handle(&self, _: Request) -> Self::Future {
+        Ft::new(self.clone()())
+    }
+}
 
 impl<F,A,Fut> Handler<(A,)> for F
 where
@@ -90,7 +108,7 @@ where
     A1: FromRequestParts,
     A: FromRequest,
 {
-    type Future = Fd<Fr<FrpCall<A1>, A1, A>, fn((A1, A), F) -> Fut, Fut, F>;
+    type Future=Fd<Fr<FrpCall<A1>,A1,A>,fn((A1,A),F)->Fut,Fut,F>;
 
     fn handle(&self, req: Request) -> Self::Future {
         let (parts,body) = req.into_parts();
@@ -128,7 +146,7 @@ where
     A3: FromRequestParts,
     A: FromRequest,
 {
-    type Future = Fd<Fr<Frp<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A3>, ((A1, A2), A3), A>, fn((((A1, A2), A3), A), F) -> Fut, Fut, F>;
+    type Future=Fd<Fr<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A>,fn((((A1,A2),A3),A),F)->Fut,Fut,F>;
 
     fn handle(&self, req: Request) -> Self::Future {
         let (parts,body) = req.into_parts();
@@ -153,7 +171,7 @@ where
     A4: FromRequestParts,
     A: FromRequest,
 {
-    type Future = Fd<Fr<Frp<Frp<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A3>, ((A1, A2), A3), A4>, (((A1, A2), A3), A4), A>, fn(((((A1, A2), A3), A4), A), F) -> Fut, Fut, F>;
+    type Future=Fd<Fr<Frp<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A4>,(((A1,A2),A3),A4),A>,fn(((((A1,A2),A3),A4),A),F)->Fut,Fut,F>;
 
     fn handle(&self, req: Request) -> Self::Future {
         let (parts,body) = req.into_parts();
@@ -179,7 +197,7 @@ where
     A5: FromRequestParts,
     A: FromRequest,
 {
-    type Future = Fd<Fr<Frp<Frp<Frp<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A3>, ((A1, A2), A3), A4>, (((A1, A2), A3), A4), A5>, ((((A1, A2), A3), A4), A5), A>, fn((((((A1, A2), A3), A4), A5), A), F) -> Fut, Fut, F>;
+    type Future=Fd<Fr<Frp<Frp<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A4>,(((A1,A2),A3),A4),A5>,((((A1,A2),A3),A4),A5),A>,fn((((((A1,A2),A3),A4),A5),A),F)->Fut,Fut,F>;
 
     fn handle(&self, req: Request) -> Self::Future {
         let (parts,body) = req.into_parts();
@@ -197,6 +215,37 @@ mod future {
     use std::task::{ready, Poll::{self, *}};
     use http::request;
     use super::*;
+
+    pin_project_lite::pin_project! {
+        /// future that call handle without any arguments
+        pub struct Ft<Fut> {
+            #[pin] f: Fut
+        }
+    }
+
+    impl<Fut> Ft<Fut>
+    where
+        Fut: Future,
+        Fut::Output: IntoResponse,
+    {
+        pub fn new(f: Fut) -> Self {
+            Self { f }
+        }
+    }
+
+    impl<Fut> Future for Ft<Fut>
+    where
+        Fut: Future,
+        Fut::Output: IntoResponse,
+    {
+        type Output = Response;
+
+        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+            Ready(ready!(self.project().f.poll(cx)).into_response())
+        }
+    }
+
+    // ---
 
     pin_project_lite::pin_project! {
         /// future that wrap FromRequestParts future
@@ -374,7 +423,7 @@ mod future {
     // ---
 
     pin_project_lite::pin_project! {
-        /// future that wrap subsequent FromRequest future
+        /// future that call handle with subsequent FromRequest future
         #[project = FProj]
         pub enum Fd<Fut,M,MFut,F1> {
             Fr { #[pin] f: Fut, inner: Option<F1>, mapper: Option<M>, },
