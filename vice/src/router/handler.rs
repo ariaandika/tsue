@@ -6,34 +6,7 @@ use crate::{
 use hyper::service::Service;
 use std::{convert::Infallible, marker::PhantomData};
 
-#[cfg(test)]
-mod test {
-    use super::Handler;
-    use http::Method;
-
-    #[test]
-    fn assert_handler() {
-        assert(ap0);
-        assert(ap1);
-        assert(ap2);
-        assert(ap3);
-        assert(ap4);
-        assert(ap5);
-        assert(ap6);
-    }
-
-    pub fn assert<F,S>(_: F) where F: Handler<S>, { }
-
-    async fn ap0() { }
-    async fn ap1(_: Method) { }
-    async fn ap2(_: Method, _: String) { }
-    async fn ap3(_: Method, _: Method, _: String) { }
-    async fn ap4(_: Method, _: Method, _: Method, _: String) { }
-    async fn ap5(_: Method, _: Method, _: Method, _: Method, _: String) { }
-    async fn ap6(_: Method, _: Method, _: Method, _: Method, _: Method, _: String) { }
-}
-
-/// the concrete type of functional handler service
+/// functional service
 #[derive(Clone)]
 pub struct HandlerService<F,S> {
     inner: F,
@@ -45,7 +18,6 @@ impl<F, S> HandlerService<F, S> {
         Self { inner, _s: PhantomData  }
     }
 }
-
 
 impl<F,S> Service<Request> for HandlerService<F,S>
 where
@@ -60,7 +32,7 @@ where
     }
 }
 
-/// a functional handler
+/// a function that can be an http service
 ///
 /// this trait exists because multiple blanket implementation on `Service`
 /// directly for multiple function with different arguments is impossible
@@ -458,5 +430,32 @@ mod future {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Handler;
+    use http::Method;
+
+    #[test]
+    fn assert_handler() {
+        assert(ap0);
+        assert(ap1);
+        assert(ap2);
+        assert(ap3);
+        assert(ap4);
+        assert(ap5);
+        assert(ap6);
+    }
+
+    pub fn assert<F,S>(_: F) where F: Handler<S>, { }
+
+    async fn ap0() { }
+    async fn ap1(_: Method) { }
+    async fn ap2(_: Method, _: String) { }
+    async fn ap3(_: Method, _: Method, _: String) { }
+    async fn ap4(_: Method, _: Method, _: Method, _: String) { }
+    async fn ap5(_: Method, _: Method, _: Method, _: Method, _: String) { }
+    async fn ap6(_: Method, _: Method, _: Method, _: Method, _: Method, _: String) { }
 }
 

@@ -7,15 +7,21 @@
 //!
 //! fn main() -> std::io::Result<()> {
 //!     let route = Router::new()
-//!         .route("/", get(||async { String::from("Vice Dev") }));
+//!         .route("/", get(index));
 //!     vice::listen("0.0.0.0:3000", route)
+//! }
+//!
+//! async fn index() -> &'static str {
+//!     "Vice Dev"
 //! }
 //! ```
 use crate::{
     http::{Request, Response},
-    util::{futures::EitherInto, service::NotFound, Either}, HttpService,
+    util::{futures::EitherInto, service::NotFound, Either},
+    HttpService,
 };
-use handler::{Handler, HandlerService};
+use handler::HandlerService;
+use http::Method;
 use hyper::service::Service;
 use std::convert::Infallible;
 
@@ -27,20 +33,8 @@ pub mod handler;
 ///
 /// # Service
 ///
-/// this implements [`Service`] that can be used in [`listen`]
+/// this implements [`Service`] that can be used in [`listen`](crate::listen)
 ///
-/// [`listen`]: crate::listen
-///
-/// # Example
-///
-/// ```no_run
-/// use vice::router::Router;
-///
-/// fn main() -> std::io::Result<()> {
-///     let route = Router::new();
-///     vice::listen("0.0.0.0:3000", route)
-/// }
-/// ```
 pub struct Router<S> {
     inner: S,
 }
@@ -53,29 +47,20 @@ impl Router<NotFound> {
 }
 
 impl<S> Router<S> {
-    /// create new `Router` with custom fallback
-    pub fn new_with_fallback(fallback: S) -> Router<S> {
+    /// create new `Router` with custom fallback instead of 404 NotFound
+    pub fn with_fallback(fallback: S) -> Router<S> {
         Router { inner: fallback }
     }
 
     /// assign new route
-    pub fn route<R>(self, matches: impl Into<RequestMatcher>, route: R) -> Router<Branch<R, S>> {
+    pub fn route<R>(self, path: &'static str, route: R) -> Router<Branch<R, S>> {
         Router {
             inner: Branch {
-                matcher: matches.into(),
+                path,
                 inner: route,
                 fallback: self.inner,
             },
         }
-    }
-
-    /// assign new route with early generic constraint check
-    #[inline]
-    pub fn route_checked<R>(self, path: &'static str, route: R) -> Router<Branch<R, S>>
-    where
-        R: HttpService,
-    {
-        self.route(path, route)
     }
 }
 
@@ -98,22 +83,50 @@ impl Default for Router<NotFound> {
     }
 }
 
-/// setup a handler service for `GET` method
-pub fn get<F,S>(f: F) -> HandlerService<F, S>
-where
-    F: Handler<S>,
-{
-    HandlerService::new(f)
+/// setup a service for `GET` method
+pub fn get<F,S>(f: F) -> MethodRouter<HandlerService<F,S>,NotFound> {
+    MethodRouter { method: Method::GET, inner: HandlerService::new(f), fallback: NotFound }
 }
 
-#[allow(dead_code)]
-/// service that match request and delegate to either service
+/// setup a service for `POST` method
+pub fn post<F,S>(f: F) -> MethodRouter<HandlerService<F,S>,NotFound> {
+    MethodRouter { method: Method::POST, inner: HandlerService::new(f), fallback: NotFound }
+}
+
+/// service that match http method and delegate to either service
+///
+/// user typically does not interact with this directly,
+/// instead use functions like [`get`] or [`post`]
+pub struct MethodRouter<S,F> {
+    method: Method,
+    inner: S,
+    fallback: F,
+}
+
+impl<S,F> Service<Request> for MethodRouter<S,F>
+where
+    S: HttpService,
+    F: HttpService,
+{
+    type Response = Response;
+    type Error = Infallible;
+    type Future = EitherInto<S::Future,F::Future,Result<Response,Infallible>>;
+
+    fn call(&self, req: Request) -> Self::Future {
+        match self.method == req.method() {
+            true => Either::Left(self.inner.call(req)).await_into(),
+            false => Either::Right(self.fallback.call(req)).await_into(),
+        }
+    }
+}
+
+/// service that match request path and delegate to either service
 ///
 /// user typically does not interact with this directly, instead use [`route`] method
 ///
 /// [`route`]: Router::route
 pub struct Branch<S,F> {
-    matcher: RequestMatcher,
+    path: &'static str,
     inner: S,
     fallback: F,
 }
@@ -128,64 +141,10 @@ where
     type Future = EitherInto<S::Future,F::Future,Result<Response,Infallible>>;
 
     fn call(&self, req: Request) -> Self::Future {
-        match self.matcher == req {
+        match self.path == req.uri().path() {
             true => Either::Left(self.inner.call(req)).await_into(),
             false => Either::Right(self.fallback.call(req)).await_into(),
         }
-    }
-}
-
-/// partially match request
-///
-/// # Example
-///
-/// ```
-/// use vice::router::RequestMatcher;
-/// use http::{Request, Method};
-///
-/// assert_eq!(RequestMatcher::default(),Request::new(()));
-/// assert_eq!(RequestMatcher::from("/"),Request::new(()));
-/// assert_eq!(RequestMatcher::from(Method::GET),Request::new(()));
-/// assert_eq!(RequestMatcher::from(("/",Method::GET)),Request::new(()));
-/// assert_ne!(RequestMatcher::from(("/",Method::POST)),Request::new(()));
-/// ```
-#[derive(Default,Debug)]
-pub struct RequestMatcher {
-    path: Option<&'static str>,
-    method: Option<http::Method>,
-}
-
-impl<T> PartialEq<Request<T>> for RequestMatcher {
-    fn eq(&self, other: &Request<T>) -> bool {
-        if let Some(path) = self.path {
-            if path != other.uri().path() {
-                return false;
-            }
-        }
-        if let Some(method) = &self.method {
-            if method != other.method() {
-                return false;
-            }
-        }
-        true
-    }
-}
-
-impl From<&'static str> for RequestMatcher {
-    fn from(value: &'static str) -> Self {
-        Self { path: Some(value), method: None }
-    }
-}
-
-impl From<http::Method> for RequestMatcher {
-    fn from(value: http::Method) -> Self {
-        Self { path: None, method: Some(value) }
-    }
-}
-
-impl From<(&'static str,http::Method)> for RequestMatcher {
-    fn from((path,method): (&'static str,http::Method)) -> Self {
-        Self { path: Some(path), method: Some(method) }
     }
 }
 
