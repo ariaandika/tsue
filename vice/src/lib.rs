@@ -5,4 +5,4 @@ pub mod util;
 pub mod runtime;
 
 #[doc(inline)]
-pub use runtime::listen;
+pub use runtime::{listen, HttpService};

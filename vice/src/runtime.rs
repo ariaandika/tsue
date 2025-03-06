@@ -6,11 +6,32 @@ use log::error;
 use std::{convert::Infallible, fmt::Display, io, net::ToSocketAddrs, sync::Arc};
 use tokio::net::TcpListener;
 
+/// a service that accept http request and return http response
+pub trait HttpService:
+    Service<
+        Request,
+        Response = Response,
+        Error = Infallible,
+        Future = Self::HttpFuture,
+    > + Send
+    + Sync
+    + 'static
+{
+    type HttpFuture: Future<Output = Result<Response,Infallible>> + Send + Sync + 'static;
+}
+
+impl<S> HttpService for S
+where
+    S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
+    S::Future: Send + Sync + 'static,
+{
+    type HttpFuture = Self::Future;
+}
+
 /// entrypoint to run the server
 pub fn listen<S>(addr: impl ToSocketAddrs + Display + Clone, service: S) -> io::Result<()>
 where
-    S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
-    S::Future: Send + 'static,
+    S: HttpService,
 {
     let tcp = std::net::TcpListener::bind(addr.clone()).map_err(|e|tcp_error(addr, e))?;
     tcp.set_nonblocking(true)?;

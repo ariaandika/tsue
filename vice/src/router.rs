@@ -13,7 +13,7 @@
 //! ```
 use crate::{
     http::{Request, Response},
-    util::{futures::EitherInto, service::NotFound, Either},
+    util::{futures::EitherInto, service::NotFound, Either}, HttpService,
 };
 use handler::{Handler, HandlerService};
 use hyper::service::Service;
@@ -73,7 +73,7 @@ impl<S> Router<S> {
     #[inline]
     pub fn route_checked<R>(self, path: &'static str, route: R) -> Router<Branch<R, S>>
     where
-        R: Service<Request, Response = Response, Error = Infallible>,
+        R: HttpService,
     {
         self.route(path, route)
     }
@@ -81,7 +81,7 @@ impl<S> Router<S> {
 
 impl<S> Service<Request> for Router<S>
 where
-    S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
+    S: HttpService
 {
     type Response = Response;
     type Error = Infallible;
@@ -120,8 +120,8 @@ pub struct Branch<S,F> {
 
 impl<S,F> Service<Request> for Branch<S,F>
 where
-    S: Service<Request, Response = Response, Error = Infallible>,
-    F: Service<Request, Response = Response, Error = Infallible>,
+    S: HttpService,
+    F: HttpService,
 {
     type Response = Response;
     type Error = Infallible;
