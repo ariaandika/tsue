@@ -5,6 +5,27 @@ use std::convert::Infallible;
 
 use super::{futures::EitherInto, Either};
 
+pub trait HttpService:
+    Service<
+        Request,
+        Response = Response,
+        Error = Infallible,
+        Future = <Self as HttpService>::Future,
+    > + Send
+    + Sync
+    + 'static
+{
+    type Future: Send + Sync + 'static;
+}
+
+impl<S> HttpService for S
+where
+    S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
+    S::Future: Send + Sync + 'static,
+{
+    type Future = <Self as Service<Request>>::Future;
+}
+
 /// service that return 404 Not Found
 #[derive(Clone)]
 pub struct NotFound;

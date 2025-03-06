@@ -2,7 +2,7 @@
 //!
 //! # Example
 //!
-//! ```
+//! ```no_run
 //! use vice::router::{Router, get};
 //!
 //! fn main() -> std::io::Result<()> {
@@ -11,8 +11,6 @@
 //!     vice::listen("0.0.0.0:3000", route)
 //! }
 //! ```
-//!
-//!
 use crate::{
     http::{Request, Response},
     util::{futures::EitherInto, service::NotFound, Either},
@@ -83,7 +81,7 @@ impl<S> Router<S> {
 
 impl<S> Service<Request> for Router<S>
 where
-    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
+    S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
 {
     type Response = Response;
     type Error = Infallible;
@@ -108,7 +106,6 @@ where
     HandlerService::new(f)
 }
 
-#[derive(Clone)]
 #[allow(dead_code)]
 /// service that match request and delegate to either service
 ///
@@ -152,7 +149,7 @@ where
 /// assert_eq!(RequestMatcher::from(("/",Method::GET)),Request::new(()));
 /// assert_ne!(RequestMatcher::from(("/",Method::POST)),Request::new(()));
 /// ```
-#[derive(Clone,Default,Debug)]
+#[derive(Default,Debug)]
 pub struct RequestMatcher {
     path: Option<&'static str>,
     method: Option<http::Method>,

@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 pub fn listen<S>(addr: impl ToSocketAddrs + Display + Clone, service: S) -> io::Result<()>
 where
     S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
-    S::Future: Future<Output = Result<Response,Infallible>> + Send + 'static,
+    S::Future: Send + 'static,
 {
     let tcp = std::net::TcpListener::bind(addr.clone()).map_err(|e|tcp_error(addr, e))?;
     tcp.set_nonblocking(true)?;
