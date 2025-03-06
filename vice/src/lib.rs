@@ -3,24 +3,27 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use vice::router::{Router, get};
-//!
-//! fn main() -> std::io::Result<()> {
+//! use std::{io, sync::{atomic::{AtomicU8, Ordering}, Arc}};
+//! use vice::{extractor::State, router::{get,Router}};
+//! 
+//! fn main() -> io::Result<()> {
 //!     Router::new()
-//!         .route("/", get(index).post(post))
+//!         .route("/", get(index).post(up))
+//!         .state(Arc::new(AtomicU8::new(0)))
 //!         .listen("0.0.0.0:3000")
 //! }
 //!
 //! async fn index() -> &'static str {
-//!     "Vice Dev"
+//!     "Vice Dev!"
 //! }
 //!
-//! async fn post(body: String) -> String {
-//!     body.to_lowercase()
+//! async fn up(State(counter): State<Arc<AtomicU8>>, body: String) -> String {
+//!     format!("{}: {}",counter.fetch_add(1, Ordering::Relaxed),body.to_uppercase())
 //! }
 //! ```
 pub mod http;
 pub mod router;
+pub mod extractor;
 pub mod util;
 pub mod runtime;
 

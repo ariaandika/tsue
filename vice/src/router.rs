@@ -55,6 +55,10 @@ impl<S> Router<S> {
             fallback: self.inner,
         } }
     }
+
+    pub fn state<T>(self, state: T) -> Router<State<T, S>> {
+        Router { inner: State { state, inner: self.inner } }
+    }
 }
 
 impl<S> Router<S>
@@ -196,4 +200,26 @@ matcher_from!(_,() => ::default());
 matcher_from!(value,Method => { method: Some(value), ..Default::default() });
 matcher_from!(value,&'static str => { path: Some(value), ..Default::default() });
 matcher_from!((p,m),(&'static str,Method) => { path: Some(p), method: Some(m) });
+
+// ---
+
+pub struct State<T,S> {
+    state: T,
+    inner: S,
+}
+
+impl<T, S> Service<Request> for State<T, S>
+where
+    T: Clone + Send + Sync + 'static,
+    S: HttpService,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn call(&self, mut req: Request) -> Self::Future {
+        req.extensions_mut().insert(self.state.clone());
+        self.inner.call(req)
+    }
+}
 
