@@ -1,20 +1,4 @@
 //! request routing
-//!
-//! # Example
-//!
-//! ```no_run
-//! use vice::router::{Router, get};
-//!
-//! fn main() -> std::io::Result<()> {
-//!     let route = Router::new()
-//!         .route("/", get(index));
-//!     vice::listen("0.0.0.0:3000", route)
-//! }
-//!
-//! async fn index() -> &'static str {
-//!     "Vice Dev"
-//! }
-//! ```
 use crate::{
     http::{Request, Response},
     util::{
@@ -34,11 +18,6 @@ pub mod handler;
 /// route builder
 ///
 /// see [module level documentation](self) for more on routing
-///
-/// # Service
-///
-/// this implements [`Service`] that can be used in [`listen`](crate::listen)
-///
 pub struct Router<S> {
     inner: S,
 }
@@ -70,7 +49,24 @@ impl<S> Router<S> {
 
     /// assign new route
     pub fn route<R>(self, matcher: impl Into<Matcher>, route: R) -> Router<Branch<R, S>> {
-        self.layer(BranchLayer { matcher: matcher.into(), inner: route })
+        Router { inner: Branch {
+            matcher: matcher.into(),
+            inner: route,
+            fallback: self.inner,
+        } }
+    }
+}
+
+impl<S> Router<S>
+where
+    S: HttpService
+{
+    /// alternative way to start server
+    pub fn listen(
+        self,
+        addr: impl std::net::ToSocketAddrs + std::fmt::Display + Clone,
+    ) -> Result<(), std::io::Error> {
+        crate::listen(addr, self)
     }
 }
 
@@ -161,23 +157,10 @@ where
     }
 }
 
-pub struct BranchLayer<S> {
-    matcher: Matcher,
-    inner: S,
-}
-
-impl<S,F> Layer<F> for BranchLayer<S> {
-    type Service = Branch<S,F>;
-
-    fn layer(self, fallback: F) -> Self::Service {
-        Branch { matcher: self.matcher, inner: self.inner, fallback }
-    }
-}
-
 // ---
 
 /// partially match request
-#[derive(Clone)]
+#[derive(Clone,Default)]
 pub struct Matcher {
     path: Option<&'static str>,
     method: Option<Method>,
@@ -213,10 +196,4 @@ matcher_from!(_,() => ::default());
 matcher_from!(value,Method => { method: Some(value), ..Default::default() });
 matcher_from!(value,&'static str => { path: Some(value), ..Default::default() });
 matcher_from!((p,m),(&'static str,Method) => { path: Some(p), method: Some(m) });
-
-impl Default for Matcher {
-    fn default() -> Self {
-        Self { path: None, method: None }
-    }
-}
 
