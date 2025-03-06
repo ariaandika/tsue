@@ -46,7 +46,7 @@ where
 pub fn listen_v2<F,S>(addr: impl ToSocketAddrs + Display + Clone, service_factory: F) -> io::Result<()>
 where
     F: Fn() -> S,
-    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = Infallible> + Send + 'static,
     S::Future: Future<Output = Result<Response,Infallible>> + Send + 'static,
 {
     let tcp = std::net::TcpListener::bind(addr.clone()).map_err(|e|tcp_error(addr, e))?;

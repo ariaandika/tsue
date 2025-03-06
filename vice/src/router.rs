@@ -19,7 +19,7 @@ use crate::{
 };
 use handler::{Handler, HandlerService};
 use hyper::service::Service;
-use std::{convert::Infallible, sync::Arc};
+use std::convert::Infallible;
 
 pub mod handler;
 
@@ -43,33 +43,31 @@ pub mod handler;
 ///     vice::listen("0.0.0.0:3000", route)
 /// }
 /// ```
-#[derive(Clone)]
 pub struct Router<S> {
-    inner: Arc<S>
+    inner: S,
 }
 
 impl Router<NotFound> {
     /// create new `Router`
     pub fn new() -> Router<NotFound> {
-        Router { inner: Arc::new(NotFound) }
+        Router { inner: NotFound }
     }
 }
 
 impl<S> Router<S> {
     /// create new `Router` with custom fallback
     pub fn new_with_fallback(fallback: S) -> Router<S> {
-        Router { inner: Arc::new(fallback) }
+        Router { inner: fallback }
     }
 
     /// assign new route
     pub fn route<R>(self, matches: impl Into<RequestMatcher>, route: R) -> Router<Branch<R, S>> {
         Router {
-            inner: Arc::new(Branch {
+            inner: Branch {
                 matcher: matches.into(),
                 inner: route,
-                fallback: Arc::into_inner(self.inner)
-                    .expect("`Router` should not be cloned in builder"),
-            }),
+                fallback: self.inner,
+            },
         }
     }
 
