@@ -57,10 +57,10 @@ impl<S> Router<S> {
     }
 
     /// assign new route
-    pub fn route<R>(self, path: &'static str, route: R) -> Router<Branch<R, S>> {
+    pub fn route<R>(self, matcher: impl Into<Matcher>, route: R) -> Router<Branch<R, S>> {
         Router {
             inner: Branch {
-                path,
+                matcher: matcher.into(),
                 inner: route,
                 fallback: self.inner,
             },
@@ -149,7 +149,7 @@ where
 ///
 /// [`route`]: Router::route
 pub struct Branch<S,F> {
-    path: &'static str,
+    matcher: Matcher,
     inner: S,
     fallback: F,
 }
@@ -164,10 +164,47 @@ where
     type Future = EitherInto<S::Future,F::Future,Result<Response,Infallible>>;
 
     fn call(&self, req: Request) -> Self::Future {
-        match self.path == req.uri().path() {
+        match self.matcher == req {
             true => self.inner.call(req).left_into(),
             false => self.fallback.call(req).right_into(),
         }
     }
 }
+
+/// partially match request
+#[derive(Clone,Default)]
+pub struct Matcher {
+    path: Option<&'static str>,
+    method: Option<Method>,
+}
+
+impl PartialEq<Request> for Matcher {
+    fn eq(&self, other: &Request) -> bool {
+        if let Some(path) = self.path {
+            if path != other.uri().path() {
+                return false;
+            }
+        }
+        if let Some(method) = &self.method {
+            if method != other.method() {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+macro_rules! matcher_from {
+    ($id:pat,$ty:ty => $($tt:tt)*) => {
+        impl From<$ty> for Matcher {
+            fn from($id: $ty) -> Self {
+                Self $($tt)*
+            }
+        }
+    };
+}
+
+matcher_from!(value,Method => { method: Some(value), ..Default::default() });
+matcher_from!(value,&'static str => { path: Some(value), ..Default::default() });
+matcher_from!((p,m),(&'static str,Method) => { path: Some(p), method: Some(m) });
 
