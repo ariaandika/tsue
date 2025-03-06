@@ -1,21 +1,20 @@
-use std::io;
-use vice::{
-    http::{self},
-    router::{get, Router},
-};
+use std::{io, sync::{atomic::{AtomicU8, Ordering}, Arc}};
+use vice::{extractor::State, router::{get,Router}};
 
 fn main() -> io::Result<()> {
-    vice::runtime::listen_v2("0.0.0.0:3000", ||Router::new()
-        .route("/", get(index))
-        .route("/foo", get(foo)))
+    dotenvy::dotenv().ok();
+    env_logger::init();
+    Router::new()
+        .route("/", get(index).post(up))
+        .state(Arc::new(AtomicU8::new(0)))
+        .listen("0.0.0.0:3000")
 }
 
-async fn index(_: http::Method, _: http::Method, _: http::Method, body: String) -> String {
-    body
+async fn index() -> &'static str {
+    "Vice Dev!"
 }
 
-async fn foo(_: http::Method, body: String) -> String {
-    println!("foo");
-    body
+async fn up(State(counter): State<Arc<AtomicU8>>, body: String) -> String {
+    format!("{}: {}",counter.fetch_add(1, Ordering::Relaxed),body.to_uppercase())
 }
 
