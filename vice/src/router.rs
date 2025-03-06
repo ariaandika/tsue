@@ -20,7 +20,7 @@ use crate::{
     util::{
         futures::EitherInto,
         service::{MethodNotAllowed, NotFound},
-        FutureExt,
+        FutureExt, Layer,
     },
     HttpService,
 };
@@ -56,15 +56,21 @@ impl<S> Router<S> {
         Router { inner: fallback }
     }
 
+    /// layer current router service
+    ///
+    /// this is low level way to interact with `Router`
+    ///
+    /// see [`Layer`] for more information
+    pub fn layer<L>(self, layer: L) -> Router<L::Service>
+    where
+        L: Layer<S>,
+    {
+        Router { inner: layer.layer(self.inner), }
+    }
+
     /// assign new route
     pub fn route<R>(self, matcher: impl Into<Matcher>, route: R) -> Router<Branch<R, S>> {
-        Router {
-            inner: Branch {
-                matcher: matcher.into(),
-                inner: route,
-                fallback: self.inner,
-            },
-        }
+        self.layer(BranchLayer { matcher: matcher.into(), inner: route })
     }
 }
 
@@ -86,6 +92,8 @@ impl Default for Router<NotFound> {
         Self::new()
     }
 }
+
+// ---
 
 /// service that match request and delegate to either service
 ///
@@ -150,6 +158,19 @@ where
             true => self.inner.call(req).left_into(),
             false => self.fallback.call(req).right_into(),
         }
+    }
+}
+
+pub struct BranchLayer<S> {
+    matcher: Matcher,
+    inner: S,
+}
+
+impl<S,F> Layer<F> for BranchLayer<S> {
+    type Service = Branch<S,F>;
+
+    fn layer(self, fallback: F) -> Self::Service {
+        Branch { matcher: self.matcher, inner: self.inner, fallback }
     }
 }
 
