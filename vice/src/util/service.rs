@@ -5,20 +5,6 @@ use std::convert::Infallible;
 
 use super::{futures::EitherInto, Either};
 
-/// service that return 404 Not Found
-#[derive(Clone)]
-pub struct NotFound;
-
-impl Service<Request> for NotFound {
-    type Response = Response;
-    type Error = Infallible;
-    type Future = std::future::Ready<Result<Response,Infallible>>;
-
-    fn call(&self, _: Request) -> Self::Future {
-        std::future::ready(Ok(http::StatusCode::NOT_FOUND.into_response()))
-    }
-}
-
 impl<Req,Res,Er,L,R> Service<Req> for Either<L,R>
 where
     L: Service<Req, Response = Res, Error = Er>,
@@ -34,5 +20,33 @@ where
             Either::Right(r) => Either::Right(r.call(req)).await_into(),
         }
     }
+}
+
+macro_rules! status_service {
+    ($(#[$inner:meta])* $name:ident $status:ident) => {
+        $(#[$inner])*
+        #[derive(Clone)]
+        pub struct $name;
+
+        impl Service<Request> for $name {
+            type Response = Response;
+            type Error = Infallible;
+            type Future = std::future::Ready<Result<Response,Infallible>>;
+
+            fn call(&self, _: Request) -> Self::Future {
+                std::future::ready(Ok(http::StatusCode::$status.into_response()))
+            }
+        }
+    };
+}
+
+status_service! {
+    /// service that return 404 Not Found
+    NotFound NOT_FOUND
+}
+
+status_service! {
+    /// service that return 405 Method Not Alowed
+    MethodNotAllowed METHOD_NOT_ALLOWED
 }
 
