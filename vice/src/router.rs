@@ -87,12 +87,14 @@ impl Default for Router<NotFound> {
     }
 }
 
-/// service that match http method and delegate to either service
+/// service that match request and delegate to either service
 ///
 /// user typically does not interact with this directly,
-/// instead use functions like [`get`] or [`post`]
-pub struct MethodRouter<S,F> {
-    method: Method,
+/// instead use [`route`] method, or [`get`] or [`post`] function
+///
+/// [`route`]: Router::route
+pub struct Branch<S,F> {
+    matcher: Matcher,
     inner: S,
     fallback: F,
 }
@@ -100,14 +102,22 @@ pub struct MethodRouter<S,F> {
 macro_rules! fn_router {
     ($name:ident $method:ident $doc:literal) => {
         #[doc = $doc]
-        pub fn $name<F,S>(f: F) -> MethodRouter<HandlerService<F,S>,MethodNotAllowed> {
-            MethodRouter { method: Method::$method, inner: HandlerService::new(f), fallback: MethodNotAllowed }
+        pub fn $name<F,S>(f: F) -> Branch<HandlerService<F,S>,MethodNotAllowed> {
+            Branch {
+                matcher: Method::$method.into(),
+                inner: HandlerService::new(f),
+                fallback: MethodNotAllowed,
+            }
         }
     };
     (self $name:ident $method:ident $doc:literal) => {
         #[doc = $doc]
-        pub fn $name<S2,F2>(self, f: F2) -> MethodRouter<HandlerService<F2, S2>, MethodRouter<S, F>> {
-            MethodRouter { method: Method::$method, inner: HandlerService::new(f), fallback: self, }
+        pub fn $name<S2,F2>(self, f: F2) -> Branch<HandlerService<F2, S2>, Branch<S, F>> {
+            Branch {
+                matcher: Method::$method.into(),
+                inner: HandlerService::new(f),
+                fallback: self,
+            }
         }
     };
 }
@@ -118,40 +128,12 @@ fn_router!(put PUT "setup PUT service");
 fn_router!(patch PATCH "setup PATCH service");
 fn_router!(delete DELETE "setup DELETE service");
 
-impl<S, F> MethodRouter<S, F> {
+impl<S, F> Branch<S, F> {
     fn_router!(self get GET "add GET service");
     fn_router!(self post POST "add POST service");
     fn_router!(self put PUT "add PUT service");
     fn_router!(self patch PATCH "add PATCH service");
     fn_router!(self delete DELETE "add DELETE service");
-}
-
-impl<S,F> Service<Request> for MethodRouter<S,F>
-where
-    S: HttpService,
-    F: HttpService,
-{
-    type Response = Response;
-    type Error = Infallible;
-    type Future = EitherInto<S::Future,F::Future,Result<Response,Infallible>>;
-
-    fn call(&self, req: Request) -> Self::Future {
-        match self.method == req.method() {
-            true => self.inner.call(req).left_into(),
-            false => self.fallback.call(req).right_into(),
-        }
-    }
-}
-
-/// service that match request path and delegate to either service
-///
-/// user typically does not interact with this directly, instead use [`route`] method
-///
-/// [`route`]: Router::route
-pub struct Branch<S,F> {
-    matcher: Matcher,
-    inner: S,
-    fallback: F,
 }
 
 impl<S,F> Service<Request> for Branch<S,F>
@@ -171,8 +153,10 @@ where
     }
 }
 
+// ---
+
 /// partially match request
-#[derive(Clone,Default)]
+#[derive(Clone)]
 pub struct Matcher {
     path: Option<&'static str>,
     method: Option<Method>,
@@ -204,7 +188,14 @@ macro_rules! matcher_from {
     };
 }
 
+matcher_from!(_,() => ::default());
 matcher_from!(value,Method => { method: Some(value), ..Default::default() });
 matcher_from!(value,&'static str => { path: Some(value), ..Default::default() });
 matcher_from!((p,m),(&'static str,Method) => { path: Some(p), method: Some(m) });
+
+impl Default for Matcher {
+    fn default() -> Self {
+        Self { path: None, method: None }
+    }
+}
 
