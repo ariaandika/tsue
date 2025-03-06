@@ -17,7 +17,11 @@
 //! ```
 use crate::{
     http::{Request, Response},
-    util::{futures::EitherInto, service::{MethodNotAllowed, NotFound}, Either},
+    util::{
+        futures::EitherInto,
+        service::{MethodNotAllowed, NotFound},
+        FutureExt,
+    },
     HttpService,
 };
 use handler::HandlerService;
@@ -83,21 +87,6 @@ impl Default for Router<NotFound> {
     }
 }
 
-macro_rules! fn_router {
-    ($doc:literal $name:ident $method:ident) => {
-        #[doc = $doc]
-        pub fn $name<F,S>(f: F) -> MethodRouter<HandlerService<F,S>,MethodNotAllowed> {
-            MethodRouter { method: Method::$method, inner: HandlerService::new(f), fallback: MethodNotAllowed }
-        }
-    };
-}
-
-fn_router!("setup GET service" get GET);
-fn_router!("setup POST service" post POST);
-fn_router!("setup PUT service" put PUT);
-fn_router!("setup PATCH service" patch PATCH);
-fn_router!("setup DELETE service" delete DELETE);
-
 /// service that match http method and delegate to either service
 ///
 /// user typically does not interact with this directly,
@@ -108,8 +97,14 @@ pub struct MethodRouter<S,F> {
     fallback: F,
 }
 
-macro_rules! method_router {
-    ($doc:literal $name:ident $method:ident) => {
+macro_rules! fn_router {
+    ($name:ident $method:ident $doc:literal) => {
+        #[doc = $doc]
+        pub fn $name<F,S>(f: F) -> MethodRouter<HandlerService<F,S>,MethodNotAllowed> {
+            MethodRouter { method: Method::$method, inner: HandlerService::new(f), fallback: MethodNotAllowed }
+        }
+    };
+    (self $name:ident $method:ident $doc:literal) => {
         #[doc = $doc]
         pub fn $name<S2,F2>(self, f: F2) -> MethodRouter<HandlerService<F2, S2>, MethodRouter<S, F>> {
             MethodRouter { method: Method::$method, inner: HandlerService::new(f), fallback: self, }
@@ -117,12 +112,18 @@ macro_rules! method_router {
     };
 }
 
+fn_router!(get GET "setup GET service");
+fn_router!(post POST "setup POST service");
+fn_router!(put PUT "setup PUT service");
+fn_router!(patch PATCH "setup PATCH service");
+fn_router!(delete DELETE "setup DELETE service");
+
 impl<S, F> MethodRouter<S, F> {
-    method_router!("add GET service" get GET);
-    method_router!("add POST service" post POST);
-    method_router!("add PUT service" put PUT);
-    method_router!("add PATCH service" patch PATCH);
-    method_router!("add DELETE service" delete DELETE);
+    fn_router!(self get GET "add GET service");
+    fn_router!(self post POST "add POST service");
+    fn_router!(self put PUT "add PUT service");
+    fn_router!(self patch PATCH "add PATCH service");
+    fn_router!(self delete DELETE "add DELETE service");
 }
 
 impl<S,F> Service<Request> for MethodRouter<S,F>
@@ -136,8 +137,8 @@ where
 
     fn call(&self, req: Request) -> Self::Future {
         match self.method == req.method() {
-            true => Either::Left(self.inner.call(req)).await_into(),
-            false => Either::Right(self.fallback.call(req)).await_into(),
+            true => self.inner.call(req).left_into(),
+            false => self.fallback.call(req).right_into(),
         }
     }
 }
@@ -164,8 +165,8 @@ where
 
     fn call(&self, req: Request) -> Self::Future {
         match self.path == req.uri().path() {
-            true => Either::Left(self.inner.call(req)).await_into(),
-            false => Either::Right(self.fallback.call(req)).await_into(),
+            true => self.inner.call(req).left_into(),
+            false => self.fallback.call(req).right_into(),
         }
     }
 }

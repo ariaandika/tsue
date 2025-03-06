@@ -3,7 +3,7 @@ use crate::http::{into_response::IntoResponse, Request, Response};
 use hyper::service::Service;
 use std::convert::Infallible;
 
-use super::{futures::EitherInto, Either};
+use super::{futures::EitherInto, Either, FutureExt};
 
 impl<Req,Res,Er,L,R> Service<Req> for Either<L,R>
 where
@@ -16,16 +16,16 @@ where
 
     fn call(&self, req: Req) -> Self::Future {
         match self {
-            Either::Left(l) => Either::Left(l.call(req)).await_into(),
-            Either::Right(r) => Either::Right(r.call(req)).await_into(),
+            Either::Left(l) => l.call(req).left_into(),
+            Either::Right(r) => r.call(req).right_into(),
         }
     }
 }
 
 macro_rules! status_service {
-    ($(#[$inner:meta])* $name:ident $status:ident) => {
-        $(#[$inner])*
+    ($doc:literal $name:ident $status:ident) => {
         #[derive(Clone)]
+        #[doc = $doc]
         pub struct $name;
 
         impl Service<Request> for $name {
@@ -40,13 +40,6 @@ macro_rules! status_service {
     };
 }
 
-status_service! {
-    /// service that return 404 Not Found
-    NotFound NOT_FOUND
-}
-
-status_service! {
-    /// service that return 405 Method Not Alowed
-    MethodNotAllowed METHOD_NOT_ALLOWED
-}
+status_service!("service 404 Not Found" NotFound NOT_FOUND);
+status_service!("service 405 Method Not Alowed" MethodNotAllowed METHOD_NOT_ALLOWED);
 

@@ -1,11 +1,10 @@
 //! future utility types
 use std::{marker::PhantomData, task::{ready, Poll}};
-
 use super::Either;
 
 /// extension trait for `Future` trait
 pub trait FutureExt: Future {
-    /// map the future output
+    /// map future output
     fn map<M,R>(self, mapper: M) -> Map<Self,M>
     where
         M: FnOnce(Self::Output) -> R,
@@ -14,7 +13,7 @@ pub trait FutureExt: Future {
         Map { inner: self, mapper: Some(mapper)  }
     }
 
-    /// map the future output into `Result<T,Infallible>`
+    /// map future output into `Result<T,Infallible>`
     fn map_infallible(self) -> MapInfallible<Self>
     where
         Self: Sized
@@ -22,7 +21,7 @@ pub trait FutureExt: Future {
         MapInfallible { inner: self }
     }
 
-    /// map the future output into `Result<T,Infallible>`
+    /// map future output into `Result<T,Infallible>`
     fn and_then_or<M,L,R>(self, mapper: M) -> AndThenOr<Self,M,L>
     where
         M: FnOnce(Self::Output) -> Result<L,R>,
@@ -30,6 +29,48 @@ pub trait FutureExt: Future {
         Self: Sized,
     {
         AndThenOr::First { f: self, mapper: Some(mapper) }
+    }
+
+    /// convert future into `Either` as the left variant
+    fn left<R>(self) -> EitherFuture<Self,R>
+    where
+        R: Future,
+        Self: Sized,
+    {
+        EitherFuture::Left { left: self }
+    }
+
+    /// convert future into `Either` as the right variant
+    fn right<L>(self) -> EitherFuture<L,Self>
+    where
+        L: Future,
+        Self: Sized,
+    {
+        EitherFuture::Right { right: self }
+    }
+
+    /// convert future into `Either` as the left variant
+    /// where the output implement the same `Into`
+    fn left_into<R,O>(self) -> EitherInto<Self,R,O>
+    where
+        Self::Output: Into<O>,
+        R: Future,
+        R::Output: Into<O>,
+        Self: Sized,
+    {
+        EitherInto::Left { left: self, _p: PhantomData }
+    }
+
+    /// convert future into `Either` as the right variant
+    /// where the output implement the same `Into`
+    fn right_into<L,O>(self) -> EitherInto<L,Self,O>
+    where
+        Self::Output: Into<O>,
+        L: Future,
+        L::Output: Into<O>,
+        Self: Sized,
+    {
+        EitherInto::Right { right: self }
     }
 }
 
@@ -115,7 +156,10 @@ where
     }
 }
 
+// ---
+
 pin_project_lite::pin_project! {
+    /// poll either two futures resulting in either output
     #[project = EitherProj]
     pub enum EitherFuture<L,R> {
         Left { #[pin] left: L },
@@ -139,6 +183,7 @@ where
 }
 
 pin_project_lite::pin_project! {
+    /// two futures where the output implement the same `Into`
     #[project = EitherIntoProj]
     pub enum EitherInto<L,R,O> {
         Left { #[pin] left: L, _p: PhantomData<O> },
