@@ -175,12 +175,7 @@ where
 
     fn handle(&self, req: Request) -> Self::Future {
         let (parts,body) = req.into_parts();
-        fn mapper<A1,A2,A3,A4,A,F,Fut>(((((a1,a2),a3),a4),a): ((((A1,A2),A3),A4),A), inner: F) -> Fut
-        where
-            F: FnOnce(A1,A2,A3,A4,A) -> Fut,
-        {
-            inner(a1,a2,a3,a4,a)
-        }
+        let mapper = |((((a1,a2),a3),a4),a),inner: Self|inner(a1,a2,a3,a4,a);
         Fd::new(Fr::new(Frp::new(Frp::new(Frp::new(FrpCall::new(parts)))), body), self.clone(), mapper)
     }
 }
@@ -201,12 +196,7 @@ where
 
     fn handle(&self, req: Request) -> Self::Future {
         let (parts,body) = req.into_parts();
-        fn mapper<A1,A2,A3,A4,A5,A,F,Fut>((((((a1,a2),a3),a4),a5),a): (((((A1,A2),A3),A4),A5),A), inner: F) -> Fut
-        where
-            F: FnOnce(A1,A2,A3,A4,A5,A) -> Fut,
-        {
-            inner(a1,a2,a3,a4,a5,a)
-        }
+        let mapper = |(((((a1,a2),a3),a4),a5),a),inner: Self|inner(a1,a2,a3,a4,a5,a);
         Fd::new(Fr::new(Frp::new(Frp::new(Frp::new(Frp::new(FrpCall::new(parts))))), body), self.clone(), mapper)
     }
 }
