@@ -17,7 +17,7 @@
 //! ```
 use crate::{
     http::{Request, Response},
-    util::{futures::EitherInto, service::NotFound, Either},
+    util::{futures::EitherInto, service::{MethodNotAllowed, NotFound}, Either},
     HttpService,
 };
 use handler::HandlerService;
@@ -83,15 +83,20 @@ impl Default for Router<NotFound> {
     }
 }
 
-/// setup a service for `GET` method
-pub fn get<F,S>(f: F) -> MethodRouter<HandlerService<F,S>,NotFound> {
-    MethodRouter { method: Method::GET, inner: HandlerService::new(f), fallback: NotFound }
+macro_rules! fn_router {
+    ($doc:literal $name:ident $method:ident) => {
+        #[doc = $doc]
+        pub fn $name<F,S>(f: F) -> MethodRouter<HandlerService<F,S>,MethodNotAllowed> {
+            MethodRouter { method: Method::$method, inner: HandlerService::new(f), fallback: MethodNotAllowed }
+        }
+    };
 }
 
-/// setup a service for `POST` method
-pub fn post<F,S>(f: F) -> MethodRouter<HandlerService<F,S>,NotFound> {
-    MethodRouter { method: Method::POST, inner: HandlerService::new(f), fallback: NotFound }
-}
+fn_router!("setup GET service" get GET);
+fn_router!("setup POST service" post POST);
+fn_router!("setup PUT service" put PUT);
+fn_router!("setup PATCH service" patch PATCH);
+fn_router!("setup DELETE service" delete DELETE);
 
 /// service that match http method and delegate to either service
 ///
@@ -101,6 +106,23 @@ pub struct MethodRouter<S,F> {
     method: Method,
     inner: S,
     fallback: F,
+}
+
+macro_rules! method_router {
+    ($doc:literal $name:ident $method:ident) => {
+        #[doc = $doc]
+        pub fn $name<S2,F2>(self, f: F2) -> MethodRouter<HandlerService<F2, S2>, MethodRouter<S, F>> {
+            MethodRouter { method: Method::$method, inner: HandlerService::new(f), fallback: self, }
+        }
+    };
+}
+
+impl<S, F> MethodRouter<S, F> {
+    method_router!("add GET service" get GET);
+    method_router!("add POST service" post POST);
+    method_router!("add PUT service" put PUT);
+    method_router!("add PATCH service" patch PATCH);
+    method_router!("add DELETE service" delete DELETE);
 }
 
 impl<S,F> Service<Request> for MethodRouter<S,F>
