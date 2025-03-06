@@ -501,7 +501,6 @@ dependencies = [
  "hyper-util",
  "log",
  "pin-project-lite",
- "thiserror",
  "tokio",
 ]
 

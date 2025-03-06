@@ -173,12 +173,29 @@ mod string_future {
     }
 
     /// error returned from [`String`] implementation of [`FromRequest`]
-    #[derive(thiserror::Error, Debug)]
     pub enum StringFutureError {
-        #[error(transparent)]
         Hyper(hyper::Error),
-        #[error(transparent)]
         Utf8(FromUtf8Error),
+    }
+
+    impl std::fmt::Display for StringFutureError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            use std::fmt::Display;
+            match self {
+                Self::Hyper(hyper) => Display::fmt(hyper, f),
+                Self::Utf8(utf8) => Display::fmt(utf8, f),
+            }
+        }
+    }
+
+    impl std::fmt::Debug for StringFutureError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            use std::fmt::Debug;
+            match self {
+                Self::Hyper(hyper) => Debug::fmt(hyper, f),
+                Self::Utf8(utf8) => Debug::fmt(utf8, f),
+            }
+        }
     }
 }
 
