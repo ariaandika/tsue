@@ -1,19 +1,33 @@
 use bytes::Bytes;
 use std::{ops::Deref, str::Utf8Error};
 
-/// str based on [`Bytes`]
+/// A cheaply cloneable and sliceable string
+///
+/// internally it uses [`Bytes`], so we get all the benefit of
+/// `Bytes` while having utf8 checked
 #[derive(Clone, Default)]
 pub struct ByteStr(Bytes);
 
 impl ByteStr {
+    /// Creates a new empty [`ByteStr`]
+    ///
+    /// This will not allocate
     pub const fn new() -> Self {
         Self(Bytes::new())
     }
 
-    pub const fn from_static(s: &'static [u8]) -> ByteStr {
-        Self(Bytes::from_static(s))
+    /// Creates a new [`ByteStr`] from a static str
+    ///
+    /// The returned [`ByteStr`] will point directly to the static str.
+    /// There is no allocating or copying
+    pub const fn from_static(s: &'static str) -> ByteStr {
+        Self(Bytes::from_static(s.as_bytes()))
     }
 
+    /// Creates a new [`ByteStr`] from a [`Bytes`]
+    ///
+    /// Input is checked to ensure that the bytes are valid
+    /// UTF-8
     pub fn from_bytes(bytes: Bytes) -> Result<ByteStr, Utf8Error> {
         std::str::from_utf8(bytes.as_ref())?;
         Ok(Self(bytes))

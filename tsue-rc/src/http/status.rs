@@ -1,7 +1,31 @@
 //! the [`StatusCode`] struct
-use std::{fmt::{Debug, Display, Formatter}, num::NonZeroU16};
+use std::{
+    fmt::{Debug, Display, Formatter},
+    num::NonZeroU16,
+};
 
+#[derive(Clone, Copy)]
 pub struct StatusCode(NonZeroU16);
+
+impl Display for StatusCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.status_str())?;
+        f.write_str(" ")?;
+        f.write_str(&self.message())
+    }
+}
+
+impl Debug for StatusCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("StatusCode").field(&self.0.get()).finish()
+    }
+}
+
+impl Default for StatusCode {
+    fn default() -> Self {
+        Self::OK
+    }
+}
 
 macro_rules! status_code_v2 {
     (@msgs $($int:literal $msg:literal,)*) => {
@@ -72,31 +96,10 @@ macro_rules! status_code_v2 {
             $int $($tt)*
         }
     };
-
 }
-
 
 status_code_v2! {
     200 OK "OK",
     400 BAD_REQUEST "Bad Request",
 }
 
-impl Display for StatusCode {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.status_str())?;
-        f.write_str(" ")?;
-        f.write_str(&self.message())
-    }
-}
-
-impl Debug for StatusCode {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("StatusCode").field(&self.0.get()).finish()
-    }
-}
-
-impl Default for StatusCode {
-    fn default() -> Self {
-        Self::OK
-    }
-}

@@ -1,9 +1,10 @@
-use super::{request::ParseError, IntoResponse, Request};
+use super::HttpService;
 use crate::{
     body::Body,
-    http::request,
+    request::{self, ParseError, Request},
+    response::{self, IntoResponse},
     service::Service,
-    stream::{self, StreamFuture, StreamHandle},
+    task::{StreamFuture, StreamHandle},
 };
 use bytes::BytesMut;
 use log::{debug, error, trace};
@@ -17,35 +18,33 @@ use std::{
 use tokio::net::TcpStream;
 
 #[derive(Clone)]
-pub struct HttpService<S> {
+pub struct TcpService<S> {
     inner: S,
 }
 
-impl<S> HttpService<S> {
-    pub fn new(inner: S) -> HttpService<S> {
-        HttpService { inner }
+impl<S> TcpService<S> {
+    pub fn new(inner: S) -> TcpService<S> {
+        TcpService { inner }
     }
 }
 
-impl<S> Service<TcpStream> for HttpService<S>
+impl<S> Service<TcpStream> for TcpService<S>
 where
-    S: Service<Request> + Clone,
-    S::Response: IntoResponse,
-    S::Error: IntoResponse,
+    S: HttpService + Clone
 {
     type Response = ();
     // error will only be ignored in top level service
     type Error = ();
-    type Future = HttpFuture<S,S::Future>;
+    type Future = TcpFuture<S,S::Future>;
 
     fn call(&self, stream: TcpStream) -> Self::Future {
         trace!("connection open");
-        HttpFuture {
+        TcpFuture {
             inner: self.inner.clone(),
             buffer: BytesMut::with_capacity(1024),
             res_buffer: BytesMut::with_capacity(1024),
-            stream: stream::new_task(stream),
-            state: HttpState::Init,
+            stream: crate::task::spawn(stream),
+            state: TcpState::Init,
         }
     }
 }
@@ -73,13 +72,13 @@ macro_rules! ready {
 
 pin_project_lite::pin_project! {
     #[derive(Default)]
-    #[project = HttpStateProject]
-    enum HttpState<Fut> {
+    #[project = TcpStateProject]
+    enum TcpState<Fut> {
         Init,
-        Read { #[pin] rx: StreamFuture<io::Result<(usize,BytesMut)>> },
+        Read { #[pin] rx: StreamFuture<(usize,BytesMut)> },
         Parse,
         Inner { #[pin] future: Fut },
-        Write { #[pin] rx: StreamFuture<io::Result<()>> },
+        Write { #[pin] rx: StreamFuture<()> },
         Cleanup,
         #[default]
         Invalid,
@@ -87,18 +86,18 @@ pin_project_lite::pin_project! {
 }
 
 pin_project_lite::pin_project! {
-    #[project = HttpProject]
-    pub struct HttpFuture<S,F> {
+    #[project = TcpProject]
+    pub struct TcpFuture<S,F> {
         inner: S,
         buffer: BytesMut,
         res_buffer: BytesMut,
         stream: StreamHandle,
         #[pin]
-        state: HttpState<F>,
+        state: TcpState<F>,
     }
 }
 
-impl<S> Future for HttpFuture<S,S::Future>
+impl<S> Future for TcpFuture<S,S::Future>
 where
     S: Service<Request>,
     S::Response: IntoResponse,
@@ -108,9 +107,9 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         use Poll::*;
-        use HttpStateProject::*;
+        use TcpStateProject::*;
 
-        let HttpProject {
+        let TcpProject {
             inner,
             buffer,
             mut res_buffer,
@@ -122,7 +121,7 @@ where
             match state.as_mut().project() {
                 Init => {
                     let rx = stream.read(mem::take(buffer));
-                    state.set(HttpState::Read { rx });
+                    state.set(TcpState::Read { rx });
                 }
                 Read { rx } => {
                     let (read,rx) = ready!(rx.poll(cx));
@@ -131,14 +130,14 @@ where
                         trace!("connection closed");
                         return Ready(Ok(()));
                     }
-                    state.set(HttpState::Parse);
+                    state.set(TcpState::Parse);
                 }
                 Parse => {
                     let parts = match unwrap!(request::parse(buffer)) {
                         Some(ok) => ok,
                         None => {
                             debug!("buffer should be unique to reclaim: {:?}",buffer.try_reclaim(1024));
-                            state.set(HttpState::Init);
+                            state.set(TcpState::Init);
                             continue;
                         },
                     };
@@ -157,7 +156,7 @@ where
 
                     let request = Request::from_parts(parts,body);
                     let future = inner.call(request);
-                    state.set(HttpState::Inner { future });
+                    state.set(TcpState::Inner { future });
                 }
                 Inner { future } => {
                     let mut response = match future.poll(cx) {
@@ -165,16 +164,16 @@ where
                         Pending => return Pending,
                     };
 
-                    response.check();
+                    response::check(&mut response);
                     let (parts,body) = response.into_parts();
-                    parts.write(&mut res_buffer);
+                    response::write(&parts, &mut res_buffer);
                     let rx = stream.write(res_buffer.split().freeze(), body);
-                    state.set(HttpState::Write { rx });
+                    state.set(TcpState::Write { rx });
                 }
                 Write { rx } => {
                     // wait write complete
                     ready!(rx.poll(cx));
-                    state.set(HttpState::Cleanup);
+                    state.set(TcpState::Cleanup);
                 }
                 Cleanup => {
                     // this state will make sure all shared buffer is dropped
@@ -189,7 +188,7 @@ where
                         debug!("failed to reclaim res_buffer");
                     }
 
-                    state.set(HttpState::Init);
+                    state.set(TcpState::Init);
                 }
                 Invalid => panic!("poll after complete"),
             }
@@ -198,7 +197,7 @@ where
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum HttpError {
+pub enum TcpError {
     #[error("io error: {0}")]
     Io(#[from] io::Error),
     #[error("parse error: {0}")]

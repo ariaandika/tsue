@@ -1,25 +1,14 @@
 //! http protocol
-use crate::bytestring::ByteStr;
+use crate::bytestr::ByteStr;
 use bytes::Bytes;
 
-pub mod status;
-pub mod request;
-pub mod response;
-pub mod from_request;
-pub mod into_response;
-pub mod service;
-pub mod noop;
-pub mod debug;
+mod status;
 
 pub use status::StatusCode;
-pub use request::Request;
-pub use response::Response;
-pub use from_request::{FromRequest, FromRequestParts};
-pub use into_response::{IntoResponse, IntoResponseParts};
 
-pub const MAX_HEADER: usize = 32;
+pub const HEADER_SIZE: usize = 32;
 
-#[derive(Default, Debug)]
+#[derive(Clone, Copy, Default, Debug)]
 pub enum Method {
     #[default]
     GET,
@@ -31,7 +20,7 @@ pub enum Method {
     CONNECT,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub enum Version {
     Http10,
     #[default]
@@ -64,13 +53,33 @@ impl Header {
     }
 }
 
-impl std::fmt::Debug for Version {
+impl std::fmt::Display for Method {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Method::GET => f.write_str("GET"),
+            Method::POST => f.write_str("POST"),
+            Method::PUT => f.write_str("PUT"),
+            Method::PATCH => f.write_str("PATCH"),
+            Method::DELETE => f.write_str("DELETE"),
+            Method::HEAD => f.write_str("HEAD"),
+            Method::CONNECT => f.write_str("CONNECT"),
+        }
+    }
+}
+
+impl std::fmt::Display for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Version::Http10 => f.write_str("HTTP/1.0"),
             Version::Http11 => f.write_str("HTTP/1.1"),
             Version::Http2 =>  f.write_str("HTTP/2"),
         }
+    }
+}
+
+impl std::fmt::Debug for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
     }
 }
 

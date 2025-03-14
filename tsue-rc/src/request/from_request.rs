@@ -1,32 +1,35 @@
-//! the [`FromRequest`] and [`FromRequestParts`] trait
-use super::{request, Request};
+use super::{FromRequest, FromRequestParts, Parts, Request};
+use crate::http::Method;
+use bytes::BytesMut;
 use std::{
     convert::Infallible,
     future::{ready, Ready},
+    io,
+    pin::Pin,
 };
 
-/// a type that can be constructed from request
-///
-/// this trait is used as request handler parameters
-pub trait FromRequest: Sized {
-    type Error;
-    type Future: Future<Output = Result<Self, Self::Error>>;
-    fn from_request(req: Request) -> Self::Future;
+// NOTE:
+// using Pin<Box> in association type is worth it instead of impl Future,
+// because it can be referenced externally
+
+macro_rules! from_parts {
+    ($self:ty, $($id:ident = $t:ty;)* ($parts:pat) => $body: expr) => {
+        impl FromRequestParts for $self {
+            $(type $id = $t;)*
+
+            fn from_request_parts($parts: &mut Parts) -> Self::Future {
+                $body
+            }
+        }
+    };
 }
 
-/// a type that can be constructed from request parts
-///
-/// this trait is used as request handler parameters
-pub trait FromRequestParts: Sized {
-    type Error;
-    type Future: Future<Output = Result<Self, Self::Error>>;
-    fn from_request_parts(parts: &mut request::Parts) -> Self::Future;
+from_parts! {
+    Method,
+    Error = Infallible;
+    Future = Ready<Result<Self,Infallible>>;
+    (parts) => ready(Ok(parts.method))
 }
-
-
-//
-// NOTE: impls
-//
 
 macro_rules! from_request {
     ($self:ty, $($id:ident = $t:ty;)* ($req:pat) => $body: expr) => {
@@ -40,10 +43,7 @@ macro_rules! from_request {
     };
 }
 
-// NOTE:
-// using Pin<Box> in association type is worth it instead of impl Future,
-// because it can be referenced externally
-
+/// anything that implement `FromRequestParts` also implement `FromRequest`
 impl<F> FromRequest for F
 where
     F: FromRequestParts
@@ -56,13 +56,11 @@ where
     }
 }
 
-impl FromRequestParts for () {
-    type Error = Infallible;
-    type Future = Ready<Result<Self, Infallible>>;
-
-    fn from_request_parts(_: &mut request::Parts) -> Self::Future {
-        ready(Ok(()))
-    }
+from_request! {
+    (),
+    Error = Infallible;
+    Future = Ready<Result<Self,Infallible>>;
+    (_) => ready(Ok(()))
 }
 
 from_request! {
@@ -72,14 +70,14 @@ from_request! {
     (req) => ready(Ok(req))
 }
 
-/*
-
 from_request! {
     BytesMut,
     Error = io::Error;
     Future = Pin<Box<dyn Future<Output = io::Result<Self>>>>;
     (req) => Box::pin(req.into_body().bytes_mut())
 }
+
+/*
 
 from_request! {
     Bytes,
@@ -106,3 +104,4 @@ from_request! {
 }
 
 */
+

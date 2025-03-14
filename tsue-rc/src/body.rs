@@ -1,42 +1,38 @@
 //! request and response body struct
 use bytes::{Bytes, BytesMut};
 use std::io;
+use crate::task::{StreamFuture, StreamHandle};
 
-use crate::stream::{StreamFuture, StreamHandle};
-
+/// http request body
+//
+// this is public api, which user interact to
 #[derive(Default)]
 pub struct Body {
-    kind: BodyKind
+    chan: Option<BodyChan>
 }
 
-#[derive(Default)]
-/// request body
-enum BodyKind {
-    #[default]
-    Empty,
-    Chan {
-        content_len: usize,
-        buffer: BytesMut,
-        stream: StreamHandle,
-    }
+struct BodyChan {
+    content_len: usize,
+    buffer: BytesMut,
+    stream: StreamHandle,
 }
 
 impl Body {
-    pub(crate) fn empty() -> Body {
-        Self { kind: BodyKind::Empty }
+    pub fn empty() -> Body {
+        Self { chan: None }
     }
 
-    pub(crate) fn new(content_len: usize, buffer: BytesMut, stream: StreamHandle) -> Body {
-        Self { kind: BodyKind::Chan { content_len, buffer, stream } }
+    pub fn new(content_len: usize, buffer: BytesMut, stream: StreamHandle) -> Body {
+        Self { chan: Some(BodyChan { content_len, buffer, stream }) }
     }
 
     /// return content-length if any
     ///
     /// chunked content is not yet supported
     pub fn content_len(&self) -> Option<usize> {
-        match self.kind {
-            BodyKind::Empty => None,
-            BodyKind::Chan { content_len, .. } => Some(content_len),
+        match self.chan {
+            Some(BodyChan { content_len, .. }) => Some(content_len),
+            None => None,
         }
     }
 
@@ -47,15 +43,15 @@ impl Body {
     /// if content length is missing or invalid, an io error [`io::ErrorKind::InvalidData`] is returned
     ///
     /// otherwise propagate any io error
-    pub fn bytes_mut(self) -> StreamFuture<io::Result<BytesMut>> {
-        let BodyKind::Chan { stream, buffer, content_len, } = self.kind else {
+    pub fn bytes_mut(self) -> StreamFuture<BytesMut> {
+        let Some(BodyChan { stream, buffer, content_len, }) = self.chan else {
             // maybe return error for no content length
-            return StreamFuture::exact(Ok(BytesMut::new()))
+            return StreamFuture::exact(BytesMut::new())
         };
         let read = buffer.len();
         let read_left = content_len.saturating_sub(read);
         if read_left == 0 {
-            return StreamFuture::exact(Ok(buffer))
+            return StreamFuture::exact(buffer)
         }
         stream.read_exact(read, read_left, buffer)
     }
@@ -131,10 +127,10 @@ impl From<String> for ResBody {
 
 impl std::fmt::Debug for Body {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Body").field(match &self.kind {
-            BodyKind::Empty => b"Empty",
-            BodyKind::Chan { .. } => b"Channel",
-        }).finish()
+        match self.content_len() {
+            Some(len) => f.debug_tuple("Body").field(&len).finish(),
+            None => f.debug_tuple("Body").field(&"Empty").finish(),
+        }
     }
 }
 

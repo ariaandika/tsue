@@ -1,82 +1,13 @@
-//! the [`request::Parts`] and [`Request`] type
-//!
-//! [`request::Parts`]: Parts
-use super::{request, Header, Method, Version, MAX_HEADER};
-use crate::{body::Body, bytestring::ByteStr};
+use super::Parts;
+use crate::bytestr::ByteStr;
+use crate::http::{Header, Method, Version, HEADER_SIZE};
 use bytes::{Buf, Bytes, BytesMut};
 use std::str::Utf8Error;
-
-#[derive(Default)]
-pub struct Parts {
-    method: Method,
-    path: ByteStr,
-    version: Version,
-    headers: [Header;MAX_HEADER],
-    header_len: usize,
-}
-
-impl Parts {
-    pub fn method(&self) -> &Method {
-        &self.method
-    }
-
-    pub fn headers(&self) -> &[Header] {
-        &self.headers[..self.header_len]
-    }
-
-    pub fn path(&self) -> &ByteStr {
-        &self.path
-    }
-
-    pub fn version(&self) -> &Version {
-        &self.version
-    }
-}
-
-#[derive(Default)]
-pub struct Request {
-    parts: Parts,
-    body: Body,
-}
-
-impl Request {
-    pub fn from_parts(parts: Parts, body: Body) -> Request {
-        Self { parts, body  }
-    }
-
-    pub fn into_parts(self) -> (Parts,Body) {
-        (self.parts,self.body)
-    }
-
-    pub fn into_body(self) -> Body {
-        self.body
-    }
-}
-
-/// delegate method
-impl Request {
-    pub fn method(&self) -> &Method {
-        self.parts.method()
-    }
-
-    pub fn headers(&self) -> &[Header] {
-        self.parts.headers()
-    }
-
-    pub fn path(&self) -> &ByteStr {
-        self.parts.path()
-    }
-
-    pub fn version(&self) -> &Version {
-        self.parts.version()
-    }
-}
-
 
 /// parse request
 ///
 /// return `Ok(None)` when buffer end before parse complete
-pub fn parse(buf: &mut BytesMut) -> Result<Option<request::Parts>,ParseError> {
+pub fn parse(buf: &mut BytesMut) -> Result<Option<Parts>,ParseError> {
     use ParseError::*;
 
     macro_rules! try_advance {
@@ -146,10 +77,10 @@ pub fn parse(buf: &mut BytesMut) -> Result<Option<request::Parts>,ParseError> {
     log::trace!("parsed version {version:?}");
 
     // headers
-    let mut headers = [const { Header::new_static() };MAX_HEADER];
+    let mut headers = [const { Header::new_static() };HEADER_SIZE];
     let mut header_len = 0;
     loop {
-        if header_len >= MAX_HEADER { break; }
+        if header_len >= HEADER_SIZE { break; }
 
         if matches!((buf.get(0),buf.get(1)),(Some(b'\r'),Some(&b'\n'))) {
             buf.advance(2);
@@ -171,7 +102,7 @@ pub fn parse(buf: &mut BytesMut) -> Result<Option<request::Parts>,ParseError> {
         log::trace!("parsed header {:?}",&headers[header_len-1]);
     }
 
-    Ok(Some(request::Parts {
+    Ok(Some(Parts {
         method,
         path,
         version,
@@ -189,26 +120,3 @@ pub enum ParseError {
     #[error("invalid version: {0:?}")]
     InvalidVersion(Bytes),
 }
-
-impl std::fmt::Debug for Parts {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Parts")
-            .field("method", &self.method)
-            .field("path", &self.path)
-            .field("version", &self.version)
-            .field("headers", &self.headers())
-            .finish()
-    }
-}
-
-impl std::fmt::Debug for Request {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Request")
-            .field("method", &self.parts.method)
-            .field("path", &self.parts.path)
-            .field("version", &self.parts.version)
-            .field("headers", &self.parts.headers())
-            .finish()
-    }
-}
-

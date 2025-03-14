@@ -2,10 +2,7 @@
 //!
 //! vice is a server library where it provide project architecture from the start
 //!
-//! it sacrifice customability for it, otherwise you can use [`hyper`]
-//!
-//! [`hyper`]: https://hyper.rs
-//! [`Router`]: router::Router
+//! it sacrifice customability for it
 // impl Future vs type Future vs generic Future
 // - impl Future: can be async fn, type cannot be referenced externally, no double implementation
 // - type Future: no async fn, type can be referenced externally, no double implementation
@@ -28,11 +25,14 @@
 // - cannot contains unnamed future without boxing, like async fn or private future type (unstable)
 // - future type can be referenced externally
 // - cannot have double implementation
-pub mod bytestring;
-pub mod stream;
+pub mod bytestr;
+pub mod http;
+pub mod request;
+pub mod response;
+
+pub mod task;
+pub mod body;
+
 pub mod service;
 pub mod runtime;
-
-pub mod http;
-pub mod body;
 
