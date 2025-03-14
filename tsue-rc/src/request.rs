@@ -1,5 +1,6 @@
 //! http request
 use crate::http::{Header, Method, Version, HEADER_SIZE};
+use crate::IntoResponse;
 use crate::{body::Body, bytestr::ByteStr};
 
 pub use parser::{parse, ParseError};
@@ -78,7 +79,7 @@ impl Request {
 ///
 /// this trait is used as request handler parameters
 pub trait FromRequest: Sized {
-    type Error;
+    type Error: IntoResponse;
     type Future: Future<Output = Result<Self, Self::Error>>;
     fn from_request(req: Request) -> Self::Future;
 }
@@ -87,7 +88,7 @@ pub trait FromRequest: Sized {
 ///
 /// this trait is used as request handler parameters
 pub trait FromRequestParts: Sized {
-    type Error;
+    type Error: IntoResponse;
     type Future: Future<Output = Result<Self, Self::Error>>;
     fn from_request_parts(parts: &mut Parts) -> Self::Future;
 }

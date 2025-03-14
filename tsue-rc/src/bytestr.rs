@@ -43,6 +43,12 @@ impl Deref for ByteStr {
     }
 }
 
+impl PartialEq<str> for ByteStr {
+    fn eq(&self, other: &str) -> bool {
+        self.0.as_ref() == other.as_bytes()
+    }
+}
+
 impl PartialEq<&str> for ByteStr {
     fn eq(&self, other: &&str) -> bool {
         self.0.as_ref() == other.as_bytes()

@@ -37,15 +37,10 @@ impl Body {
     }
 
     /// consume body into [`BytesMut`]
-    ///
-    /// # Errors
-    ///
-    /// if content length is missing or invalid, an io error [`io::ErrorKind::InvalidData`] is returned
-    ///
-    /// otherwise propagate any io error
     pub fn bytes_mut(self) -> StreamFuture<BytesMut> {
         let Some(BodyChan { stream, buffer, content_len, }) = self.chan else {
-            // maybe return error for no content length
+            // should if content length is missing or invalid,
+            // an io error [`io::ErrorKind::InvalidData`] is returned ?
             return StreamFuture::exact(BytesMut::new())
         };
         let read = buffer.len();

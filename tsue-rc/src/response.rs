@@ -114,3 +114,34 @@ impl std::fmt::Debug for Response {
     }
 }
 
+
+pub struct BadRequest<E>(E);
+
+mod helpers {
+    use super::*;
+
+    impl<E> BadRequest<E> {
+        pub fn new(inner: E) -> Self {
+            Self(inner)
+        }
+    }
+
+    impl<E> From<E> for BadRequest<E>
+    where
+        E: std::fmt::Display
+    {
+        fn from(value: E) -> Self {
+            Self(value)
+        }
+    }
+
+    impl<E> IntoResponse for BadRequest<E>
+    where
+        E: std::fmt::Display
+    {
+        fn into_response(self) -> crate::Response {
+            (crate::http::StatusCode::BAD_REQUEST, self.0.to_string()).into_response()
+        }
+    }
+}
+

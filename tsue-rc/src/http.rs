@@ -8,7 +8,7 @@ pub use status::StatusCode;
 
 pub const HEADER_SIZE: usize = 32;
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub enum Method {
     #[default]
     GET,

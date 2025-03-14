@@ -1,9 +1,5 @@
 //! functional route
-use crate::{
-    http::{FromRequest, FromRequestParts, IntoResponse, Request, Response, ReqBody},
-    util::futures::{FutureExt, MapInfallible},
-};
-use hyper::service::Service;
+use crate::{futures::{FutureExt, MapInfallible}, FromRequest, FromRequestParts, IntoResponse, Request, Response, Service};
 use std::{convert::Infallible, marker::PhantomData};
 
 /// functional service
@@ -175,7 +171,7 @@ where
 
 mod future {
     use std::task::{ready, Poll::{self, *}};
-    use http::request;
+    use crate::{request, Body};
     use super::*;
 
     pin_project_lite::pin_project! {
@@ -338,7 +334,7 @@ mod future {
         where
             Fr1: FromRequest,
         {
-            Frp { #[pin] f: Fut, body: Option<ReqBody>, },
+            Frp { #[pin] f: Fut, body: Option<Body>, },
             Fr { #[pin] f: Fr1::Future, frp: Option<Frp1>, },
         }
     }
@@ -348,7 +344,7 @@ mod future {
         Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
         Fr1: FromRequest,
     {
-        pub fn new(f: Fut, body: ReqBody) -> Self {
+        pub fn new(f: Fut, body: Body) -> Self {
             Self::Frp { f, body: Some(body) }
         }
     }
@@ -435,7 +431,7 @@ mod future {
 #[cfg(test)]
 mod test {
     use super::Handler;
-    use http::Method;
+    use crate::http::Method;
 
     #[test]
     fn assert_handler() {

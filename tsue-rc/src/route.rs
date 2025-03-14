@@ -1,6 +1,6 @@
 //! request routing
 use crate::{
-    futures::EitherInto,
+    futures::{EitherInto, FutureExt},
     helpers::Layer,
     http::Method,
     request::Request,
@@ -173,12 +173,12 @@ pub struct Matcher {
 impl PartialEq<Request> for Matcher {
     fn eq(&self, other: &Request) -> bool {
         if let Some(path) = self.path {
-            if path != other.uri().path() {
+            if other.path().eq(path) {
                 return false;
             }
         }
         if let Some(method) = &self.method {
-            if method != other.method() {
+            if method != &other.method() {
                 return false;
             }
         }
@@ -204,6 +204,7 @@ matcher_from!((p,m),(&'static str,Method) => { path: Some(p), method: Some(m) })
 // ---
 
 pub struct State<T,S> {
+    #[allow(dead_code)]
     state: T,
     inner: S,
 }
@@ -217,8 +218,8 @@ where
     type Error = S::Error;
     type Future = S::Future;
 
-    fn call(&self, mut req: Request) -> Self::Future {
-        req.extensions_mut().insert(self.state.clone());
+    fn call(&self, req: Request) -> Self::Future {
+        // TODO: req.extensions_mut().insert(self.state.clone());
         self.inner.call(req)
     }
 }
