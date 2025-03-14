@@ -33,6 +33,9 @@ pub mod response;
 pub mod task;
 pub mod body;
 
+pub mod helpers;
+pub mod futures;
+
 pub mod service;
 pub mod runtime;
 

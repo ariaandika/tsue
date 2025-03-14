@@ -1,5 +1,6 @@
 pub mod servicefn;
 pub mod tcp;
+pub mod http;
 
 pub trait Service<Request> {
     type Response;

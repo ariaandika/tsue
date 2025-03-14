@@ -101,5 +101,7 @@ macro_rules! status_code_v2 {
 status_code_v2! {
     200 OK "OK",
     400 BAD_REQUEST "Bad Request",
+    404 NOT_FOUND "Not Found",
+    405 METHOD_NOT_ALLOWED "Method Not Allowed",
 }
 
