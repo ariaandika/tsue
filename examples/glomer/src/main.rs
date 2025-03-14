@@ -1,5 +1,5 @@
 use std::{io, sync::{atomic::{AtomicU8, Ordering}, Arc}};
-use vice::{extractor::State, router::{get,Router}};
+use tsue::{extractor::State, router::{get,Router}};
 
 fn main() -> io::Result<()> {
     dotenvy::dotenv().ok();
@@ -11,7 +11,7 @@ fn main() -> io::Result<()> {
 }
 
 async fn index() -> &'static str {
-    "Vice Dev!"
+    "Tsue Dev!"
 }
 
 async fn up(State(counter): State<Arc<AtomicU8>>, body: String) -> String {
