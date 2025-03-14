@@ -8,6 +8,7 @@ pub use parser::{parse, ParseError};
 mod from_request;
 mod parser;
 
+/// an http request parts
 #[derive(Default)]
 pub struct Parts {
     method: Method,
@@ -18,23 +19,28 @@ pub struct Parts {
 }
 
 impl Parts {
+    /// getter for http method
     pub fn method(&self) -> Method {
         self.method
     }
 
+    /// getter for http path
     pub fn path(&self) -> &ByteStr {
         &self.path
     }
 
+    /// getter for http version
     pub fn version(&self) -> Version {
         self.version
     }
 
+    /// getter for http headers
     pub fn headers(&self) -> &[Header] {
         &self.headers[..self.header_len]
     }
 }
 
+/// an http request
 #[derive(Default)]
 pub struct Request {
     parts: Parts,
@@ -43,14 +49,21 @@ pub struct Request {
 
 /// construction methods
 impl Request {
+    /// construct request from parts
+    ///
+    /// see also [`Request::into_parts`]
     pub fn from_parts(parts: Parts, body: Body) -> Request {
         Self { parts, body  }
     }
 
+    /// destruct request into parts
+    ///
+    /// see also [`Request::from_parts`]
     pub fn into_parts(self) -> (Parts,Body) {
         (self.parts,self.body)
     }
 
+    /// destruct request into [`Body`]
     pub fn into_body(self) -> Body {
         self.body
     }
@@ -58,18 +71,22 @@ impl Request {
 
 /// delegate methods
 impl Request {
+    /// getter for http method
     pub fn method(&self) -> Method {
         self.parts.method
     }
 
+    /// getter for http path
     pub fn path(&self) -> &ByteStr {
         self.parts.path()
     }
 
+    /// getter for http version
     pub fn version(&self) -> Version {
         self.parts.version
     }
 
+    /// getter for http headers
     pub fn headers(&self) -> &[Header] {
         self.parts.headers()
     }

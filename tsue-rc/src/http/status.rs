@@ -4,6 +4,7 @@ use std::{
     num::NonZeroU16,
 };
 
+/// an http status code
 #[derive(Clone, Copy)]
 pub struct StatusCode(NonZeroU16);
 

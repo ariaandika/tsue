@@ -6,8 +6,10 @@ mod status;
 
 pub use status::StatusCode;
 
+/// default header array size
 pub const HEADER_SIZE: usize = 32;
 
+/// an http method
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub enum Method {
     #[default]
@@ -20,6 +22,7 @@ pub enum Method {
     CONNECT,
 }
 
+/// an http version
 #[derive(Clone, Copy, Default)]
 pub enum Version {
     Http10,
@@ -29,6 +32,7 @@ pub enum Version {
 }
 
 impl Version {
+    /// version as bytes (e.g: `b"HTTP/1.1"`)
     pub const fn as_bytes(&self) -> &'static [u8] {
         match self {
             Version::Http10 => b"HTTP/1.0",
@@ -38,6 +42,7 @@ impl Version {
     }
 }
 
+/// an http header
 #[derive(Clone, Default)]
 pub struct Header {
     pub name: ByteStr,
@@ -45,6 +50,7 @@ pub struct Header {
 }
 
 impl Header {
+    /// create empty header
     pub const fn new_static() -> Header {
         Header {
             name: ByteStr::new(),

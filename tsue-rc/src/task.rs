@@ -1,4 +1,4 @@
-//! share stream between tasks
+//! task communication via channel
 use crate::body::ResBody;
 use bytes::{Bytes, BytesMut};
 use std::io;

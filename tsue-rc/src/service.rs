@@ -1,3 +1,4 @@
+//! asynchronous service
 pub mod servicefn;
 pub mod tcp;
 pub mod http;

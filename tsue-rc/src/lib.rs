@@ -1,8 +1,7 @@
-//! # Vice Server Library
+//! # Tsue Server Library
 //!
-//! vice is a server library where it provide project architecture from the start
+//! tsue is a lightweight server library
 //!
-//! it sacrifice customability for it
 // impl Future vs type Future vs generic Future
 // - impl Future: can be async fn, type cannot be referenced externally, no double implementation
 // - type Future: no async fn, type can be referenced externally, no double implementation

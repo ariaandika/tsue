@@ -1,3 +1,4 @@
+//! entrypoint to start the server
 use crate::service::{tcp::TcpService, HttpService, Service};
 use log::debug;
 use std::{

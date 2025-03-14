@@ -14,6 +14,7 @@ pub fn check(res: &mut Response) {
     });
 }
 
+/// write http response parts into buffer
 pub fn write(parts: &Parts, bytes: &mut BytesMut) {
     bytes.extend_from_slice(parts.version.as_bytes());
     bytes.extend_from_slice(b" ");

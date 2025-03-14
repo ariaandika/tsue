@@ -7,6 +7,7 @@ pub use writer::{check, write};
 mod into_response;
 mod writer;
 
+/// an http response parts
 #[derive(Default)]
 pub struct Parts {
     version: Version,
@@ -16,18 +17,22 @@ pub struct Parts {
 }
 
 impl Parts {
+    /// getter for http version
     pub fn version(&self) -> Version {
         self.version
     }
 
+    /// getter for http status
     pub fn status(&self) -> StatusCode {
         self.status
     }
 
+    /// getter for http headers
     pub fn headers(&self) -> &[Header] {
         &self.headers[..self.header_len]
     }
 
+    /// insert new header
     pub fn insert_header(&mut self, header: Header) {
         if self.header_len >= HEADER_SIZE {
             return;
@@ -37,6 +42,7 @@ impl Parts {
     }
 }
 
+/// an http response
 #[derive(Default)]
 pub struct Response {
     parts: Parts,
@@ -45,6 +51,7 @@ pub struct Response {
 
 /// construction methods
 impl Response {
+    /// construct new response with body
     pub fn new(body: ResBody) -> Response {
         Response {
             parts: <_>::default(),
@@ -52,14 +59,21 @@ impl Response {
         }
     }
 
+    /// construct response from parts
+    ///
+    /// see also [`Response::into_parts`]
     pub fn from_parts(parts: Parts, body: ResBody) -> Response {
         Response { parts, body }
     }
 
+    /// destruct response into parts
+    ///
+    /// see also [`Response::from_parts`]
     pub fn into_parts(self) -> (Parts, ResBody) {
         (self.parts,self.body)
     }
 
+    /// destruct response into [`ResBody`]
     pub fn into_body(self) -> ResBody {
         self.body
     }
@@ -67,14 +81,17 @@ impl Response {
 
 /// delegate methods
 impl Response {
+    /// getter for http version
     pub fn version(&self) -> Version {
         self.parts.version
     }
 
+    /// getter for http status
     pub fn status(&self) -> StatusCode {
         self.parts.status
     }
 
+    /// getter for http headers
     pub fn headers(&self) -> &[Header] {
         self.parts.headers()
     }
@@ -115,12 +132,16 @@ impl std::fmt::Debug for Response {
 }
 
 
+/// return bad request for error
+///
+/// implement [`IntoResponse`] with bad request and error message as body
 pub struct BadRequest<E>(E);
 
 mod helpers {
     use super::*;
 
     impl<E> BadRequest<E> {
+        /// create new [`BadRequest`]
         pub fn new(inner: E) -> Self {
             Self(inner)
         }

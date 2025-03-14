@@ -4,7 +4,7 @@ use crate::http::{Header, Method, Version, HEADER_SIZE};
 use bytes::{Buf, Bytes, BytesMut};
 use std::str::Utf8Error;
 
-/// parse request
+/// parse http request
 ///
 /// return `Ok(None)` when buffer end before parse complete
 pub fn parse(buf: &mut BytesMut) -> Result<Option<Parts>,ParseError> {
@@ -111,6 +111,7 @@ pub fn parse(buf: &mut BytesMut) -> Result<Option<Parts>,ParseError> {
     }))
 }
 
+/// error maybe return from [`parse`]
 #[derive(thiserror::Error, Debug)]
 pub enum ParseError {
     #[error("invalid method: {0:?}")]
@@ -120,3 +121,4 @@ pub enum ParseError {
     #[error("invalid version: {0:?}")]
     InvalidVersion(Bytes),
 }
+

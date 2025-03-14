@@ -1,7 +1,8 @@
+//! cheaply cloneable and sliceable string
 use bytes::Bytes;
 use std::{ops::Deref, str::Utf8Error};
 
-/// A cheaply cloneable and sliceable string
+/// a cheaply cloneable and sliceable string
 ///
 /// internally it uses [`Bytes`], so we get all the benefit of
 /// `Bytes` while having utf8 checked

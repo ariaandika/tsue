@@ -1,3 +1,4 @@
+//! helper types and traits
 
 /// service which holds another service
 pub trait Layer<S> {
