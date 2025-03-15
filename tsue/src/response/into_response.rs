@@ -1,6 +1,8 @@
-use super::{IntoResponse, IntoResponseParts, Parts, Response};
+use super::{Html, IntoResponse, IntoResponseParts, Json, Parts, Response};
 use bytes::{Bytes, BytesMut};
-use http::{response, HeaderMap, HeaderValue, StatusCode};
+use http::{response, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use mime::Mime;
+use serde::Serialize;
 
 macro_rules! part {
     ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident) => $body:expr) => {
@@ -53,6 +55,16 @@ where
     }
 }
 
+impl IntoResponseParts for (&'static str, &'static str) {
+    fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
+        parts.headers.insert(
+            HeaderName::from_static(self.0),
+            HeaderValue::from_static(self.1)
+        );
+        parts
+    }
+}
+
 impl<const N: usize, T> IntoResponseParts for [(&'static str, T);N]
 where
     T: Into<Bytes>,
@@ -70,6 +82,9 @@ where
 part!((), (self,parts) => ());
 part!(std::convert::Infallible, (self) => match self { });
 part!(StatusCode, mut (self,parts) => parts.status = self);
+part!(Mime, mut (self,parts) => parts.headers.insert(
+    HeaderName::from_static("Content-Type"), HeaderValue::from_str(self.as_ref()).unwrap()
+));
 part!(HeaderMap, mut,mut (self,parts) => {
     const PLACEHOLDER: HeaderValue = HeaderValue::from_static("deez");
     for (key,val) in (&mut self).into_iter() {
@@ -78,14 +93,33 @@ part!(HeaderMap, mut,mut (self,parts) => {
 });
 
 res!(Bytes, self => Response::new(self.into()));
+res!(Vec<u8>, self => Response::new(self.into()));
 res!(BytesMut, self => Response::new(self.freeze().into()));
 res!(Response, self => self);
 res!(&'static str, self => IntoResponse::into_response((
-    [("Content-Type","text/plain")], Bytes::from_static(self.as_bytes())
+    ("Content-Type","text/plain; charset=utf-8"), Bytes::from_static(self.as_bytes())
 )));
 res!(String, self => IntoResponse::into_response((
-    [("Content-Type","text/plain")], Bytes::from(self)
+    ("Content-Type","text/plain; charset=utf-8"), Bytes::from(self)
 )));
+
+impl<T> IntoResponse for Html<T> where T: Into<Bytes> {
+    fn into_response(self) -> Response {
+        (("Content-Type","text/html; charset=utf-8"),self.0.into()).into_response()
+    }
+}
+
+impl<T> IntoResponse for Json<T> where T: Serialize {
+    fn into_response(self) -> Response {
+        match serde_json::to_vec(&self.0) {
+            Ok(ok) => (("Content-Type","application/json"),ok).into_response(),
+            Err(err) => {
+                log::error!("failed to serialize: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            },
+        }
+    }
+}
 
 macro_rules! into_response_tuple {
     (@$($r:ident,)*) => {

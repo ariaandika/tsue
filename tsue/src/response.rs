@@ -26,3 +26,9 @@ pub trait IntoResponseParts {
     fn into_response_parts(self, parts: Parts) -> Parts;
 }
 
+/// Response with `Content-Type` of `text/html; charset=utf-8`
+pub struct Html<T>(pub T);
+
+/// Response with `Content-Type` of `application/json`
+pub struct Json<T>(pub T);
+
