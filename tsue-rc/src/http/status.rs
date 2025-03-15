@@ -10,9 +10,9 @@ pub struct StatusCode(NonZeroU16);
 
 impl Display for StatusCode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.status_str())?;
+        f.write_str(self.status_str())?;
         f.write_str(" ")?;
-        f.write_str(&self.message())
+        f.write_str(self.message())
     }
 }
 

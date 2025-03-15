@@ -23,7 +23,7 @@ pub fn write(parts: &Parts, bytes: &mut BytesMut) {
     for Header { name, value } in parts.headers() {
         bytes.extend_from_slice(name.as_bytes());
         bytes.extend_from_slice(b": ");
-        bytes.extend_from_slice(&value);
+        bytes.extend_from_slice(value);
         bytes.extend_from_slice(b"\r\n");
     }
     bytes.extend_from_slice(b"\r\n");

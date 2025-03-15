@@ -58,13 +58,13 @@ impl PartialEq<&str> for ByteStr {
 
 impl std::fmt::Display for ByteStr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        str::fmt(&*self, f)
+        str::fmt(self, f)
     }
 }
 
 impl std::fmt::Debug for ByteStr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        str::fmt(&*self, f)
+        str::fmt(self, f)
     }
 }
 

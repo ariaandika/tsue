@@ -30,10 +30,7 @@ impl Body {
     ///
     /// chunked content is not yet supported
     pub fn content_len(&self) -> Option<usize> {
-        match self.chan {
-            Some(BodyChan { content_len, .. }) => Some(content_len),
-            None => None,
-        }
+        self.chan.as_ref().map(|e|e.content_len)
     }
 
     /// consume body into [`BytesMut`]

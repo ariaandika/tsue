@@ -82,7 +82,7 @@ pub fn parse(buf: &mut BytesMut) -> Result<Option<Parts>,ParseError> {
     loop {
         if header_len >= HEADER_SIZE { break; }
 
-        if matches!((buf.get(0),buf.get(1)),(Some(b'\r'),Some(&b'\n'))) {
+        if matches!((buf.first(),buf.get(1)),(Some(b'\r'),Some(&b'\n'))) {
             buf.advance(2);
             break;
         }

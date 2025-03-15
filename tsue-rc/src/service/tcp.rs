@@ -112,7 +112,7 @@ where
         let TcpProject {
             inner,
             buffer,
-            mut res_buffer,
+            res_buffer,
             stream,
             mut state,
         } = self.as_mut().project();
@@ -166,7 +166,7 @@ where
 
                     response::check(&mut response);
                     let (parts,body) = response.into_parts();
-                    response::write(&parts, &mut res_buffer);
+                    response::write(&parts, res_buffer);
                     let rx = stream.write(res_buffer.split().freeze(), body);
                     state.set(TcpState::Write { rx });
                 }
