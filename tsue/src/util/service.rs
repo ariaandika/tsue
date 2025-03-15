@@ -1,9 +1,8 @@
 //! service utility types
-use crate::http::{into_response::IntoResponse, Request, Response};
+use super::{futures::EitherInto, Either, FutureExt};
+use crate::{request::Request, response::{Response, IntoResponse}};
 use hyper::service::Service;
 use std::convert::Infallible;
-
-use super::{futures::EitherInto, Either, FutureExt};
 
 impl<Req,Res,Er,L,R> Service<Req> for Either<L,R>
 where

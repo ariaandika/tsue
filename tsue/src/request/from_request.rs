@@ -1,39 +1,11 @@
-//! [`FromRequest`] and [`FromRequestParts`] trait
-use std::{convert::Infallible, future::{ready, Ready}};
-use super::{into_response::IntoResponse, ReqBody, Request};
+use super::{Body, FromRequest, FromRequestParts, Request};
 use crate::util::response::BadRequest;
 use bytes::Bytes;
 use http::request;
-
-// NOTE: Previously, `FromRequest` only accept mutable reference of `request::Parts`
-// that allow `IntoResponse` access it, things get absurdly complicated realy quick
-// when we have to carry around `request::Parts`, and it makes `IntoResponse`
-// not portable because it require `request::Part` to call it
-// For now, use something like `Responder` to build response which come from function
-// argument which have access to `request::Parts`
-
-// NOTE:
-// using Pin<Box> in associated type is worth it instead of impl Future,
-// because it can be referenced externally
-// [issue](#63063 <https://github.com/rust-lang/rust/issues/63063>)
-
-/// Type that can be constructed from request
-///
-/// this trait is used as request handler parameters
-pub trait FromRequest: Sized {
-    type Error: IntoResponse;
-    type Future: Future<Output = Result<Self, Self::Error>>;
-    fn from_request(req: Request) -> Self::Future;
-}
-
-/// Type that can be constructed from request parts
-///
-/// this trait is used as request handler parameters
-pub trait FromRequestParts: Sized {
-    type Error: IntoResponse;
-    type Future: Future<Output = Result<Self, Self::Error>>;
-    fn from_request_parts(parts: &mut request::Parts) -> Self::Future;
-}
+use std::{
+    convert::Infallible,
+    future::{ready, Ready},
+};
 
 /// anything that implement `FromRequestParts` also implement `FromRequest`
 impl<F> FromRequest for F
@@ -113,12 +85,12 @@ mod bytes_future {
         /// future returned from [`Bytes`] implementation of [`FromRequest`]
         pub struct BytesFuture {
             #[pin]
-            inner: Collect<ReqBody>,
+            inner: Collect<Body>,
         }
     }
 
     impl BytesFuture {
-        pub(super) fn new(inner: ReqBody) -> BytesFuture {
+        pub(super) fn new(inner: Body) -> BytesFuture {
             Self { inner: inner.collect() }
         }
     }
@@ -146,12 +118,12 @@ mod string_future {
         /// future returned from [`String`] implementation of [`FromRequest`]
         pub struct StringFuture {
             #[pin]
-            inner: Collect<ReqBody>,
+            inner: Collect<Body>,
         }
     }
 
     impl StringFuture {
-        pub(super) fn new(inner: ReqBody) -> Self {
+        pub(super) fn new(inner: Body) -> Self {
             Self { inner: inner.collect() }
         }
     }
@@ -198,4 +170,5 @@ mod string_future {
         }
     }
 }
+
 

@@ -1,21 +1,6 @@
-//! [`IntoResponse`] and [`IntoResponseParts`] trait
-use super::Response;
+use super::{IntoResponse, IntoResponseParts, Response};
 use bytes::Bytes;
 use http::{response, HeaderMap, HeaderValue, StatusCode};
-
-/// Type that can be converted into response
-///
-/// this trait is used as request handler return type
-pub trait IntoResponse {
-    fn into_response(self) -> Response;
-}
-
-/// Type that can be converted into response parts
-///
-/// this trait is used as request handler return type
-pub trait IntoResponseParts {
-    fn into_response_parts(self, parts: response::Parts) -> response::Parts;
-}
 
 /// anything that implement `IntoResponseParts` also implement `IntoResponse`
 impl<R> IntoResponse for R
@@ -118,4 +103,5 @@ macro_rules! into_response_tuple {
 }
 
 into_response_tuple!(R1,R2,R3,R4,R5,R6,R7,R8,);
+
 

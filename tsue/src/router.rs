@@ -1,12 +1,10 @@
 //! request routing
 use crate::{
-    http::{Request, Response},
-    util::{
+    request::Request, response::Response, util::{
         futures::EitherInto,
         service::{MethodNotAllowed, NotFound},
         FutureExt, Layer,
-    },
-    HttpService,
+    }, HttpService
 };
 use handler::HandlerService;
 use http::Method;

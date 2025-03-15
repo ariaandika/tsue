@@ -1,6 +1,7 @@
 //! functional route
 use crate::{
-    http::{FromRequest, FromRequestParts, IntoResponse, Request, Response, ReqBody},
+    request::{Body, FromRequest, FromRequestParts, Request},
+    response::{IntoResponse, Response},
     util::futures::{FutureExt, MapInfallible},
 };
 use hyper::service::Service;
@@ -338,7 +339,7 @@ mod future {
         where
             Fr1: FromRequest,
         {
-            Frp { #[pin] f: Fut, body: Option<ReqBody>, },
+            Frp { #[pin] f: Fut, body: Option<Body>, },
             Fr { #[pin] f: Fr1::Future, frp: Option<Frp1>, },
         }
     }
@@ -348,7 +349,7 @@ mod future {
         Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
         Fr1: FromRequest,
     {
-        pub fn new(f: Fut, body: ReqBody) -> Self {
+        pub fn new(f: Fut, body: Body) -> Self {
             Self::Frp { f, body: Some(body) }
         }
     }

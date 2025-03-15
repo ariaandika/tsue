@@ -21,7 +21,9 @@
 //!     format!("{}: {}",counter.fetch_add(1, Ordering::Relaxed),body.to_uppercase())
 //! }
 //! ```
-pub mod http;
+pub mod request;
+pub mod response;
+
 pub mod router;
 pub mod extractor;
 pub mod util;
