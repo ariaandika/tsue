@@ -1,9 +1,11 @@
+//! HTTP request
 use crate::response::IntoResponse;
 
 mod from_request;
 
-pub use hyper::body::Incoming as Body;
 pub use http::request::Parts;
+pub use hyper::body::Incoming as Body;
+pub use from_request::{BytesFuture, BytesFutureError, StringFuture, StringFutureError};
 
 /// Represents an HTTP request
 pub type Request<T = Body> = hyper::http::Request<T>;
@@ -20,7 +22,7 @@ pub type Request<T = Body> = hyper::http::Request<T>;
 // because it can be referenced externally
 // [issue](#63063 <https://github.com/rust-lang/rust/issues/63063>)
 
-/// Type that can be constructed from request
+/// A type that can be constructed from Request
 ///
 /// this trait is used as request handler parameters
 pub trait FromRequest: Sized {
@@ -29,7 +31,7 @@ pub trait FromRequest: Sized {
     fn from_request(req: Request) -> Self::Future;
 }
 
-/// Type that can be constructed from request parts
+/// A type that can be constructed from Request parts
 ///
 /// this trait is used as request handler parameters
 pub trait FromRequestParts: Sized {
