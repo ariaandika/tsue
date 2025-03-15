@@ -135,9 +135,10 @@ impl std::fmt::Debug for Response {
 /// return bad request for error
 ///
 /// implement [`IntoResponse`] with bad request and error message as body
-pub struct BadRequest<E>(E);
+#[derive(Debug)]
+pub struct BadRequest<E>(pub E);
 
-mod helpers {
+mod bad_request {
     use super::*;
 
     impl<E> BadRequest<E> {
@@ -145,11 +146,15 @@ mod helpers {
         pub fn new(inner: E) -> Self {
             Self(inner)
         }
+
+        pub fn map<T: From<E>>(self) -> BadRequest<T> {
+            BadRequest(self.0.into())
+        }
     }
 
     impl<E> From<E> for BadRequest<E>
     where
-        E: std::fmt::Display
+        E: std::error::Error,
     {
         fn from(value: E) -> Self {
             Self(value)
@@ -162,6 +167,14 @@ mod helpers {
     {
         fn into_response(self) -> crate::Response {
             (crate::http::StatusCode::BAD_REQUEST, self.0.to_string()).into_response()
+        }
+    }
+
+    impl<E> std::error::Error for BadRequest<E> where E: std::error::Error { }
+
+    impl<E> std::fmt::Display for BadRequest<E> where E: std::fmt::Display {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            E::fmt(&self.0, f)
         }
     }
 }

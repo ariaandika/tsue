@@ -1,15 +1,13 @@
 use super::Parts;
 use crate::bytestr::ByteStr;
 use crate::http::{Header, Method, Version, HEADER_SIZE};
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BytesMut};
 use std::str::Utf8Error;
 
 /// parse http request
 ///
 /// return `Ok(None)` when buffer end before parse complete
 pub fn parse(buf: &mut BytesMut) -> Result<Option<Parts>,ParseError> {
-    use ParseError::*;
-
     macro_rules! try_advance {
         ($n:literal) => {
             match buf.len() >= $n {
@@ -48,7 +46,7 @@ pub fn parse(buf: &mut BytesMut) -> Result<Option<Parts>,ParseError> {
         b"DELETE" | b"delete" => Method::DELETE,
         b"HEAD" | b"head" => Method::HEAD,
         b"CONNECT" | b"connect" => Method::CONNECT,
-        _ => return Err(InvalidMethod(method.freeze()))
+        _ => return Err(format!("invalid method: {method:?}").into())
     };
 
     log::trace!("parsed method {method:?}");
@@ -69,7 +67,7 @@ pub fn parse(buf: &mut BytesMut) -> Result<Option<Parts>,ParseError> {
         b"HTTP/1.0" => Version::Http10,
         b"HTTP/1.1" => Version::Http11,
         b"HTTP/2" => Version::Http2,
-        _ => return Err(InvalidVersion(version.freeze())),
+        _ => return Err(format!("invalid version: {version:?}").into()),
     };
 
     try_advance!(2);
@@ -112,13 +110,26 @@ pub fn parse(buf: &mut BytesMut) -> Result<Option<Parts>,ParseError> {
 }
 
 /// error maybe return from [`parse`]
-#[derive(thiserror::Error, Debug)]
-pub enum ParseError {
-    #[error("invalid method: {0:?}")]
-    InvalidMethod(Bytes),
-    #[error("invalid path: {0}")]
-    InvalidPath(#[from] Utf8Error),
-    #[error("invalid version: {0:?}")]
-    InvalidVersion(Bytes),
+#[derive(Debug)]
+pub struct ParseError(String);
+
+impl From<String> for ParseError {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Utf8Error> for ParseError {
+    fn from(value: Utf8Error) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        String::fmt(&self.0, f)
+    }
 }
 

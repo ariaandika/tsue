@@ -1,7 +1,7 @@
 use super::HttpService;
 use crate::{
     body::Body,
-    request::{self, ParseError, Request},
+    request::{self, Request},
     response::{self, IntoResponse},
     service::Service,
     task::{StreamFuture, StreamHandle},
@@ -9,7 +9,6 @@ use crate::{
 use bytes::BytesMut;
 use log::{debug, error, trace};
 use std::{
-    io::{self},
     mem,
     pin::Pin,
     str::from_utf8,
@@ -196,82 +195,3 @@ where
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum TcpError {
-    #[error("io error: {0}")]
-    Io(#[from] io::Error),
-    #[error("parse error: {0}")]
-    ParseError(#[from] ParseError),
-}
-
-/*
-pub struct StreamActor(ActorHandle<Message>);
-
-pub enum Message {
-    Read {
-        bytes: BytesMut,
-        send: oneshot::Sender<io::Result<(usize,BytesMut)>>,
-    },
-    Write {
-        head: Bytes,
-        body: ResBody,
-        send: oneshot::Sender<io::Result<()>>,
-    },
-}
-
-impl StreamActor {
-    fn new(stream: TcpStream) -> StreamActor {
-        Self(Actor::new(move|recv|Self::task(stream, recv)))
-    }
-
-    fn read(&self, bytes: BytesMut) -> oneshot::Receiver<io::Result<(usize, BytesMut)>> {
-        let (tx, rx) = oneshot::channel();
-        match self.0.try_send(Message::Read { bytes, send: tx }) {
-            Ok(()) => rx,
-            Err(err) => {
-                let msg = format!("actor should never full or closed: {err}");
-                let tx = match err {
-                    TrySendError::Full(Message::Read { send, .. }) |
-                    TrySendError::Closed(Message::Read { send, .. }) => send,
-                    _ => unreachable!(),
-                };
-
-                tx.send(Err(io::Error::new(io::ErrorKind::Other, msg)));
-
-                rx
-            }
-        }
-    }
-
-    fn write(&self, head: Bytes, body: ResBody) -> io::Result<oneshot::Receiver<io::Result<()>>> {
-        let (tx, rx) = oneshot::channel();
-        match self.0.try_send(Message::Write { head, body, send: tx, }) {
-            Ok(()) => Ok(rx),
-            Err(err) => Err(into_io_error(err)),
-        }
-    }
-
-    async fn task(mut stream: TcpStream, mut recv: mpsc::Receiver<Message>) {
-        while let Some(message) = recv.recv().await {
-            match message {
-                Message::Read { mut bytes, send } => {
-                    let _ = match stream.read_buf(&mut bytes).await {
-                        Ok(ok) => send.send(Ok((ok,bytes))),
-                        Err(err) => send.send(Err(err)),
-                    };
-                }
-                Message::Write { head, body, send } => {
-                    let _ = match stream.write_all_buf(&mut Bytes::chain(head, body.as_ref())).await {
-                        Ok(_) => send.send(Ok(())),
-                        Err(err) => send.send(Err(err)),
-                    };
-                }
-            }
-        }
-    }
-}
-
-fn into_io_error<E: std::error::Error>(err: E) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, format!("actor should never full or closed: {err}"))
-}
-*/

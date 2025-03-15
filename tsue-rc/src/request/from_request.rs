@@ -1,9 +1,10 @@
+use bytes::{Bytes, BytesMut};
 use super::{FromRequest, FromRequestParts, Parts, Request};
-use crate::{http::Method, response::BadRequest};
+use crate::{futures::{FutureExt, Map, MapErr, MapOk, TryFutureExt}, http::Method, response::BadRequest, task::StreamFuture};
 use std::{
     convert::Infallible,
     future::{ready, Ready},
-    io,
+    io, string::FromUtf8Error,
 };
 
 // NOTE:
@@ -68,144 +69,70 @@ from_request! {
     (req) => ready(Ok(req))
 }
 
-// from_request! {
-//     BytesMut,
-//     Error = Infallible;
-//     Future = MapInfallible<StreamFuture<BytesMut>>;
-//     (req) => req.into_body().bytes_mut().map_infallible()
-// }
-
-// from_request! {
-//     Bytes,
-//     Error = io::Error;
-//     Future = futures::MapOk<<BytesMut as FromRequest>::Future, fn(BytesMut) -> Bytes>;
-//     (req) => BytesMut::from_request(req).map_ok(BytesMut::freeze as _)
-// }
-//
-// from_request! {
-//     Vec<u8>,
-//     Error = io::Error;
-//     Future = futures::MapOk<<BytesMut as FromRequest>::Future, fn(BytesMut) -> Vec<u8>>;
-//     (req) => BytesMut::from_request(req).map_ok(Into::into as _)
-// }
-
 from_request! {
-    String,
+    BytesMut,
     Error = BadRequest<io::Error>;
-    Future = Ready<Result<Self,BadRequest<io::Error>>>;
-    (_req) => todo!()// BytesMut::from_request(req).map(|e|String::from_utf8(e?.into()).map_err(Into::into))
+    Future = MapErr<StreamFuture<BytesMut>, fn(io::Error) -> BadRequest<io::Error>>;
+    (req) => req.into_body().bytes_mut().map_err(BadRequest)
 }
 
-/*
-#[doc(inline)]
-pub use bytes_future::BytesFuture;
 from_request! {
     Bytes,
-    Error = BadRequest<hyper::Error>;
-    Future = BytesFuture;
-    (req) => BytesFuture::new(req.into_body())
+    Error = BadRequest<io::Error>;
+    Future = MapOk<<BytesMut as FromRequest>::Future, fn(BytesMut) -> Bytes>;
+    (req) => BytesMut::from_request(req).map_ok(BytesMut::freeze as _)
 }
 
-#[doc(inline)]
-pub use string_future::{StringFuture, StringFutureError};
+from_request! {
+    Vec<u8>,
+    Error = BadRequest<io::Error>;
+    Future = MapOk<<BytesMut as FromRequest>::Future, fn(BytesMut) -> Vec<u8>>;
+    (req) => BytesMut::from_request(req).map_ok(Into::into as _)
+}
+
 from_request! {
     String,
-    Error = BadRequest<StringFutureError>;
-    Future = StringFuture;
-    (req) => StringFuture::new(req.into_body())
+    Error = BadRequest<BytesUtf8Error>;
+    Future = Map<
+        <BytesMut as FromRequest>::Future,
+        fn(Result<BytesMut, BadRequest<io::Error>>) -> Result<String, BadRequest<BytesUtf8Error>>,
+    >;
+    (req) => BytesMut::from_request(req).map(map_to_string)
 }
 
-mod bytes_future {
-    use super::*;
-    use http_body_util::{combinators::Collect, BodyExt};
+fn map_to_string(result: Result<BytesMut, BadRequest<io::Error>>) -> Result<String, BadRequest<BytesUtf8Error>> {
+    String::from_utf8(result.map_err(BadRequest::map)?.into())
+        .map_err(Into::<BytesUtf8Error>::into)
+        .map_err(Into::into)
+}
 
-    pin_project_lite::pin_project! {
-        /// future returned from [`Bytes`] implementation of [`FromRequest`]
-        pub struct BytesFuture {
-            #[pin]
-            inner: Collect<ReqBody>,
-        }
-    }
+#[derive(Debug)]
+pub enum BytesUtf8Error {
+    Io(io::Error),
+    FromUtf8(FromUtf8Error),
+}
 
-    impl BytesFuture {
-        pub(super) fn new(inner: ReqBody) -> BytesFuture {
-            Self { inner: inner.collect() }
-        }
-    }
+impl std::error::Error for BytesUtf8Error { }
 
-    impl Future for BytesFuture {
-        type Output = Result<Bytes, BadRequest<hyper::Error>>;
-
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            match self.project().inner.poll(cx) {
-                Ready(Ok(ok)) => Ready(Ok(ok.to_bytes())),
-                Ready(Err(err)) => Ready(Err(err.into())),
-                Pending => Pending
-            }
+impl std::fmt::Display for BytesUtf8Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::fmt::Display;
+        match self {
+            BytesUtf8Error::Io(error) => Display::fmt(error, f),
+            BytesUtf8Error::FromUtf8(error) => Display::fmt(error, f),
         }
     }
 }
 
-mod string_future {
-    use super::*;
-    use http_body_util::{combinators::Collect, BodyExt};
-    use std::string::FromUtf8Error;
-
-    pin_project_lite::pin_project! {
-        /// future returned from [`String`] implementation of [`FromRequest`]
-        pub struct StringFuture {
-            #[pin]
-            inner: Collect<ReqBody>,
-        }
-    }
-
-    impl StringFuture {
-        pub(super) fn new(inner: ReqBody) -> Self {
-            Self { inner: inner.collect() }
-        }
-    }
-
-    impl Future for StringFuture {
-        type Output = Result<String, BadRequest<StringFutureError>>;
-
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            match self.project().inner.poll(cx) {
-                Ready(Ok(ok)) => match String::from_utf8(Vec::from(ok.to_bytes())) {
-                    Ok(ok) => Ready(Ok(ok)),
-                    Err(err) => Ready(Err(StringFutureError::Utf8(err).into())),
-                },
-                Ready(Err(err)) => Ready(Err(StringFutureError::Hyper(err).into())),
-                Pending => Pending
-            }
-        }
-    }
-
-    /// error returned from [`String`] implementation of [`FromRequest`]
-    pub enum StringFutureError {
-        Hyper(hyper::Error),
-        Utf8(FromUtf8Error),
-    }
-
-    impl std::fmt::Display for StringFutureError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            use std::fmt::Display;
-            match self {
-                Self::Hyper(hyper) => Display::fmt(hyper, f),
-                Self::Utf8(utf8) => Display::fmt(utf8, f),
-            }
-        }
-    }
-
-    impl std::fmt::Debug for StringFutureError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            use std::fmt::Debug;
-            match self {
-                Self::Hyper(hyper) => Debug::fmt(hyper, f),
-                Self::Utf8(utf8) => Debug::fmt(utf8, f),
-            }
-        }
+impl From<io::Error> for BytesUtf8Error {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
     }
 }
-*/
+
+impl From<FromUtf8Error> for BytesUtf8Error {
+    fn from(value: FromUtf8Error) -> Self {
+        Self::FromUtf8(value)
+    }
+}
+
