@@ -1,5 +1,4 @@
 //! utility types
-pub mod response;
 
 /// represent two type that implement the same trait
 pub enum Either<L,R> {
@@ -9,7 +8,6 @@ pub enum Either<L,R> {
 
 mod service {
     use crate::future::{EitherInto, FutureExt};
-
     use super::Either;
     use hyper::service::Service;
 
@@ -26,6 +24,25 @@ mod service {
             match self {
                 Either::Left(l) => l.call(req).left_into(),
                 Either::Right(r) => r.call(req).right_into(),
+            }
+        }
+    }
+}
+
+mod response {
+    use crate::response::{IntoResponse, Response};
+
+    use super::Either;
+
+    impl<L,R> IntoResponse for Either<L,R>
+    where
+        L: IntoResponse,
+        R: IntoResponse,
+    {
+        fn into_response(self) -> Response {
+            match self {
+                Either::Left(l) => l.into_response(),
+                Either::Right(r) => r.into_response(),
             }
         }
     }

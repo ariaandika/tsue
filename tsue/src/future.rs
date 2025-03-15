@@ -1,6 +1,6 @@
 //! future utility types
 use std::{marker::PhantomData, task::{ready, Poll}};
-use crate::util::Either;
+use crate::helper::Either;
 
 /// extension trait for `Future` trait
 pub trait FutureExt: Future {
