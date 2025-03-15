@@ -1,6 +1,6 @@
-//! utility types
+//! Utility types
 
-/// represent two type that implement the same trait
+/// Represent two type that implement the same trait
 pub enum Either<L,R> {
     Left(L),
     Right(R),

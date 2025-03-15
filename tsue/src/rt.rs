@@ -1,4 +1,4 @@
-//! entrypoint of the server
+//! Entrypoint of the server
 use crate::service::HttpService;
 use hyper::server::conn::http1::Builder as Hyper;
 use hyper_util::rt::TokioIo;
@@ -6,7 +6,7 @@ use log::error;
 use std::{fmt::Display, io, net::ToSocketAddrs, sync::Arc};
 use tokio::net::TcpListener;
 
-/// entrypoint to run the server
+/// Entrypoint to run the server
 pub fn listen<S>(addr: impl ToSocketAddrs + Display + Clone, service: S) -> io::Result<()>
 where
     S: HttpService,

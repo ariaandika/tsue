@@ -1,9 +1,12 @@
+//! Multiple [`FromRequest`] implementation helpers
+//!
+//! [`FromRequest`]: crate::request::FromRequest
 use crate::{request::FromRequestParts, response::{Response, IntoResponse}};
 use http::{request, StatusCode};
 use log::error;
 use std::future::{ready, Ready};
 
-/// shared state
+/// Extract shared state
 #[derive(Clone)]
 pub struct State<T>(pub T);
 

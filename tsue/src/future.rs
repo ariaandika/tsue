@@ -1,10 +1,10 @@
-//! future utility types
+//! Future utility types
 use std::{marker::PhantomData, task::{ready, Poll}};
 use crate::helper::Either;
 
-/// extension trait for `Future` trait
+/// Extension trait for `Future` trait
 pub trait FutureExt: Future {
-    /// map future output
+    /// Map future output
     fn map<M,R>(self, mapper: M) -> Map<Self,M>
     where
         M: FnOnce(Self::Output) -> R,
@@ -13,7 +13,7 @@ pub trait FutureExt: Future {
         Map { inner: self, mapper: Some(mapper)  }
     }
 
-    /// map future output into `Result<T,Infallible>`
+    /// Map future output into `Result<T,Infallible>`
     fn map_infallible(self) -> MapInfallible<Self>
     where
         Self: Sized
@@ -21,7 +21,7 @@ pub trait FutureExt: Future {
         MapInfallible { inner: self }
     }
 
-    /// map future output into another future
+    /// Map future output into another future
     fn and_then<M,F2>(self, mapper: M) -> AndThen<Self,M,F2>
     where
         M: FnOnce(Self::Output) -> F2,
@@ -31,7 +31,7 @@ pub trait FutureExt: Future {
         AndThen::First { f: self, mapper: Some(mapper) }
     }
 
-    /// convert future into `Either` as the left variant
+    /// Convert future into `Either` as the left variant
     fn left<R>(self) -> EitherFuture<Self,R>
     where
         R: Future,
@@ -40,7 +40,7 @@ pub trait FutureExt: Future {
         EitherFuture::Left { left: self }
     }
 
-    /// convert future into `Either` as the right variant
+    /// Convert future into `Either` as the right variant
     fn right<L>(self) -> EitherFuture<L,Self>
     where
         L: Future,
@@ -49,7 +49,7 @@ pub trait FutureExt: Future {
         EitherFuture::Right { right: self }
     }
 
-    /// convert future into `Either` as the left variant
+    /// Convert future into `Either` as the left variant
     /// where the output implement the same `Into`
     fn left_into<R,O>(self) -> EitherInto<Self,R,O>
     where
@@ -61,7 +61,7 @@ pub trait FutureExt: Future {
         EitherInto::Left { left: self, _p: PhantomData }
     }
 
-    /// convert future into `Either` as the right variant
+    /// Convert future into `Either` as the right variant
     /// where the output implement the same `Into`
     fn right_into<L,O>(self) -> EitherInto<L,Self,O>
     where
@@ -76,7 +76,9 @@ pub trait FutureExt: Future {
 
 impl<F> FutureExt for F where F: Future { }
 
+/// Extension trait for `Future` trait that output a `Result`
 pub trait TryFutureExt: Future {
+    /// Map future output if it `Result::Ok`
     fn map_ok<M,T,E,T2>(self, mapper: M) -> MapOk<Self,M>
     where
         Self: Future<Output = Result<T,E>>,
@@ -86,6 +88,7 @@ pub trait TryFutureExt: Future {
         MapOk { inner: self, mapper: Some(mapper) }
     }
 
+    /// Map future output if it `Result::Err`
     fn map_err<M,T,E,E2>(self, mapper: M) -> MapErr<Self,M>
     where
         Self: Future<Output = Result<T,E>>,
@@ -101,7 +104,7 @@ impl<F> TryFutureExt for F where F: Future { }
 // ---
 
 pin_project_lite::pin_project! {
-    /// map future output
+    /// Map future output
     pub struct Map<F,M> {
         #[pin]
         inner: F,
@@ -125,6 +128,7 @@ where
 // ---
 
 pin_project_lite::pin_project! {
+    /// Map future output into `Result<T,Infallible>`
     pub struct MapInfallible<F> {
         #[pin]
         inner: F
@@ -142,7 +146,7 @@ impl<F> Future for MapInfallible<F> where F: Future {
 // ---
 
 pin_project_lite::pin_project! {
-    /// map future output into another future
+    /// Map future output into another future
     #[project = AndThenProj]
     pub enum AndThen<F,M,F2> {
         First { #[pin] f: F, mapper: Option<M> },
@@ -174,7 +178,7 @@ where
 // ---
 
 pin_project_lite::pin_project! {
-    /// two futures resulting in either output
+    /// Two futures resulting in Either output
     #[project = EitherProj]
     pub enum EitherFuture<L,R> {
         Left { #[pin] left: L },
@@ -198,7 +202,7 @@ where
 }
 
 pin_project_lite::pin_project! {
-    /// two futures where the output implement the same `Into`
+    /// Two futures where the output implement the same `Into`
     #[project = EitherIntoProj]
     pub enum EitherInto<L,R,O> {
         Left { #[pin] left: L, _p: PhantomData<O> },
@@ -226,7 +230,7 @@ where
 // ---
 
 pin_project_lite::pin_project! {
-    /// map future output if it `Result::Ok`
+    /// Map future output if it `Result::Ok`
     pub struct MapOk<F,M> {
         #[pin]
         inner: F,
@@ -253,7 +257,7 @@ where
 // ---
 
 pin_project_lite::pin_project! {
-    /// map future output if it `Result::Err`
+    /// Map future output if it `Result::Err`
     pub struct MapErr<F,M> {
         #[pin]
         inner: F,

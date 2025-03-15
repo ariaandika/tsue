@@ -1,4 +1,4 @@
-//! request routing
+//! Request routing
 use crate::{
     future::{EitherInto, FutureExt},
     request::Request,
@@ -12,7 +12,7 @@ use std::convert::Infallible;
 
 pub mod handler;
 
-/// route builder
+/// Route builder
 ///
 /// see [module level documentation](self) for more on routing
 pub struct Router<S> {
@@ -20,19 +20,19 @@ pub struct Router<S> {
 }
 
 impl Router<NotFound> {
-    /// create new `Router`
+    /// Create new `Router`
     pub fn new() -> Router<NotFound> {
         Router { inner: NotFound }
     }
 }
 
 impl<S> Router<S> {
-    /// create new `Router` with custom fallback instead of 404 NotFound
+    /// Create new `Router` with custom fallback instead of 404 NotFound
     pub fn with_fallback(fallback: S) -> Router<S> {
         Router { inner: fallback }
     }
 
-    /// layer current router service
+    /// Layer current router service
     ///
     /// this is low level way to interact with `Router`
     ///
@@ -44,7 +44,7 @@ impl<S> Router<S> {
         Router { inner: layer.layer(self.inner), }
     }
 
-    /// assign new route
+    /// Register new route
     pub fn route<R>(self, matcher: impl Into<Matcher>, route: R) -> Router<Branch<R, S>> {
         Router { inner: Branch {
             matcher: matcher.into(),
@@ -53,6 +53,7 @@ impl<S> Router<S> {
         } }
     }
 
+    /// Add shared state
     pub fn state<T>(self, state: T) -> Router<State<T, S>> {
         Router { inner: State { state, inner: self.inner } }
     }
@@ -62,7 +63,7 @@ impl<S> Router<S>
 where
     S: HttpService
 {
-    /// alternative way to start server
+    /// Alternative way to start server
     pub fn listen(
         self,
         addr: impl std::net::ToSocketAddrs + std::fmt::Display + Clone,
@@ -92,7 +93,7 @@ impl Default for Router<NotFound> {
 
 // ---
 
-/// service that match request and delegate to either service
+/// Service that match request and delegate to either service
 ///
 /// user typically does not interact with this directly,
 /// instead use [`route`] method, or [`get`] or [`post`] function
@@ -127,18 +128,18 @@ macro_rules! fn_router {
     };
 }
 
-fn_router!(get GET "setup GET service");
-fn_router!(post POST "setup POST service");
-fn_router!(put PUT "setup PUT service");
-fn_router!(patch PATCH "setup PATCH service");
-fn_router!(delete DELETE "setup DELETE service");
+fn_router!(get GET "Setup GET service");
+fn_router!(post POST "Setup POST service");
+fn_router!(put PUT "Setup PUT service");
+fn_router!(patch PATCH "Setup PATCH service");
+fn_router!(delete DELETE "Setup DELETE service");
 
 impl<S, F> Branch<S, F> {
-    fn_router!(self get GET "add GET service");
-    fn_router!(self post POST "add POST service");
-    fn_router!(self put PUT "add PUT service");
-    fn_router!(self patch PATCH "add PATCH service");
-    fn_router!(self delete DELETE "add DELETE service");
+    fn_router!(self get GET "Add GET service");
+    fn_router!(self post POST "Add POST service");
+    fn_router!(self put PUT "Add PUT service");
+    fn_router!(self patch PATCH "Add PATCH service");
+    fn_router!(self delete DELETE "Add DELETE service");
 }
 
 impl<S,F> Service<Request> for Branch<S,F>
@@ -160,7 +161,7 @@ where
 
 // ---
 
-/// partially match request
+/// Partially match request
 #[derive(Clone,Default)]
 pub struct Matcher {
     path: Option<&'static str>,
@@ -200,6 +201,10 @@ matcher_from!((p,m),(&'static str,Method) => { path: Some(p), method: Some(m) })
 
 // ---
 
+/// A service that assign a shared state
+///
+/// user typically does not interact with this directly,
+/// instead use the [`Router::state`] method
 pub struct State<T,S> {
     state: T,
     inner: S,
