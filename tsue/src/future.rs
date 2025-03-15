@@ -21,13 +21,14 @@ pub trait FutureExt: Future {
         MapInfallible { inner: self }
     }
 
-    fn and_then_or<M,L,R>(self, mapper: M) -> AndThenOr<Self,M,L>
+    /// map future output into another future
+    fn and_then<M,F2>(self, mapper: M) -> AndThen<Self,M,F2>
     where
-        M: FnOnce(Self::Output) -> Result<L,R>,
-        L: Future<Output = R>,
+        M: FnOnce(Self::Output) -> F2,
+        F2: Future,
         Self: Sized,
     {
-        AndThenOr::First { f: self, mapper: Some(mapper) }
+        AndThen::First { f: self, mapper: Some(mapper) }
     }
 
     /// convert future into `Either` as the left variant
@@ -75,10 +76,32 @@ pub trait FutureExt: Future {
 
 impl<F> FutureExt for F where F: Future { }
 
+pub trait TryFutureExt: Future {
+    fn map_ok<M,T,E,T2>(self, mapper: M) -> MapOk<Self,M>
+    where
+        Self: Future<Output = Result<T,E>>,
+        M: FnOnce(T) -> T2,
+        Self: Sized
+    {
+        MapOk { inner: self, mapper: Some(mapper) }
+    }
+
+    fn map_err<M,T,E,E2>(self, mapper: M) -> MapErr<Self,M>
+    where
+        Self: Future<Output = Result<T,E>>,
+        M: FnOnce(E) -> E2,
+        Self: Sized
+    {
+        MapErr { inner: self, mapper: Some(mapper) }
+    }
+}
+
+impl<F> TryFutureExt for F where F: Future { }
+
 // ---
 
 pin_project_lite::pin_project! {
-    /// map the output of a future
+    /// map future output
     pub struct Map<F,M> {
         #[pin]
         inner: F,
@@ -108,10 +131,7 @@ pin_project_lite::pin_project! {
     }
 }
 
-impl<F> Future for MapInfallible<F>
-where
-    F: Future,
-{
+impl<F> Future for MapInfallible<F> where F: Future {
     type Output = Result<F::Output, std::convert::Infallible>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
@@ -122,34 +142,30 @@ where
 // ---
 
 pin_project_lite::pin_project! {
-    #[project = AndThenOrProj]
-    pub enum AndThenOr<F,M,L> {
+    /// map future output into another future
+    #[project = AndThenProj]
+    pub enum AndThen<F,M,F2> {
         First { #[pin] f: F, mapper: Option<M> },
-        Second { #[pin] f: L },
+        Second { #[pin] f2: F2 },
     }
 }
 
-impl<F,M,L,R> Future for AndThenOr<F,M,L>
+impl<F,M,F2> Future for AndThen<F,M,F2>
 where
     F: Future,
-    M: FnOnce(F::Output) -> Result<L,R>,
-    L: Future<Output = R>,
+    M: FnOnce(F::Output) -> F2,
+    F2: Future,
 {
-    type Output = R;
+    type Output = F2::Output;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         loop {
             match self.as_mut().project() {
-                AndThenOrProj::First { f, mapper } => {
-                    let ok = ready!(f.poll(cx));
-                    match (mapper.take().expect("poll after complete"))(ok) {
-                        Ok(fut2) => {
-                            self.set(AndThenOr::Second { f: fut2 });
-                        },
-                        Err(r) => return Poll::Ready(r),
-                    }
+                AndThenProj::First { f, mapper } => {
+                    let f2 = (mapper.take().expect("poll after complete"))(ready!(f.poll(cx)));
+                    self.set(AndThen::Second { f2 });
                 },
-                AndThenOrProj::Second { f } => return f.poll(cx),
+                AndThenProj::Second { f2 } => return f2.poll(cx),
             }
         }
     }
@@ -158,7 +174,7 @@ where
 // ---
 
 pin_project_lite::pin_project! {
-    /// poll either two futures resulting in either output
+    /// two futures resulting in either output
     #[project = EitherProj]
     pub enum EitherFuture<L,R> {
         Left { #[pin] left: L },
@@ -203,6 +219,60 @@ where
         match self.as_mut().project() {
             EitherIntoProj::Left { left, .. } => Poll::Ready(ready!(left.poll(cx)).into()),
             EitherIntoProj::Right { right } => Poll::Ready(ready!(right.poll(cx)).into()),
+        }
+    }
+}
+
+// ---
+
+pin_project_lite::pin_project! {
+    /// map future output if it `Result::Ok`
+    pub struct MapOk<F,M> {
+        #[pin]
+        inner: F,
+        mapper: Option<M>,
+    }
+}
+
+impl<F,M,T,E,T2> Future for MapOk<F,M>
+where
+    F: Future<Output = Result<T,E>>,
+    M: FnOnce(T) -> T2,
+{
+    type Output = Result<T2,E>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let me = self.project();
+        match ready!(me.inner.poll(cx)) {
+            Ok(ok) => Poll::Ready(Ok((me.mapper.take().expect("poll after complete"))(ok))),
+            Err(err) => Poll::Ready(Err(err)),
+        }
+    }
+}
+
+// ---
+
+pin_project_lite::pin_project! {
+    /// map future output if it `Result::Err`
+    pub struct MapErr<F,M> {
+        #[pin]
+        inner: F,
+        mapper: Option<M>,
+    }
+}
+
+impl<F,M,T,E,E2> Future for MapErr<F,M>
+where
+    F: Future<Output = Result<T,E>>,
+    M: FnOnce(E) -> E2,
+{
+    type Output = Result<T,E2>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let me = self.project();
+        match ready!(me.inner.poll(cx)) {
+            Ok(ok) => Poll::Ready(Ok(ok)),
+            Err(err) => Poll::Ready(Err((me.mapper.take().expect("poll after complete"))(err))),
         }
     }
 }
