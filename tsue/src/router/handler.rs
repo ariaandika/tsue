@@ -1,8 +1,8 @@
 //! functional route
 use crate::{
+    future::{FutureExt, MapInfallible},
     request::{Body, FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
-    util::futures::{FutureExt, MapInfallible},
 };
 use hyper::service::Service;
 use std::{convert::Infallible, marker::PhantomData};

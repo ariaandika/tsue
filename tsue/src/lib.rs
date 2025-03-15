@@ -24,6 +24,8 @@
 pub mod request;
 pub mod response;
 
+pub mod future;
+
 pub mod router;
 pub mod extractor;
 pub mod util;

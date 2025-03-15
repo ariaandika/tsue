@@ -1,10 +1,6 @@
 //! utility types
-pub mod futures;
 pub mod response;
 pub mod service;
-
-#[doc(inline)]
-pub use futures::FutureExt;
 
 /// service which holds another service
 pub trait Layer<S> {

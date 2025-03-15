@@ -1,6 +1,6 @@
 //! future utility types
 use std::{marker::PhantomData, task::{ready, Poll}};
-use super::Either;
+use crate::util::Either;
 
 /// extension trait for `Future` trait
 pub trait FutureExt: Future {
@@ -21,7 +21,6 @@ pub trait FutureExt: Future {
         MapInfallible { inner: self }
     }
 
-    /// map future output into `Result<T,Infallible>`
     fn and_then_or<M,L,R>(self, mapper: M) -> AndThenOr<Self,M,L>
     where
         M: FnOnce(Self::Output) -> Result<L,R>,

@@ -1,6 +1,10 @@
 //! service utility types
-use super::{futures::EitherInto, Either, FutureExt};
-use crate::{request::Request, response::{Response, IntoResponse}};
+use super::Either;
+use crate::{
+    future::{EitherInto, FutureExt},
+    request::Request,
+    response::{IntoResponse, Response},
+};
 use hyper::service::Service;
 use std::convert::Infallible;
 
