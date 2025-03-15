@@ -3,11 +3,7 @@ use crate::{
     future::{EitherInto, FutureExt},
     request::Request,
     response::Response,
-    util::{
-        service::{MethodNotAllowed, NotFound},
-        Layer,
-    },
-    HttpService,
+    service::{HttpService, Layer, MethodNotAllowed, NotFound},
 };
 use handler::HandlerService;
 use http::Method;

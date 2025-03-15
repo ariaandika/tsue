@@ -1,28 +1,37 @@
-//! service utility types
-use super::Either;
 use crate::{
-    future::{EitherInto, FutureExt},
     request::Request,
     response::{IntoResponse, Response},
 };
-use hyper::service::Service;
 use std::convert::Infallible;
 
-impl<Req,Res,Er,L,R> Service<Req> for Either<L,R>
-where
-    L: Service<Req, Response = Res, Error = Er>,
-    R: Service<Req, Response = Res, Error = Er>,
-{
-    type Response = Res;
-    type Error = Er;
-    type Future = EitherInto<L::Future,R::Future,Result<Res,Er>>;
+pub use hyper::service::Service;
 
-    fn call(&self, req: Req) -> Self::Future {
-        match self {
-            Either::Left(l) => l.call(req).left_into(),
-            Either::Right(r) => r.call(req).right_into(),
-        }
-    }
+/// a service that accept http request and return http response
+pub trait HttpService:
+    Service<
+        Request,
+        Response = Response,
+        Error = Infallible,
+        Future = Self::HttpFuture,
+    > + Send
+    + Sync
+    + 'static
+{
+    type HttpFuture: Future<Output = Result<Response,Infallible>> + Send + Sync + 'static;
+}
+
+impl<S> HttpService for S
+where
+    S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
+    S::Future: Send + Sync + 'static,
+{
+    type HttpFuture = Self::Future;
+}
+
+/// service which holds another service
+pub trait Layer<S> {
+    type Service;
+    fn layer(self, service: S) -> Self::Service;
 }
 
 macro_rules! status_service {

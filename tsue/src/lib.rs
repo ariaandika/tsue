@@ -25,11 +25,11 @@ pub mod request;
 pub mod response;
 
 pub mod future;
+pub mod service;
 
 pub mod router;
 pub mod extractor;
 pub mod util;
 pub mod runtime;
 
-#[doc(inline)]
-pub use runtime::{listen, HttpService};
+pub use runtime::listen;

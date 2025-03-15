@@ -1,32 +1,10 @@
 //! entrypoint of the server
-use crate::{request::Request, response::Response};
-use hyper::{server::conn::http1::Builder as Hyper, service::Service};
+use crate::service::HttpService;
+use hyper::server::conn::http1::Builder as Hyper;
 use hyper_util::rt::TokioIo;
 use log::error;
-use std::{convert::Infallible, fmt::Display, io, net::ToSocketAddrs, sync::Arc};
+use std::{fmt::Display, io, net::ToSocketAddrs, sync::Arc};
 use tokio::net::TcpListener;
-
-/// a service that accept http request and return http response
-pub trait HttpService:
-    Service<
-        Request,
-        Response = Response,
-        Error = Infallible,
-        Future = Self::HttpFuture,
-    > + Send
-    + Sync
-    + 'static
-{
-    type HttpFuture: Future<Output = Result<Response,Infallible>> + Send + Sync + 'static;
-}
-
-impl<S> HttpService for S
-where
-    S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
-    S::Future: Send + Sync + 'static,
-{
-    type HttpFuture = Self::Future;
-}
 
 /// entrypoint to run the server
 pub fn listen<S>(addr: impl ToSocketAddrs + Display + Clone, service: S) -> io::Result<()>
