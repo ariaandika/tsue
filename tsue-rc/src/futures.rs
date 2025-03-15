@@ -1,6 +1,12 @@
 //! future utility types
-use std::{marker::PhantomData, task::{ready, Poll}};
 use crate::helpers::Either;
+use std::{
+    marker::PhantomData,
+    task::{
+        ready,
+        Poll::{self, *},
+    },
+};
 
 /// extension trait for `Future` trait
 pub trait FutureExt: Future {
@@ -75,6 +81,30 @@ pub trait FutureExt: Future {
 }
 
 impl<F> FutureExt for F where F: Future { }
+
+pub trait TryFutureExt: Future {
+    /// map future output if its `Ok`
+    fn map_ok<M,T,E,T2>(self, mapper: M) -> MapOk<Self,M>
+    where
+        Self: Future<Output = Result<T,E>>,
+        M: FnOnce(T) -> T2,
+        Self: Sized,
+    {
+        MapOk { inner: self, mapper: Some(mapper)  }
+    }
+
+    /// map future output if its `Err`
+    fn map_err<M,T,E,E2>(self, mapper: M) -> MapErr<Self,M>
+    where
+        Self: Future<Output = Result<T,E>>,
+        M: FnOnce(E) -> E2,
+        Self: Sized,
+    {
+        MapErr { inner: self, mapper: Some(mapper)  }
+    }
+}
+
+impl<F> TryFutureExt for F where F: Future { }
 
 // ---
 
@@ -182,6 +212,8 @@ where
     }
 }
 
+// --
+
 pin_project_lite::pin_project! {
     /// two futures where the output implement the same `Into`
     #[project = EitherIntoProj]
@@ -207,5 +239,60 @@ where
         }
     }
 }
+
+// ---
+
+pin_project_lite::pin_project! {
+    /// map the output of a future
+    pub struct MapOk<F,M> {
+        #[pin]
+        inner: F,
+        mapper: Option<M>,
+    }
+}
+
+impl<F,M,T,T2,E> Future for MapOk<F,M>
+where
+    F: Future<Output = Result<T,E>>,
+    M: FnOnce(T) -> T2,
+{
+    type Output = Result<T2,E>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let me = self.project();
+        match ready!(me.inner.poll(cx)) {
+            Ok(ok) => Ready(Ok(me.mapper.take().expect("poll after complete")(ok))),
+            Err(err) => Ready(Err(err)),
+        }
+    }
+}
+
+// ---
+
+pin_project_lite::pin_project! {
+    /// map the output of a future
+    pub struct MapErr<F,M> {
+        #[pin]
+        inner: F,
+        mapper: Option<M>,
+    }
+}
+
+impl<F,M,T,E,E2> Future for MapErr<F,M>
+where
+    F: Future<Output = Result<T,E>>,
+    M: FnOnce(E) -> E2,
+{
+    type Output = Result<T,E2>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let me = self.project();
+        match ready!(me.inner.poll(cx)) {
+            Ok(ok) => Ready(Ok(ok)),
+            Err(err) => Ready(Err(me.mapper.take().expect("poll after complete")(err))),
+        }
+    }
+}
+
 
 
