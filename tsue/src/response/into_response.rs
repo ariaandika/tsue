@@ -84,7 +84,7 @@ part!((), (self,parts) => ());
 part!(std::convert::Infallible, (self) => match self { });
 part!(StatusCode, mut (self,parts) => parts.status = self);
 part!(Mime, mut (self,parts) => parts.headers.insert(
-    HeaderName::from_static("Content-Type"), HeaderValue::from_str(self.as_ref()).unwrap()
+    HeaderName::from_static("content-type"), HeaderValue::from_str(self.as_ref()).unwrap()
 ));
 part!(HeaderMap, mut,mut (self,parts) => {
     const PLACEHOLDER: HeaderValue = HeaderValue::from_static("deez");
