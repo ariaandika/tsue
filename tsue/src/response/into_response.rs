@@ -1,4 +1,5 @@
-use super::{Html, IntoResponse, IntoResponseParts, Json, Parts, Response};
+use crate::extractor::Json;
+use super::{Html, IntoResponse, IntoResponseParts, Parts, Response};
 use bytes::{Bytes, BytesMut};
 use http::{response, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use mime::Mime;

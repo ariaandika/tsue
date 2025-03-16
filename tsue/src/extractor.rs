@@ -28,3 +28,8 @@ where
     }
 }
 
+/// JSON Request and Response helper
+///
+/// Response with `Content-Type` of `application/json`
+pub struct Json<T>(pub T);
+
