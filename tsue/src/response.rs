@@ -1,5 +1,6 @@
 //! HTTP response
 use bytes::Bytes;
+use http::StatusCode;
 use http_body_util::Full;
 
 mod into_response;
@@ -28,4 +29,25 @@ pub trait IntoResponseParts {
 
 /// Response with `Content-Type` of `text/html; charset=utf-8`
 pub struct Html<T>(pub T);
+
+/// Response with `3xx` status code
+pub struct Redirect {
+    status: StatusCode,
+    location: String,
+}
+
+impl Redirect {
+    /// by default it will redirect with 307 Temporary Redirect
+    pub fn new(location: String) -> Redirect {
+        Redirect {
+            status: StatusCode::TEMPORARY_REDIRECT,
+            location,
+        }
+    }
+
+    /// redrect with custom status code
+    pub fn with_status(status: StatusCode, location: String) -> Redirect {
+        Redirect { status, location, }
+    }
+}
 

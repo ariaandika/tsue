@@ -1,5 +1,5 @@
 use crate::extractor::Json;
-use super::{Html, IntoResponse, IntoResponseParts, Parts, Response};
+use super::{Html, IntoResponse, IntoResponseParts, Parts, Redirect, Response};
 use bytes::{Bytes, BytesMut};
 use http::{response, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use mime::Mime;
@@ -102,6 +102,9 @@ res!(&'static str, self => IntoResponse::into_response((
 )));
 res!(String, self => IntoResponse::into_response((
     ("Content-Type","text/plain; charset=utf-8"), Bytes::from(self)
+)));
+res!(Redirect, self => IntoResponse::into_response((
+    [("Location",self.location)], self.status,
 )));
 
 impl<T> IntoResponse for Html<T> where T: Into<Bytes> {
