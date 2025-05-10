@@ -1,24 +1,21 @@
 //! The [`Service`] trait and helpers
+use std::convert::Infallible;
+
 use crate::{
     request::Request,
     response::{IntoResponse, Response},
 };
-use std::convert::Infallible;
 
 pub use hyper::service::Service;
 
-/// A `Service` that accept http request and return http response
+/// A [`Service`] that accept http request and return http response.
 pub trait HttpService:
-    Service<
-        Request,
-        Response = Response,
-        Error = Infallible,
-        Future = Self::HttpFuture,
-    > + Send
+    Service<Request, Response = Response, Error = Infallible, Future = Self::HttpFuture>
+    + Send
     + Sync
     + 'static
 {
-    type HttpFuture: Future<Output = Result<Response,Infallible>> + Send + Sync + 'static;
+    type HttpFuture: Future<Output = Result<Response, Infallible>> + Send + Sync + 'static;
 }
 
 impl<S> HttpService for S
@@ -29,9 +26,10 @@ where
     type HttpFuture = Self::Future;
 }
 
-/// A `Service` which holds another service
+/// A [`Service`] which holds another service.
 pub trait Layer<S> {
     type Service;
+
     fn layer(self, service: S) -> Self::Service;
 }
 
@@ -53,6 +51,6 @@ macro_rules! status_service {
     };
 }
 
-status_service!("Service 404 Not Found" NotFound NOT_FOUND);
-status_service!("Service 405 Method Not Alowed" MethodNotAllowed METHOD_NOT_ALLOWED);
+status_service!("[`Service`] that response with 404 Not Found" NotFound NOT_FOUND);
+status_service!("[`Service`] that response with 405 Method Not Alowed" MethodNotAllowed METHOD_NOT_ALLOWED);
 

@@ -1,12 +1,16 @@
-//! Multiple [`FromRequest`] implementation helpers
+//! Multiple [`FromRequest`] implementation helpers.
 //!
 //! [`FromRequest`]: crate::request::FromRequest
-use crate::{request::FromRequestParts, response::{Response, IntoResponse}};
-use http::{request, StatusCode};
+use http::{StatusCode, request};
 use log::error;
-use std::future::{ready, Ready};
+use std::future::{Ready, ready};
 
-/// Extract shared state
+use crate::{
+    request::FromRequestParts,
+    response::{IntoResponse, Response},
+};
+
+/// Extract shared state.
 #[derive(Clone)]
 pub struct State<T>(pub T);
 
@@ -28,8 +32,8 @@ where
     }
 }
 
-/// JSON Request and Response helper
+/// JSON Request and Response helper.
 ///
-/// Response with `Content-Type` of `application/json`
+/// Response with `Content-Type` of `application/json`.
 pub struct Json<T>(pub T);
 
