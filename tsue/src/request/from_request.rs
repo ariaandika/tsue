@@ -1,13 +1,22 @@
 use bytes::Bytes;
-use http::{Extensions, HeaderMap, Method, Uri, Version};
+use http::{Extensions, HeaderMap, Method, StatusCode, Uri, Version};
+use http_body_util::{BodyExt, combinators::Collect};
 use serde::de::DeserializeOwned;
 use std::{
     convert::Infallible,
+    fmt,
     future::{Ready, ready},
+    marker::PhantomData,
+    pin::Pin,
+    string::FromUtf8Error,
+    task::{Context, Poll, ready},
 };
 
 use super::{Body, FromRequest, FromRequestParts, Parts, Request};
-use crate::extractor::Json;
+use crate::{
+    extractor::Json,
+    response::{IntoResponse, Response},
+};
 
 macro_rules! from_parts {
     ($self:ty, ($parts:pat) => $body: expr) => {
@@ -39,7 +48,7 @@ macro_rules! from_req {
     };
 }
 
-/// anything that implement `FromRequestParts` also implement `FromRequest`
+/// Anything that implement `FromRequestParts` also implement `FromRequest`.
 impl<F> FromRequest for F where F: FromRequestParts {
     type Error = <F as FromRequestParts>::Error;
 
@@ -61,20 +70,20 @@ from_parts!(Parts, (parts) => parts.clone());
 from_req!(Request, (req) => req);
 from_req!(Body, (req) => req.into_body());
 
-// Body Implementations
+// ===== Body Implementations =====
 
 from_req! {
     Bytes,
     Error = BytesFutureError;
     Future = BytesFuture;
-    (req) => BytesFuture::new(req.into_body())
+    (req) => BytesFuture { inner: req.into_body().collect() }
 }
 
 from_req! {
     String,
     Error = StringFutureError;
     Future = StringFuture;
-    (req) => StringFuture::new(req.into_body())
+    (req) => StringFuture { inner: req.into_body().collect() }
 }
 
 impl<T> FromRequest for Json<T>
@@ -85,189 +94,147 @@ where
     type Future = JsonFuture<T>;
 
     fn from_request(req: Request) -> Self::Future {
-        JsonFuture::new(req.into_body())
-    }
-}
-
-pub use bytes_future::{BytesFuture, BytesFutureError};
-pub use string_future::{StringFuture, StringFutureError};
-pub use json_future::{JsonFuture, JsonFutureError};
-
-mod bytes_future {
-    use super::*;
-    use crate::response::{IntoResponse, Response};
-    use http::StatusCode;
-    use http_body_util::{combinators::Collect, BodyExt};
-
-    pin_project_lite::pin_project! {
-        /// Future returned from [`Bytes`] implementation of [`FromRequest`]
-        pub struct BytesFuture {
-            #[pin]
-            inner: Collect<Body>,
-        }
-    }
-
-    impl BytesFuture {
-        pub fn new(inner: Body) -> BytesFuture {
-            Self { inner: inner.collect() }
-        }
-    }
-
-    impl Future for BytesFuture {
-        type Output = Result<Bytes, BytesFutureError>;
-
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            match self.project().inner.poll(cx) {
-                Ready(Ok(ok)) => Ready(Ok(ok.to_bytes())),
-                Ready(Err(err)) => Ready(Err(BytesFutureError(err))),
-                Pending => Pending
-            }
-        }
-    }
-
-    /// Error that can be returned by [`BytesFuture`]
-    #[derive(Debug)]
-    pub struct BytesFutureError(hyper::Error);
-
-    impl IntoResponse for BytesFutureError {
-        fn into_response(self) -> Response {
-            (StatusCode::BAD_REQUEST,self.0.to_string()).into_response()
-        }
-    }
-
-    impl std::error::Error for BytesFutureError { }
-    impl std::fmt::Display for BytesFutureError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            self.0.fmt(f)
+        JsonFuture {
+            inner: req.into_body().collect(),
+            _p: PhantomData,
         }
     }
 }
 
-mod string_future {
-    use super::*;
-    use crate::response::{IntoResponse, Response};
-    use http::StatusCode;
-    use http_body_util::{combinators::Collect, BodyExt};
-    use std::string::FromUtf8Error;
+// ===== Future Implementations =====
 
-    pin_project_lite::pin_project! {
-        /// Future returned from [`String`] implementation of [`FromRequest`]
-        pub struct StringFuture {
-            #[pin]
-            inner: Collect<Body>,
-        }
+/// Future returned from [`Bytes`] implementation of [`FromRequest`].
+pub struct BytesFuture {
+    inner: Collect<Body>,
+}
+
+/// Future returned from [`String`] implementation of [`FromRequest`].
+pub struct StringFuture {
+    inner: Collect<Body>,
+}
+
+pin_project_lite::pin_project! {
+    /// Future returned from [`Json`] implementation of [`FromRequest`].
+    pub struct JsonFuture<T> {
+        #[pin]
+        inner: Collect<Body>,
+        _p: PhantomData<T>,
     }
+}
 
-    impl StringFuture {
-        pub fn new(inner: Body) -> Self {
-            Self { inner: inner.collect() }
-        }
+impl Future for BytesFuture {
+    type Output = Result<Bytes, BytesFutureError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let ok = ready!(Pin::new(&mut self.inner).poll(cx)?);
+        Poll::Ready(Ok(ok.to_bytes()))
     }
+}
 
-    impl Future for StringFuture {
-        type Output = Result<String, StringFutureError>;
+impl Future for StringFuture {
+    type Output = Result<String, StringFutureError>;
 
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            match self.project().inner.poll(cx) {
-                Ready(Ok(ok)) => match String::from_utf8(ok.to_bytes().into()) {
-                    Ok(ok) => Ready(Ok(ok)),
-                    Err(err) => Ready(Err(StringFutureError::Utf8(err))),
-                },
-                Ready(Err(err)) => Ready(Err(StringFutureError::Hyper(err))),
-                Pending => Pending
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let ok = ready!(Pin::new(&mut self.inner).poll(cx)?).to_bytes();
+        Poll::Ready(Ok(String::from_utf8(ok.into())?))
+    }
+}
+
+impl<T> Future for JsonFuture<T>
+where
+    T: DeserializeOwned,
+{
+    type Output = Result<Json<T>, JsonFutureError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let ok = ready!(self.project().inner.poll(cx)?).to_bytes();
+        Poll::Ready(Ok(Json(serde_json::from_slice::<T>(&ok)?)))
+    }
+}
+
+// ===== Errors =====
+
+macro_rules! from {
+    ($id:ident, $fr:ty: $pat:pat => $body:expr) => {
+        impl From<$fr> for $id {
+            fn from($pat: $fr) -> Self {
+                $body
             }
         }
-    }
+    };
+}
 
-    /// Error that can be returned by [`StringFuture`]
-    #[derive(Debug)]
-    pub enum StringFutureError {
-        Hyper(hyper::Error),
-        Utf8(FromUtf8Error),
-    }
+/// Error that can be returned by [`BytesFuture`].
+#[derive(Debug)]
+pub struct BytesFutureError(hyper::Error);
 
-    impl IntoResponse for StringFutureError {
-        fn into_response(self) -> Response {
-            (StatusCode::BAD_REQUEST,self.to_string()).into_response()
-        }
-    }
+from!(BytesFutureError, hyper::Error: e => Self(e));
 
-    impl std::error::Error for StringFutureError { }
-    impl std::fmt::Display for StringFutureError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                Self::Hyper(hyper) => hyper.fmt(f),
-                Self::Utf8(utf8) => utf8.fmt(f),
-            }
+impl IntoResponse for BytesFutureError {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, self.0.to_string()).into_response()
+    }
+}
+
+impl std::error::Error for BytesFutureError { }
+
+impl fmt::Display for BytesFutureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// Error that can be returned by [`StringFuture`].
+#[derive(Debug)]
+pub enum StringFutureError {
+    Hyper(hyper::Error),
+    Utf8(FromUtf8Error),
+}
+
+from!(StringFutureError, hyper::Error: e => Self::Hyper(e));
+from!(StringFutureError, FromUtf8Error: e => Self::Utf8(e));
+
+impl IntoResponse for StringFutureError {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
+    }
+}
+
+impl std::error::Error for StringFutureError { }
+
+impl fmt::Display for StringFutureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Hyper(hyper) => hyper.fmt(f),
+            Self::Utf8(utf8) => utf8.fmt(f),
         }
     }
 }
 
-mod json_future {
-    use super::*;
-    use crate::response::{IntoResponse, Response};
-    use http::StatusCode;
-    use http_body_util::{combinators::Collect, BodyExt};
-    use std::marker::PhantomData;
+/// Error that can be returned by [`JsonFuture`].
+#[derive(Debug)]
+pub enum JsonFutureError {
+    Hyper(hyper::Error),
+    Serde(serde_json::Error),
+}
 
-    pin_project_lite::pin_project! {
-        /// Future returned from [`Json`] implementation of [`FromRequest`]
-        pub struct JsonFuture<T> {
-            #[pin]
-            inner: Collect<Body>,
-            _p: PhantomData<T>,
-        }
-    }
+from!(JsonFutureError, hyper::Error: e => Self::Hyper(e));
+from!(JsonFutureError, serde_json::Error: e => Self::Serde(e));
 
-    impl<T> JsonFuture<T> {
-        pub fn new(inner: Body) -> Self {
-            Self { inner: inner.collect(), _p: PhantomData }
-        }
-    }
-
-    impl<T> Future for JsonFuture<T>
-    where
-        T: DeserializeOwned,
-    {
-        type Output = Result<Json<T>, JsonFutureError>;
-
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-            use std::task::Poll::*;
-            match self.project().inner.poll(cx) {
-                Ready(Ok(ok)) => match serde_json::from_slice::<T>(&ok.to_bytes()) {
-                    Ok(ok) => Ready(Ok(Json(ok))),
-                    Err(err) => Ready(Err(JsonFutureError::Serde(err))),
-                },
-                Ready(Err(err)) => Ready(Err(JsonFutureError::Hyper(err))),
-                Pending => Pending
-            }
-        }
-    }
-
-    /// Error that can be returned by [`JsonFuture`]
-    #[derive(Debug)]
-    pub enum JsonFutureError {
-        Hyper(hyper::Error),
-        Serde(serde_json::Error),
-    }
-
-    impl IntoResponse for JsonFutureError {
-        fn into_response(self) -> Response {
-            (StatusCode::BAD_REQUEST,self.to_string()).into_response()
-        }
-    }
-
-    impl std::error::Error for JsonFutureError { }
-    impl std::fmt::Display for JsonFutureError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                Self::Hyper(hyper) => hyper.fmt(f),
-                Self::Serde(serde) => serde.fmt(f),
-            }
-        }
+impl IntoResponse for JsonFutureError {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
     }
 }
 
+impl std::error::Error for JsonFutureError { }
+
+impl fmt::Display for JsonFutureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Hyper(hyper) => hyper.fmt(f),
+            Self::Serde(serde) => serde.fmt(f),
+        }
+    }
+}
 

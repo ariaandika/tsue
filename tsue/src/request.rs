@@ -3,11 +3,13 @@ use crate::response::IntoResponse;
 
 mod from_request;
 
+pub use from_request::{
+    BytesFuture, BytesFutureError, JsonFuture, JsonFutureError, StringFuture, StringFutureError,
+};
 pub use http::request::Parts;
 pub use hyper::body::Incoming as Body;
-pub use from_request::{BytesFuture, BytesFutureError, StringFuture, StringFutureError};
 
-/// Represents an HTTP request
+/// Represents an HTTP request.
 pub type Request<T = Body> = hyper::http::Request<T>;
 
 // NOTE: Previously, `FromRequest` only accept mutable reference of `request::Parts`
@@ -22,21 +24,25 @@ pub type Request<T = Body> = hyper::http::Request<T>;
 // because it can be referenced externally
 // [issue](#63063 <https://github.com/rust-lang/rust/issues/63063>)
 
-/// A type that can be constructed from Request
+/// A type that can be constructed from Request.
 ///
-/// this trait is used as request handler parameters
+/// This trait is used as request handler parameters.
 pub trait FromRequest: Sized {
     type Error: IntoResponse;
+
     type Future: Future<Output = Result<Self, Self::Error>>;
+
     fn from_request(req: Request) -> Self::Future;
 }
 
-/// A type that can be constructed from Request parts
+/// A type that can be constructed from Request parts.
 ///
-/// this trait is used as request handler parameters
+/// This trait is used as request handler parameters.
 pub trait FromRequestParts: Sized {
     type Error: IntoResponse;
+
     type Future: Future<Output = Result<Self, Self::Error>>;
+
     fn from_request_parts(parts: &mut Parts) -> Self::Future;
 }
 
