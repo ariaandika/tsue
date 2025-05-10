@@ -117,17 +117,20 @@ where
 // ===== Future Implementations =====
 
 /// Future returned from [`Bytes`] implementation of [`FromRequest`].
+#[derive(Debug)]
 pub struct BytesFuture {
     buffer: BytesMut,
     inner: Body,
 }
 
 /// Future returned from [`String`] implementation of [`FromRequest`].
+#[derive(Debug)]
 pub struct StringFuture {
     f: BytesFuture,
 }
 
 /// Future returned from [`Json`] implementation of [`FromRequest`].
+#[derive(Debug)]
 pub struct JsonFuture<T> {
     f: BytesFuture,
     _p: PhantomData<T>,
@@ -190,6 +193,12 @@ macro_rules! from {
 pub struct BytesFutureError(hyper::Error);
 
 from!(BytesFutureError, hyper::Error: e => Self(e));
+
+impl From<BytesFutureError> for hyper::Error {
+    fn from(value: BytesFutureError) -> Self {
+        value.0
+    }
+}
 
 impl IntoResponse for BytesFutureError {
     fn into_response(self) -> Response {
