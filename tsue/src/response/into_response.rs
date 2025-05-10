@@ -124,8 +124,9 @@ where
     fn into_response(self) -> Response {
         match serde_json::to_vec(&self.0) {
             Ok(ok) => (("content-type", "application/json"), ok).into_response(),
-            Err(err) => {
-                log::error!("failed to serialize: {err}");
+            Err(_err) => {
+                #[cfg(feature = "log")]
+                log::error!("failed to serialize json response: {_err}");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }

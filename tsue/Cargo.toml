@@ -9,7 +9,7 @@ http = "1.2.0"
 http-body-util = "0.1.2"
 hyper = "1.6.0"
 hyper-util = { version = "0.1.10", features = ["server", "tokio", "http1"], optional = true }
-log = "0.4.26"
+log = { version = "0.4.26", optional = true }
 mime = "0.3.17"
 pin-project-lite = "0.2.16"
 serde = "1.0.219"
@@ -18,3 +18,4 @@ tokio = { version = "1.43.0", features = ["net"], optional = true }
 
 [features]
 tokio = ["dep:tokio","dep:hyper-util","hyper/server","hyper/http1"]
+log = ["dep:log"]

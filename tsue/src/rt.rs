@@ -1,7 +1,6 @@
 //! Entrypoint of the server
 use hyper::server::conn::http1::Builder as Hyper;
 use hyper_util::rt::TokioIo;
-use log::error;
 use std::{fmt::Display, io, sync::Arc};
 use tokio::net::{TcpListener, ToSocketAddrs};
 
@@ -29,8 +28,9 @@ where
                         .with_upgrades(),
                 );
             }
-            Err(err) => {
-                error!("{err}");
+            Err(_err) => {
+                #[cfg(feature = "log")]
+                log::error!("failed to connect peer: {_err}");
             }
         }
     }

@@ -2,7 +2,6 @@
 //!
 //! [`FromRequest`]: crate::request::FromRequest
 use http::{StatusCode, request};
-use log::error;
 use std::future::{Ready, ready};
 
 use crate::{
@@ -25,7 +24,8 @@ where
         ready(match parts.extensions.get::<T>().cloned() {
             Some(ok) => Ok(Self(ok)),
             None => {
-                error!("State is not declared");
+                #[cfg(feature = "log")]
+                log::error!("State is not declared");
                 Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
             },
         })
