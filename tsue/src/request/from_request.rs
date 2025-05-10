@@ -1,13 +1,13 @@
-use super::{Body, FromRequest, FromRequestParts, Parts, Request};
-use crate::extractor::Json;
 use bytes::Bytes;
 use http::{Extensions, HeaderMap, Method, Uri, Version};
 use serde::de::DeserializeOwned;
 use std::{
     convert::Infallible,
-    future::{ready, Ready},
-    mem,
+    future::{Ready, ready},
 };
+
+use super::{Body, FromRequest, FromRequestParts, Parts, Request};
+use crate::extractor::Json;
 
 macro_rules! from_parts {
     ($self:ty, ($parts:pat) => $body: expr) => {
@@ -42,6 +42,7 @@ macro_rules! from_req {
 /// anything that implement `FromRequestParts` also implement `FromRequest`
 impl<F> FromRequest for F where F: FromRequestParts {
     type Error = <F as FromRequestParts>::Error;
+
     type Future = <F as FromRequestParts>::Future;
 
     fn from_request(req: Request) -> Self::Future {
@@ -51,11 +52,11 @@ impl<F> FromRequest for F where F: FromRequestParts {
 
 from_parts!((), (_) => ());
 from_parts!(Method, (parts) => parts.method.clone());
-from_parts!(Uri, (parts) => mem::take(&mut parts.uri));
+from_parts!(Uri, (parts) => parts.uri.clone());
 from_parts!(Version, (parts) => parts.version);
-from_parts!(HeaderMap, (parts) => mem::take(&mut parts.headers));
-from_parts!(Extensions, (parts) => mem::take(&mut parts.extensions));
-from_parts!(Parts, (parts) => mem::replace(parts, Request::new(()).into_parts().0));
+from_parts!(HeaderMap, (parts) => parts.headers.clone());
+from_parts!(Extensions, (parts) => parts.extensions.clone());
+from_parts!(Parts, (parts) => parts.clone());
 
 from_req!(Request, (req) => req);
 from_req!(Body, (req) => req.into_body());
