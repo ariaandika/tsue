@@ -81,7 +81,12 @@ where
     }
 }
 
-part!((), (self,parts) => ());
+impl IntoResponseParts for () {
+    fn into_response_parts(self, parts: Parts) -> Parts {
+        parts
+    }
+}
+
 part!(std::convert::Infallible, (self) => match self { });
 part!(StatusCode, mut (self,parts) => parts.status = self);
 part!(Mime, mut (self,parts) => parts.headers.insert(
