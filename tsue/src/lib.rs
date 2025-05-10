@@ -30,6 +30,10 @@ pub mod helper;
 
 pub mod route;
 pub mod extractor;
+
+#[cfg(feature = "tokio")]
 pub mod rt;
 
+#[cfg(feature = "tokio")]
 pub use rt::listen;
+

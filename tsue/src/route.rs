@@ -64,10 +64,11 @@ where
     S: HttpService
 {
     /// Alternative way to start server
+    #[cfg(feature = "tokio")]
     pub fn listen(
         self,
-        addr: impl std::net::ToSocketAddrs + std::fmt::Display + Clone,
-    ) -> Result<(), std::io::Error> {
+        addr: impl tokio::net::ToSocketAddrs + std::fmt::Display + Clone,
+    ) -> impl Future<Output = Result<(), std::io::Error> > {
         crate::listen(addr, self)
     }
 }
