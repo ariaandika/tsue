@@ -1,6 +1,4 @@
 //! HTTP request
-use crate::response::IntoResponse;
-
 mod from_request;
 
 pub use from_request::{
@@ -28,7 +26,7 @@ pub type Request<T = Body> = hyper::http::Request<T>;
 ///
 /// This trait is used as request handler parameters.
 pub trait FromRequest: Sized {
-    type Error: IntoResponse;
+    type Error;
 
     type Future: Future<Output = Result<Self, Self::Error>>;
 
@@ -39,7 +37,7 @@ pub trait FromRequest: Sized {
 ///
 /// This trait is used as request handler parameters.
 pub trait FromRequestParts: Sized {
-    type Error: IntoResponse;
+    type Error;
 
     type Future: Future<Output = Result<Self, Self::Error>>;
 

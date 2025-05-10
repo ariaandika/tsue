@@ -1,11 +1,12 @@
 //! functional route
+use hyper::service::Service;
+use std::{convert::Infallible, marker::PhantomData};
+
 use crate::{
     future::{FutureExt, MapInfallible},
     request::{Body, FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
 };
-use hyper::service::Service;
-use std::{convert::Infallible, marker::PhantomData};
 
 /// functional service
 #[derive(Clone)]
@@ -64,6 +65,7 @@ where
     Fut: Future,
     Fut::Output: IntoResponse,
     A: FromRequest,
+    A::Error: IntoResponse,
 {
     type Future = Fd<FrCall<A>, fn(A, F) -> Fut, Fut, F>;
 
@@ -79,7 +81,9 @@ where
     Fut: Future,
     Fut::Output: IntoResponse,
     A1: FromRequestParts,
+    A1::Error: IntoResponse,
     A: FromRequest,
+    A::Error: IntoResponse,
 {
     type Future=Fd<Fr<FrpCall<A1>,A1,A>,fn((A1,A),F)->Fut,Fut,F>;
 
@@ -96,8 +100,11 @@ where
     Fut: Future,
     Fut::Output: IntoResponse,
     A1: FromRequestParts,
+    A1::Error: IntoResponse,
     A2: FromRequestParts,
+    A2::Error: IntoResponse,
     A: FromRequest,
+    A::Error: IntoResponse,
 {
     type Future = Fd<Fr<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A>, fn(((A1, A2), A), F) -> Fut, Fut, F>;
 
@@ -115,9 +122,13 @@ where
     Fut: Future,
     Fut::Output: IntoResponse,
     A1: FromRequestParts,
+    A1::Error: IntoResponse,
     A2: FromRequestParts,
+    A2::Error: IntoResponse,
     A3: FromRequestParts,
+    A3::Error: IntoResponse,
     A: FromRequest,
+    A::Error: IntoResponse,
 {
     type Future=Fd<Fr<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A>,fn((((A1,A2),A3),A),F)->Fut,Fut,F>;
 
@@ -139,10 +150,15 @@ where
     Fut: Future,
     Fut::Output: IntoResponse,
     A1: FromRequestParts,
+    A1::Error: IntoResponse,
     A2: FromRequestParts,
+    A2::Error: IntoResponse,
     A3: FromRequestParts,
+    A3::Error: IntoResponse,
     A4: FromRequestParts,
+    A4::Error: IntoResponse,
     A: FromRequest,
+    A::Error: IntoResponse,
 {
     type Future=Fd<Fr<Frp<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A4>,(((A1,A2),A3),A4),A>,fn(((((A1,A2),A3),A4),A),F)->Fut,Fut,F>;
 
@@ -159,11 +175,17 @@ where
     Fut: Future,
     Fut::Output: IntoResponse,
     A1: FromRequestParts,
+    A1::Error: IntoResponse,
     A2: FromRequestParts,
+    A2::Error: IntoResponse,
     A3: FromRequestParts,
+    A3::Error: IntoResponse,
     A4: FromRequestParts,
+    A4::Error: IntoResponse,
     A5: FromRequestParts,
+    A5::Error: IntoResponse,
     A: FromRequest,
+    A::Error: IntoResponse,
 {
     type Future=Fd<Fr<Frp<Frp<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A4>,(((A1,A2),A3),A4),A5>,((((A1,A2),A3),A4),A5),A>,fn((((((A1,A2),A3),A4),A5),A),F)->Fut,Fut,F>;
 
@@ -233,6 +255,7 @@ mod future {
     impl<Frp> Future for FrpCall<Frp>
     where
         Frp: FromRequestParts,
+        Frp::Error: IntoResponse,
     {
         type Output = Result<(request::Parts,Frp),Response>;
 
@@ -272,6 +295,7 @@ mod future {
     where
         Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
         Frp2: FromRequestParts,
+        Frp2::Error: IntoResponse,
     {
         type Output = Result<(request::Parts,(Frp1,Frp2)),Response>;
 
@@ -319,6 +343,7 @@ mod future {
     impl<Fr> Future for FrCall<Fr>
     where
         Fr: FromRequest,
+        Fr::Error: IntoResponse,
     {
         type Output = Result<Fr,Response>;
 
@@ -358,6 +383,7 @@ mod future {
     where
         Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
         Fr1: FromRequest,
+        Fr1::Error: IntoResponse,
     {
         type Output = Result<(Frp1,Fr1),Response>;
 
