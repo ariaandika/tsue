@@ -1,9 +1,10 @@
-use crate::extractor::Json;
-use super::{Html, IntoResponse, IntoResponseParts, Parts, Redirect, Response};
 use bytes::{Bytes, BytesMut};
-use http::{response, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, response};
 use mime::Mime;
 use serde::Serialize;
+
+use super::{Html, IntoResponse, IntoResponseParts, Parts, Redirect, Response};
+use crate::extractor::Json;
 
 macro_rules! part {
     ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident) => $body:expr) => {
@@ -31,7 +32,7 @@ macro_rules! res {
     };
 }
 
-/// anything that implement `IntoResponseParts` also implement `IntoResponse`
+/// Anything that implement [`IntoResponseParts`] also implement [`IntoResponse`].
 impl<R> IntoResponse for R
 where
     R: IntoResponseParts,
@@ -98,29 +99,35 @@ res!(Vec<u8>, self => Response::new(self.into()));
 res!(BytesMut, self => Response::new(self.freeze().into()));
 res!(Response, self => self);
 res!(&'static str, self => IntoResponse::into_response((
-    ("Content-Type","text/plain; charset=utf-8"), Bytes::from_static(self.as_bytes())
+    ("content-type","text/plain; charset=utf-8"), Bytes::from_static(self.as_bytes())
 )));
 res!(String, self => IntoResponse::into_response((
-    ("Content-Type","text/plain; charset=utf-8"), Bytes::from(self)
+    ("content-type","text/plain; charset=utf-8"), Bytes::from(self)
 )));
 res!(Redirect, self => IntoResponse::into_response((
-    [("Location",self.location)], self.status,
+    [("location",self.location)], self.status,
 )));
 
-impl<T> IntoResponse for Html<T> where T: Into<Bytes> {
+impl<T> IntoResponse for Html<T>
+where
+    T: Into<Bytes>,
+{
     fn into_response(self) -> Response {
-        (("Content-Type","text/html; charset=utf-8"),self.0.into()).into_response()
+        (("content-type", "text/html; charset=utf-8"), self.0.into()).into_response()
     }
 }
 
-impl<T> IntoResponse for Json<T> where T: Serialize {
+impl<T> IntoResponse for Json<T>
+where
+    T: Serialize,
+{
     fn into_response(self) -> Response {
         match serde_json::to_vec(&self.0) {
-            Ok(ok) => (("Content-Type","application/json"),ok).into_response(),
+            Ok(ok) => (("content-type", "application/json"), ok).into_response(),
             Err(err) => {
                 log::error!("failed to serialize: {err}");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
-            },
+            }
         }
     }
 }
