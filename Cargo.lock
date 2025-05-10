@@ -45,6 +45,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "example"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tokio",
+ "tsue",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -220,15 +229,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mvc"
-version = "0.1.0"
-dependencies = [
- "serde",
- "tour",
- "tsue",
-]
-
-[[package]]
 name = "object"
 version = "0.36.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -340,44 +340,24 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.43.0"
+version = "1.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d61fa4ffa3de412bfea335c6ecff681de2b609ba3c77ef3e00e521813a9ed9e"
+checksum = "2513ca694ef9ede0fb23fe71a4ee4107cb102b9dc1930f6d0fd77aae068ae165"
 dependencies = [
  "backtrace",
  "libc",
  "mio",
  "pin-project-lite",
  "socket2",
+ "tokio-macros",
  "windows-sys",
 ]
 
 [[package]]
-name = "tour"
-version = "0.1.0"
-source = "git+https://github.com/ariaandika/tour.git#dd1ec5075aed402b575af4aad8b7600266e1f9ff"
-dependencies = [
- "bytes",
- "itoa",
- "tour-macros",
- "tour-parser",
-]
-
-[[package]]
-name = "tour-macros"
-version = "0.1.0"
-source = "git+https://github.com/ariaandika/tour.git#dd1ec5075aed402b575af4aad8b7600266e1f9ff"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
- "tour-parser",
-]
-
-[[package]]
-name = "tour-parser"
-version = "0.1.0"
-source = "git+https://github.com/ariaandika/tour.git#dd1ec5075aed402b575af4aad8b7600266e1f9ff"
+name = "tokio-macros"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e06d43f1345a3bcd39f6a56dbb7dcab2ba47e68e8ac134855e7e2bdbaf8cab8"
 dependencies = [
  "proc-macro2",
  "quote",
