@@ -1,3 +1,4 @@
+//! `Futures` and `Error` types.
 use bytes::Bytes;
 use http::{Extensions, HeaderMap, Method, StatusCode, Uri, Version};
 use http_body_util::{BodyExt, combinators::Collect};

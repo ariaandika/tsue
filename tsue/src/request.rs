@@ -1,9 +1,6 @@
 //! HTTP request
-mod from_request;
+pub mod from_request;
 
-pub use from_request::{
-    BytesFuture, BytesFutureError, JsonFuture, JsonFutureError, StringFuture, StringFutureError,
-};
 pub use http::request::Parts;
 pub use hyper::body::Incoming as Body;
 
