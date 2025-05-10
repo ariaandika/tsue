@@ -1,17 +1,16 @@
 //! HTTP response
-use bytes::Bytes;
 use http::StatusCode;
-use http_body_util::Full;
 
 mod into_response;
 
+pub use into_response::Full;
 pub use http::response::Parts;
 
 /// Represents an HTTP response
 pub type Response<T = ResBody> = hyper::http::Response<T>;
 
 /// Represents a response body
-pub type ResBody = Full<Bytes>;
+pub type ResBody = Full;
 
 /// A type that can be converted into response
 ///

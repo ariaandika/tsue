@@ -6,6 +6,43 @@ use serde::Serialize;
 use super::{Html, IntoResponse, IntoResponseParts, Parts, Redirect, Response};
 use crate::extractor::Json;
 
+/// Response body.
+#[derive(Debug, Default, Clone)]
+pub struct Full {
+    inner: Bytes,
+}
+
+impl<T: Into<Bytes>> From<T> for Full {
+    fn from(value: T) -> Self {
+        Self { inner: value.into() }
+    }
+}
+
+impl http_body::Body for Full {
+    type Data = Bytes;
+
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        if self.inner.is_empty() {
+            std::task::Poll::Ready(None)
+        } else {
+            std::task::Poll::Ready(Some(Ok(http_body::Frame::data(std::mem::take(&mut self.inner)))))
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        http_body::SizeHint::with_exact(self.inner.len().try_into().unwrap())
+    }
+}
+
 macro_rules! part {
     ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident) => $body:expr) => {
         part!(@ $target, $($mut)* $(, $mut2)* ($self,_part) => $body);
