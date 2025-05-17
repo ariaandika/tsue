@@ -1,10 +1,10 @@
 //! functional route
 use futures_util::{FutureExt, future::Map};
 use hyper::service::Service;
-use std::{convert::Infallible, marker::PhantomData};
+use std::{convert::Infallible, future::{ready, Ready}, marker::PhantomData};
 
 use crate::{
-    request::{Body, FromRequest, FromRequestParts, Request},
+    request::{self, Body, FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
 };
 
@@ -59,7 +59,7 @@ where
     }
 }
 
-impl<F,A,Fut> Handler<(A,)> for F
+impl<F, A, Fut> Handler<(A,)> for F
 where
     F: FnOnce(A) -> Fut + Clone,
     Fut: Future,
@@ -67,11 +67,12 @@ where
     A: FromRequest,
     A::Error: IntoResponse,
 {
-    type Future = Fd<FrCall<A>, fn(A, F) -> Fut, Fut, F>;
+    type Future = Fd<Fr<Ready<Result<(request::Parts, ()), Response>>, (), A>, fn(((), A), F) -> Fut, Fut, F>;
 
     fn handle(&self, req: Request) -> Self::Future {
-        fn mapper<A,F,Fut>(a: A, inner: F) -> Fut where F: FnOnce(A) -> Fut, { inner(a) }
-        Fd::new(FrCall::new(req), self.clone(), mapper)
+        let (parts, body) = req.into_parts();
+        fn mapper<A, F, Fut>(((), a): ((), A), inner: F) -> Fut where F: FnOnce(A) -> Fut { inner(a) }
+        Fd::new(Fr::new(ready(Ok((parts, ()))), body), self.clone(), mapper)
     }
 }
 
