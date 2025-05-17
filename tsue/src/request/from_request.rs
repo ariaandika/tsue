@@ -1,17 +1,14 @@
 //! `Futures` and `Error` types.
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
+use futures_util::{FutureExt, future::Map};
 use http::{Extensions, HeaderMap, Method, StatusCode, Uri, Version};
-use http_body::Body as _;
+use http_body_util::{BodyExt, Collected, combinators::Collect};
 use serde::de::DeserializeOwned;
 use std::{
     convert::Infallible,
     fmt,
     future::{Ready, ready},
-    marker::PhantomData,
-    mem,
-    pin::Pin,
     string::FromUtf8Error,
-    task::{Context, Poll, ready},
 };
 
 use super::{Body, FromRequest, FromRequestParts, Parts, Request};
@@ -20,14 +17,17 @@ use crate::{
     response::{IntoResponse, Response},
 };
 
+// ===== Macros =====
+
 macro_rules! from_parts {
-    ($self:ty, ($parts:pat) => $body: expr) => {
-        from_parts!(
-            $self,Error=Infallible;Future=Ready<Result<Self,Self::Error>>;
-            ($parts) => ready(Ok($body))
-        );
+    ($self:ty, |$parts:pat_param|$body:expr) => {
+        impl FromRequestParts for $self {
+            type Error = Infallible;
+            type Future = Ready<Result<Self,Self::Error>>;
+            fn from_request_parts($parts: &mut Parts) -> Self::Future { ready(Ok($body)) }
+        }
     };
-    ($self:ty, $($id:ident = $t:ty;)* ($parts:pat) => $body: expr) => {
+    ($self:ty, $($id:ident = $t:ty;)* |$parts:pat_param|$body:expr) => {
         impl FromRequestParts for $self {
             $(type $id = $t;)*
             fn from_request_parts($parts: &mut Parts) -> Self::Future { $body }
@@ -36,13 +36,14 @@ macro_rules! from_parts {
 }
 
 macro_rules! from_req {
-    ($self:ty, ($req:pat) => $body:expr) => {
-        from_req!(
-            $self,Error=Infallible;Future=Ready<Result<Self,Self::Error>>;
-            ($req) => ready(Ok($body))
-        );
+    ($self:ty, |$req:pat_param|$body:expr) => {
+        impl FromRequest for $self {
+            type Error = Infallible;
+            type Future = Ready<Result<Self,Self::Error>>;
+            fn from_request($req: Request) -> Self::Future { ready(Ok($body)) }
+        }
     };
-    ($self:ty, $($id:ident = $t:ty;)* ($req:pat) => $body: expr) => {
+    ($self:ty, $($id:ident = $t:ty;)* |$req:pat_param|$body:expr) => {
         impl FromRequest for $self {
             $(type $id = $t;)*
             fn from_request($req: Request) -> Self::Future { $body }
@@ -61,40 +62,61 @@ impl<F> FromRequest for F where F: FromRequestParts {
     }
 }
 
-from_parts!((), (_) => ());
-from_parts!(Method, (parts) => parts.method.clone());
-from_parts!(Uri, (parts) => parts.uri.clone());
-from_parts!(Version, (parts) => parts.version);
-from_parts!(HeaderMap, (parts) => parts.headers.clone());
-from_parts!(Extensions, (parts) => parts.extensions.clone());
-from_parts!(Parts, (parts) => parts.clone());
+// ===== Parts Implementation =====
 
-from_req!(Request, (req) => req);
-from_req!(Body, (req) => req.into_body());
+from_parts!((), |_|());
+from_parts!(Method, |parts|parts.method.clone());
+from_parts!(Uri, |parts|parts.uri.clone());
+from_parts!(Version, |parts|parts.version);
+from_parts!(HeaderMap, |parts|parts.headers.clone());
+from_parts!(Extensions, |parts|parts.extensions.clone());
+from_parts!(Parts, |parts|parts.clone());
+
+from_req!(Request, |req|req);
+from_req!(Body, |req|req.into_body());
 
 // ===== Body Implementations =====
+
+type BytesFuture = Map<
+    Collect<Body>,
+    fn(Result<Collected<Bytes>, hyper::Error>) -> Result<Bytes, BytesFutureError>,
+>;
 
 from_req! {
     Bytes,
     Error = BytesFutureError;
     Future = BytesFuture;
-    (req) => BytesFuture {
-        buffer: BytesMut::new(),
-        inner: req.into_body(),
-    }
+    |req|req.into_body().collect().map(|e|Ok(e?.to_bytes()))
 }
+
+type BytesMutFuture = Map<
+    Collect<Body>,
+    fn(Result<Collected<Bytes>, hyper::Error>) -> Result<BytesMut, BytesFutureError>,
+>;
+
+from_req! {
+    BytesMut,
+    Error = BytesFutureError;
+    Future = BytesMutFuture;
+    |req|req.into_body().collect().map(|e|Ok(e?.to_bytes().into()))
+}
+
+type StringFuture = Map<
+    BytesFuture,
+    fn(Result<Bytes, BytesFutureError>) -> Result<String, StringFutureError>,
+>;
 
 from_req! {
     String,
     Error = StringFutureError;
     Future = StringFuture;
-    (req) => StringFuture {
-        f: BytesFuture {
-            buffer: BytesMut::new(),
-            inner: req.into_body(),
-        }
-    }
+    |req|Bytes::from_request(req).map(|e|Ok(String::from_utf8(e?.into())?))
 }
+
+type JsonFuture<T> = Map<
+    BytesFuture,
+    fn(Result<Bytes, BytesFutureError>) -> Result<Json<T>, JsonFutureError>,
+>;
 
 impl<T> FromRequest for Json<T>
 where
@@ -104,75 +126,7 @@ where
     type Future = JsonFuture<T>;
 
     fn from_request(req: Request) -> Self::Future {
-        JsonFuture {
-            f: BytesFuture {
-                buffer: BytesMut::new(),
-                inner: req.into_body(),
-            },
-            _p: PhantomData,
-        }
-    }
-}
-
-// ===== Future Implementations =====
-
-/// Future returned from [`Bytes`] implementation of [`FromRequest`].
-#[derive(Debug)]
-pub struct BytesFuture {
-    buffer: BytesMut,
-    inner: Body,
-}
-
-/// Future returned from [`String`] implementation of [`FromRequest`].
-#[derive(Debug)]
-pub struct StringFuture {
-    f: BytesFuture,
-}
-
-/// Future returned from [`Json`] implementation of [`FromRequest`].
-#[derive(Debug)]
-pub struct JsonFuture<T> {
-    f: BytesFuture,
-    _p: PhantomData<T>,
-}
-
-impl<T> Unpin for JsonFuture<T> { }
-
-impl Future for BytesFuture {
-    type Output = Result<Bytes, BytesFutureError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let me = self.get_mut();
-        let mut f = Pin::new(&mut me.inner);
-
-        while let Some(frame) = ready!(f.as_mut().poll_frame(cx)?) {
-            if let Ok(data) = frame.into_data() {
-                me.buffer.put(data);
-            }
-        }
-
-        Poll::Ready(Ok(mem::take(&mut me.buffer).freeze()))
-    }
-}
-
-impl Future for StringFuture {
-    type Output = Result<String, StringFutureError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let ok = ready!(Pin::new(&mut self.f).poll(cx)?);
-        Poll::Ready(Ok(String::from_utf8(ok.into())?))
-    }
-}
-
-impl<T> Future for JsonFuture<T>
-where
-    T: DeserializeOwned,
-{
-    type Output = Result<Json<T>, JsonFutureError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let ok = ready!(Pin::new(&mut self.f).poll(cx)?);
-        Poll::Ready(Ok(Json(serde_json::from_slice::<T>(&ok)?)))
+        Bytes::from_request(req).map(|e| Ok(Json(serde_json::from_slice(&e?)?)))
     }
 }
 
@@ -188,7 +142,7 @@ macro_rules! from {
     };
 }
 
-/// Error that can be returned by [`BytesFuture`].
+/// Error that can be returned from [`Bytes`] implementation of [`FromRequest`].
 #[derive(Debug)]
 pub struct BytesFutureError(hyper::Error);
 
@@ -214,7 +168,7 @@ impl fmt::Display for BytesFutureError {
     }
 }
 
-/// Error that can be returned by [`StringFuture`].
+/// Error that can be returned from [`String`] implementation of [`FromRequest`].
 #[derive(Debug)]
 pub enum StringFutureError {
     Hyper(hyper::Error),
@@ -233,7 +187,7 @@ impl IntoResponse for StringFutureError {
 impl std::error::Error for StringFutureError { }
 
 impl fmt::Display for StringFutureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Hyper(hyper) => hyper.fmt(f),
             Self::Utf8(utf8) => utf8.fmt(f),
@@ -241,7 +195,7 @@ impl fmt::Display for StringFutureError {
     }
 }
 
-/// Error that can be returned by [`JsonFuture`].
+/// Error that can be returned from [`Json`] implementation of [`FromRequest`].
 #[derive(Debug)]
 pub enum JsonFutureError {
     Hyper(hyper::Error),
@@ -260,7 +214,7 @@ impl IntoResponse for JsonFutureError {
 impl std::error::Error for JsonFutureError { }
 
 impl fmt::Display for JsonFutureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Hyper(hyper) => hyper.fmt(f),
             Self::Serde(serde) => serde.fmt(f),
