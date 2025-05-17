@@ -1,9 +1,9 @@
 //! functional route
+use futures_util::{FutureExt, future::Map};
 use hyper::service::Service;
 use std::{convert::Infallible, marker::PhantomData};
 
 use crate::{
-    future::{FutureExt, MapInfallible},
     request::{Body, FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
 };
@@ -27,24 +27,24 @@ where
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = MapInfallible<<F as Handler<S>>::Future>;
+    type Future = Map<<F as Handler<S>>::Future, fn(Response) -> Result<Response,Infallible>>;
 
     fn call(&self, req: Request) -> Self::Future {
-        self.inner.handle(req).map_infallible()
+        self.inner.handle(req).map(Ok)
     }
 }
 
-/// a function that can be an http service
+/// Async function as [`Service`].
 ///
-/// this trait exists because multiple blanket implementation on `Service`
-/// directly for multiple function with different arguments is impossible
+/// This trait exists because multiple blanket implementation on [`Service`]
+/// directly for multiple function with different arguments is impossible.
 pub trait Handler<S> {
     type Future: Future<Output = Response>;
+
     fn handle(&self, req: Request) -> Self::Future;
 }
 
-#[doc(inline)]
-pub use future::{Ft, Fd, Fr, FrCall, Frp, FrpCall};
+use future::{Fd, Fr, Frp, FrpCall};
 
 impl<F,Fut> Handler<()> for F
 where
@@ -52,10 +52,10 @@ where
     Fut: Future,
     Fut::Output: IntoResponse,
 {
-    type Future = Ft<Fut>;
+    type Future = Map<Fut, fn(Fut::Output) -> Response>;
 
     fn handle(&self, _: Request) -> Self::Future {
-        Ft::new(self.clone()())
+        self.clone()().map(IntoResponse::into_response)
     }
 }
 
@@ -197,40 +197,9 @@ where
 }
 
 mod future {
-    use std::task::{ready, Poll::{self, *}};
+    use std::{pin::Pin, task::{ready, Context, Poll::{self, *}}};
     use http::request;
     use super::*;
-
-    pin_project_lite::pin_project! {
-        /// future that call handle without any arguments
-        pub struct Ft<Fut> {
-            #[pin] f: Fut
-        }
-    }
-
-    impl<Fut> Ft<Fut>
-    where
-        Fut: Future,
-        Fut::Output: IntoResponse,
-    {
-        pub fn new(f: Fut) -> Self {
-            Self { f }
-        }
-    }
-
-    impl<Fut> Future for Ft<Fut>
-    where
-        Fut: Future,
-        Fut::Output: IntoResponse,
-    {
-        type Output = Response;
-
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-            Ready(ready!(self.project().f.poll(cx)).into_response())
-        }
-    }
-
-    // ---
 
     pin_project_lite::pin_project! {
         /// future that wrap FromRequestParts future
@@ -259,7 +228,7 @@ mod future {
     {
         type Output = Result<(request::Parts,Frp),Response>;
 
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
             let me = self.project();
             match ready!(me.f.poll(cx)) {
                 Ok(frp) => Ready(Ok((me.parts.take().unwrap(),frp))),
@@ -299,7 +268,7 @@ mod future {
     {
         type Output = Result<(request::Parts,(Frp1,Frp2)),Response>;
 
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
             loop {
                 match self.as_mut().project() {
                     FrpProj::Frp1 { f } => match ready!(f.poll(cx)) {
@@ -315,42 +284,6 @@ mod future {
                         Err(err) => Ready(Err(err.into_response())),
                     }
                 }
-            }
-        }
-    }
-
-    // ---
-
-    pin_project_lite::pin_project! {
-        /// future that wrap FromRequest future
-        pub struct FrCall<Fr>
-        where
-            Fr: FromRequest,
-        {
-            #[pin] f: Fr::Future,
-        }
-    }
-
-    impl<Fr> FrCall<Fr>
-    where
-        Fr: FromRequest,
-    {
-        pub fn new(req: Request) -> Self {
-            Self { f: Fr::from_request(req) }
-        }
-    }
-
-    impl<Fr> Future for FrCall<Fr>
-    where
-        Fr: FromRequest,
-        Fr::Error: IntoResponse,
-    {
-        type Output = Result<Fr,Response>;
-
-        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-            match ready!(self.project().f.poll(cx)) {
-                Ok(fr) => Ready(Ok(fr)),
-                Err(err) => Ready(Err(err.into_response())),
             }
         }
     }
@@ -387,7 +320,7 @@ mod future {
     {
         type Output = Result<(Frp1,Fr1),Response>;
 
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
             loop {
                 match self.as_mut().project() {
                     FrProj::Frp { f, body } => match ready!(f.poll(cx)) {
@@ -441,7 +374,7 @@ mod future {
     {
         type Output = Response;
 
-        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
             loop {
                 match self.as_mut().project() {
                     FProj::Fr { f, inner, mapper } => match ready!(f.poll(cx)) {
