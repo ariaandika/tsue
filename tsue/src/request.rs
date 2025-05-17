@@ -1,8 +1,9 @@
 //! HTTP request
-pub mod from_request;
+mod from_request;
 
 pub use http::request::Parts;
 pub use hyper::body::Incoming as Body;
+pub use from_request::{BytesFutureError, JsonFutureError, StringFutureError};
 
 /// Represents an HTTP request.
 pub type Request<T = Body> = hyper::http::Request<T>;
@@ -39,5 +40,16 @@ pub trait FromRequestParts: Sized {
     type Future: Future<Output = Result<Self, Self::Error>>;
 
     fn from_request_parts(parts: &mut Parts) -> Self::Future;
+}
+
+/// Extension trait for [`Request`].
+pub trait RequestExt {
+    fn extract<R: FromRequest>(self) -> R::Future;
+}
+
+impl RequestExt for Request {
+    fn extract<R: FromRequest>(self) -> R::Future {
+        R::from_request(self)
+    }
 }
 
