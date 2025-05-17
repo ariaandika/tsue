@@ -1,8 +1,8 @@
-use std::fmt;
 use bytes::Bytes;
 use futures_util::{FutureExt, future::Map};
-use http::StatusCode;
-use serde::{de::DeserializeOwned, Serialize};
+use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE};
+use serde::{Serialize, de::DeserializeOwned};
+use std::fmt;
 
 use super::Json;
 use crate::{
@@ -30,10 +30,13 @@ impl<T: DeserializeOwned> FromRequest for Json<T> {
 
 // ===== IntoResponse =====
 
+const APPLICATION_JSON: [(HeaderName, HeaderValue); 1] =
+    [(CONTENT_TYPE, HeaderValue::from_static("application/json"))];
+
 impl<T: Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
         match serde_json::to_vec(&self.0) {
-            Ok(ok) => (("content-type", "application/json"), ok).into_response(),
+            Ok(ok) => (APPLICATION_JSON, ok).into_response(),
             Err(_err) => {
                 #[cfg(feature = "log")]
                 log::error!("failed to serialize json response: {_err}");
@@ -65,7 +68,10 @@ impl From<serde_json::Error> for JsonFutureError {
 
 impl IntoResponse for JsonFutureError {
     fn into_response(self) -> Response {
-        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
+        match self {
+            Self::Hyper(error) => error.into_response(),
+            Self::Serde(error) => error.into_response(),
+        }
     }
 }
 

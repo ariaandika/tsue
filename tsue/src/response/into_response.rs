@@ -1,49 +1,8 @@
 use bytes::{Bytes, BytesMut};
-use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, response};
+use http::{header::CONTENT_TYPE, response, HeaderName, HeaderValue, StatusCode};
 use mime::Mime;
 
-use super::{Html, IntoResponse, IntoResponseParts, Parts, Redirect, Response};
-
-/// Response body.
-#[derive(Debug, Default, Clone)]
-pub struct Full {
-    inner: Bytes,
-}
-
-impl<T: Into<Bytes>> From<T> for Full {
-    fn from(value: T) -> Self {
-        Self {
-            inner: value.into(),
-        }
-    }
-}
-
-impl http_body::Body for Full {
-    type Data = Bytes;
-
-    type Error = std::convert::Infallible;
-
-    fn poll_frame(
-        mut self: std::pin::Pin<&mut Self>,
-        _: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        if self.inner.is_empty() {
-            std::task::Poll::Ready(None)
-        } else {
-            std::task::Poll::Ready(Some(Ok(http_body::Frame::data(std::mem::take(
-                &mut self.inner,
-            )))))
-        }
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    fn size_hint(&self) -> http_body::SizeHint {
-        http_body::SizeHint::with_exact(self.inner.len().try_into().unwrap())
-    }
-}
+use super::{IntoResponse, IntoResponseParts, Parts, Response};
 
 macro_rules! part {
     ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident) => $body:expr) => {
@@ -71,6 +30,8 @@ macro_rules! res {
     };
 }
 
+// ===== Foreign Implementation =====
+
 /// Anything that implement [`IntoResponseParts`] also implement [`IntoResponse`].
 impl<R> IntoResponse for R
 where
@@ -82,6 +43,15 @@ where
         Response::from_parts(parts, body)
     }
 }
+
+impl IntoResponseParts for () {
+    fn into_response_parts(self, parts: Parts) -> Parts {
+        parts
+    }
+}
+
+part!(std::convert::Infallible, (self) => match self { });
+part!(StatusCode, mut (self,parts) => parts.status = self);
 
 impl<T, E> IntoResponse for Result<T, E>
 where
@@ -96,9 +66,31 @@ where
     }
 }
 
+impl IntoResponse for serde_json::Error {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
+    }
+}
+
+impl IntoResponse for hyper::Error {
+    fn into_response(self) -> Response {
+        match self {
+            me if me.is_parse() => StatusCode::BAD_REQUEST.into_response(),
+            me if me.is_timeout() => StatusCode::REQUEST_TIMEOUT.into_response(),
+            _err => {
+                #[cfg(feature = "log")]
+                log::error!("{_err}");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            },
+        }
+    }
+}
+
+// ===== Headers =====
+
 impl IntoResponseParts for (&'static str, &'static str) {
     fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
-        parts.headers.insert(
+        parts.headers.append(
             HeaderName::from_static(self.0),
             HeaderValue::from_static(self.1),
         );
@@ -106,60 +98,69 @@ impl IntoResponseParts for (&'static str, &'static str) {
     }
 }
 
-impl<const N: usize, T> IntoResponseParts for [(&'static str, T); N]
-where
-    T: Into<Bytes>,
-{
+impl<const N: usize> IntoResponseParts for [(&'static str, &'static str); N] {
     fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
         for (key, val) in self {
-            if let Ok(value) = HeaderValue::from_maybe_shared(val.into()) {
-                parts.headers.insert(key, value);
-            }
+            parts
+                .headers
+                .append(HeaderName::from_static(key), HeaderValue::from_static(val));
         }
         parts
     }
 }
 
-impl IntoResponseParts for () {
-    fn into_response_parts(self, parts: Parts) -> Parts {
+impl<const N: usize> IntoResponseParts for [(&'static str, HeaderValue); N] {
+    fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
+        for (key, val) in self {
+            parts
+                .headers
+                .append(HeaderName::from_static(key), val);
+        }
         parts
     }
 }
 
-part!(std::convert::Infallible, (self) => match self { });
-part!(StatusCode, mut (self,parts) => parts.status = self);
-part!(Mime, mut (self,parts) => parts.headers.insert(
-    HeaderName::from_static("content-type"), HeaderValue::from_str(self.as_ref()).unwrap()
-));
-part!(HeaderMap, mut,mut (self,parts) => {
-    const PLACEHOLDER: HeaderValue = HeaderValue::from_static("deez");
-    for (key,val) in (&mut self).into_iter() {
-        parts.headers.insert(key, std::mem::replace(val, PLACEHOLDER));
+impl<const N: usize> IntoResponseParts for [(HeaderName, &'static str); N] {
+    fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
+        for (key, val) in self {
+            parts.headers.append(key, HeaderValue::from_static(val.into()));
+        }
+        parts
     }
-});
+}
+
+impl<const N: usize> IntoResponseParts for [(HeaderName, HeaderValue); N] {
+    fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
+        for (key, val) in self {
+            parts.headers.append(key, val);
+        }
+        parts
+    }
+}
+
+impl IntoResponseParts for Mime {
+    fn into_response_parts(self, mut parts: Parts) -> Parts {
+        parts
+            .headers
+            .insert(CONTENT_TYPE, self.as_ref().parse().unwrap());
+        parts
+    }
+}
+
+// ===== Body Implementations =====
 
 res!(Bytes, self => Response::new(self.into()));
 res!(Vec<u8>, self => Response::new(self.into()));
 res!(BytesMut, self => Response::new(self.freeze().into()));
 res!(Response, self => self);
 res!(&'static str, self => IntoResponse::into_response((
-    ("content-type","text/plain; charset=utf-8"), Bytes::from_static(self.as_bytes())
+    [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+    Bytes::from_static(self.as_bytes())
 )));
 res!(String, self => IntoResponse::into_response((
-    ("content-type","text/plain; charset=utf-8"), Bytes::from(self)
+    [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+    Bytes::from(self)
 )));
-res!(Redirect, self => IntoResponse::into_response((
-    [("location",self.location)], self.status,
-)));
-
-impl<T> IntoResponse for Html<T>
-where
-    T: Into<Bytes>,
-{
-    fn into_response(self) -> Response {
-        (("content-type", "text/html; charset=utf-8"), self.0.into()).into_response()
-    }
-}
 
 macro_rules! into_response_tuple {
     (@$($r:ident,)*) => {
