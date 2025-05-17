@@ -3,7 +3,7 @@ mod from_request;
 
 pub use http::request::Parts;
 pub use hyper::body::Incoming as Body;
-pub use from_request::{BytesFutureError, JsonFutureError, StringFutureError};
+pub use from_request::{BytesFutureError, StringFutureError};
 
 /// Represents an HTTP request.
 pub type Request<T = Body> = hyper::http::Request<T>;

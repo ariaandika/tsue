@@ -24,12 +24,10 @@
 pub mod request;
 pub mod response;
 
-mod future;
 pub mod service;
-mod helper;
+pub mod helper;
 
 pub mod route;
-pub mod extractor;
 
 #[cfg(feature = "tokio")]
 pub mod rt;

@@ -3,7 +3,6 @@ use bytes::{Bytes, BytesMut};
 use futures_util::{FutureExt, future::Map};
 use http::{Extensions, HeaderMap, Method, StatusCode, Uri, Version};
 use http_body_util::{BodyExt, Collected, combinators::Collect};
-use serde::de::DeserializeOwned;
 use std::{
     convert::Infallible,
     fmt,
@@ -12,10 +11,7 @@ use std::{
 };
 
 use super::{Body, FromRequest, FromRequestParts, Parts, Request};
-use crate::{
-    extractor::Json,
-    response::{IntoResponse, Response},
-};
+use crate::response::{IntoResponse, Response};
 
 // ===== Macros =====
 
@@ -51,8 +47,23 @@ macro_rules! from_req {
     };
 }
 
-/// Anything that implement `FromRequestParts` also implement `FromRequest`.
-impl<F> FromRequest for F where F: FromRequestParts {
+macro_rules! from {
+    ($id:ident, $fr:ty: $pat:pat => $body:expr) => {
+        impl From<$fr> for $id {
+            fn from($pat: $fr) -> Self {
+                $body
+            }
+        }
+    };
+}
+
+// ===== Blanket Implementation =====
+
+/// Anything that implement [`FromRequestParts`] also implement [`FromRequest`].
+impl<F> FromRequest for F
+where
+    F: FromRequestParts,
+{
     type Error = <F as FromRequestParts>::Error;
 
     type Future = <F as FromRequestParts>::Future;
@@ -62,18 +73,18 @@ impl<F> FromRequest for F where F: FromRequestParts {
     }
 }
 
-// ===== Parts Implementation =====
+// ===== Foreign Implementation =====
 
-from_parts!((), |_|());
-from_parts!(Method, |parts|parts.method.clone());
-from_parts!(Uri, |parts|parts.uri.clone());
-from_parts!(Version, |parts|parts.version);
-from_parts!(HeaderMap, |parts|parts.headers.clone());
-from_parts!(Extensions, |parts|parts.extensions.clone());
-from_parts!(Parts, |parts|parts.clone());
+from_parts!((), |_| ());
+from_parts!(Method, |parts| parts.method.clone());
+from_parts!(Uri, |parts| parts.uri.clone());
+from_parts!(Version, |parts| parts.version);
+from_parts!(HeaderMap, |parts| parts.headers.clone());
+from_parts!(Extensions, |parts| parts.extensions.clone());
+from_parts!(Parts, |parts| parts.clone());
 
-from_req!(Request, |req|req);
-from_req!(Body, |req|req.into_body());
+from_req!(Request, |req| req);
+from_req!(Body, |req| req.into_body());
 
 // ===== Body Implementations =====
 
@@ -101,10 +112,8 @@ from_req! {
     |req|req.into_body().collect().map(|e|Ok(e?.to_bytes().into()))
 }
 
-type StringFuture = Map<
-    BytesFuture,
-    fn(Result<Bytes, BytesFutureError>) -> Result<String, StringFutureError>,
->;
+type StringFuture =
+    Map<BytesFuture, fn(Result<Bytes, BytesFutureError>) -> Result<String, StringFutureError>>;
 
 from_req! {
     String,
@@ -113,34 +122,7 @@ from_req! {
     |req|Bytes::from_request(req).map(|e|Ok(String::from_utf8(e?.into())?))
 }
 
-type JsonFuture<T> = Map<
-    BytesFuture,
-    fn(Result<Bytes, BytesFutureError>) -> Result<Json<T>, JsonFutureError>,
->;
-
-impl<T> FromRequest for Json<T>
-where
-    T: DeserializeOwned,
-{
-    type Error = JsonFutureError;
-    type Future = JsonFuture<T>;
-
-    fn from_request(req: Request) -> Self::Future {
-        Bytes::from_request(req).map(|e| Ok(Json(serde_json::from_slice(&e?)?)))
-    }
-}
-
 // ===== Errors =====
-
-macro_rules! from {
-    ($id:ident, $fr:ty: $pat:pat => $body:expr) => {
-        impl From<$fr> for $id {
-            fn from($pat: $fr) -> Self {
-                $body
-            }
-        }
-    };
-}
 
 /// Error that can be returned from [`Bytes`] implementation of [`FromRequest`].
 #[derive(Debug)]
@@ -160,7 +142,7 @@ impl IntoResponse for BytesFutureError {
     }
 }
 
-impl std::error::Error for BytesFutureError { }
+impl std::error::Error for BytesFutureError {}
 
 impl fmt::Display for BytesFutureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -184,7 +166,7 @@ impl IntoResponse for StringFutureError {
     }
 }
 
-impl std::error::Error for StringFutureError { }
+impl std::error::Error for StringFutureError {}
 
 impl fmt::Display for StringFutureError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -194,31 +176,3 @@ impl fmt::Display for StringFutureError {
         }
     }
 }
-
-/// Error that can be returned from [`Json`] implementation of [`FromRequest`].
-#[derive(Debug)]
-pub enum JsonFutureError {
-    Hyper(hyper::Error),
-    Serde(serde_json::Error),
-}
-
-from!(JsonFutureError, BytesFutureError: e => Self::Hyper(e.0));
-from!(JsonFutureError, serde_json::Error: e => Self::Serde(e));
-
-impl IntoResponse for JsonFutureError {
-    fn into_response(self) -> Response {
-        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
-    }
-}
-
-impl std::error::Error for JsonFutureError { }
-
-impl fmt::Display for JsonFutureError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Hyper(hyper) => hyper.fmt(f),
-            Self::Serde(serde) => serde.fmt(f),
-        }
-    }
-}
-
