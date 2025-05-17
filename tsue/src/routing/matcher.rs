@@ -24,10 +24,6 @@ impl PartialEq<Request> for Matcher {
         }
         true
     }
-
-    fn ne(&self, other: &Request) -> bool {
-        !self.eq(other)
-    }
 }
 
 macro_rules! matcher_from {

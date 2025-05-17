@@ -123,7 +123,7 @@ impl<const N: usize> IntoResponseParts for [(&'static str, HeaderValue); N] {
 impl<const N: usize> IntoResponseParts for [(HeaderName, &'static str); N] {
     fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
         for (key, val) in self {
-            parts.headers.append(key, HeaderValue::from_static(val.into()));
+            parts.headers.append(key, HeaderValue::from_static(val));
         }
         parts
     }
