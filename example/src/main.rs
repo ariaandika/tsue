@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tsue::{
     extractor::{Json, State},
-    route::{Router, get, post},
+    routing::{Router, get, post},
     service::HttpService,
 };
 

@@ -27,7 +27,7 @@ pub mod response;
 pub mod service;
 pub mod helper;
 
-pub mod route;
+pub mod routing;
 
 #[cfg(feature = "tokio")]
 pub mod rt;
