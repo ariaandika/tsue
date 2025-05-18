@@ -5,7 +5,7 @@ use std::{fmt, marker::PhantomData, pin::Pin, task::{ready, Context, Poll}};
 
 use super::Json;
 use crate::{
-    request::{FromRequest, Request},
+    request::{BodyError, FromRequest, Request},
     response::{IntoResponse, Response},
 };
 
@@ -94,13 +94,13 @@ impl<T: Serialize> IntoResponse for Json<T> {
 #[derive(Debug)]
 pub enum JsonFutureError {
     ContentType,
-    Hyper(hyper::Error),
+    Body(BodyError),
     Serde(serde_json::Error),
 }
 
 impl From<BytesFutureError> for JsonFutureError {
     fn from(e: BytesFutureError) -> Self {
-        Self::Hyper(e.into())
+        Self::Body(e.into())
     }
 }
 impl From<serde_json::Error> for JsonFutureError {
@@ -113,7 +113,7 @@ impl IntoResponse for JsonFutureError {
     fn into_response(self) -> Response {
         match self {
             Self::ContentType => (StatusCode::BAD_REQUEST,"invalid content-type").into_response(),
-            Self::Hyper(error) => error.into_response(),
+            Self::Body(error) => error.into_response(),
             Self::Serde(error) => error.into_response(),
         }
     }
@@ -125,7 +125,7 @@ impl fmt::Display for JsonFutureError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::ContentType => f.write_str("invalid content-type"),
-            Self::Hyper(hyper) => hyper.fmt(f),
+            Self::Body(hyper) => hyper.fmt(f),
             Self::Serde(serde) => serde.fmt(f),
         }
     }

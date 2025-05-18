@@ -10,7 +10,7 @@ use std::{
     string::FromUtf8Error,
 };
 
-use super::{Body, FromRequest, FromRequestParts, Parts, Request};
+use super::{body::BodyError, Body, FromRequest, FromRequestParts, Parts, Request};
 use crate::response::{IntoResponse, Response};
 
 // ===== Macros =====
@@ -90,7 +90,7 @@ from_req!(Body, |req| req.into_body());
 
 type BytesFuture = Map<
     Collect<Body>,
-    fn(Result<Collected<Bytes>, hyper::Error>) -> Result<Bytes, BytesFutureError>,
+    fn(Result<Collected<Bytes>, BodyError>) -> Result<Bytes, BytesFutureError>,
 >;
 
 from_req! {
@@ -102,7 +102,7 @@ from_req! {
 
 type BytesMutFuture = Map<
     Collect<Body>,
-    fn(Result<Collected<Bytes>, hyper::Error>) -> Result<BytesMut, BytesFutureError>,
+    fn(Result<Collected<Bytes>, BodyError>) -> Result<BytesMut, BytesFutureError>,
 >;
 
 from_req! {
@@ -126,11 +126,11 @@ from_req! {
 
 /// Error that can be returned from [`Bytes`] implementation of [`FromRequest`].
 #[derive(Debug)]
-pub struct BytesFutureError(hyper::Error);
+pub struct BytesFutureError(BodyError);
 
-from!(BytesFutureError, hyper::Error: e => Self(e));
+from!(BytesFutureError, BodyError: e => Self(e));
 
-impl From<BytesFutureError> for hyper::Error {
+impl From<BytesFutureError> for BodyError {
     fn from(value: BytesFutureError) -> Self {
         value.0
     }
@@ -153,11 +153,11 @@ impl fmt::Display for BytesFutureError {
 /// Error that can be returned from [`String`] implementation of [`FromRequest`].
 #[derive(Debug)]
 pub enum StringFutureError {
-    Hyper(hyper::Error),
+    Body(BodyError),
     Utf8(FromUtf8Error),
 }
 
-from!(StringFutureError, BytesFutureError: e => Self::Hyper(e.0));
+from!(StringFutureError, BytesFutureError: e => Self::Body(e.0));
 from!(StringFutureError, FromUtf8Error: e => Self::Utf8(e));
 
 impl IntoResponse for StringFutureError {
@@ -171,7 +171,7 @@ impl std::error::Error for StringFutureError {}
 impl fmt::Display for StringFutureError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Hyper(hyper) => hyper.fmt(f),
+            Self::Body(body) => body.fmt(f),
             Self::Utf8(utf8) => utf8.fmt(f),
         }
     }

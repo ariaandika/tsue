@@ -1,9 +1,10 @@
 //! HTTP request
+mod body;
 mod from_request;
 mod tuples;
 
 pub use http::request::Parts;
-pub use hyper::body::Incoming as Body;
+pub use body::{Body, BodyError};
 pub use from_request::{BytesFutureError, StringFutureError};
 
 /// Represents an HTTP request.

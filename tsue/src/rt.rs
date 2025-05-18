@@ -4,7 +4,7 @@ use hyper_util::rt::TokioIo;
 use std::{fmt::Display, io, sync::Arc};
 use tokio::net::{TcpListener, ToSocketAddrs};
 
-use crate::service::HttpService;
+use crate::{routing, service::HttpService};
 
 /// Entrypoint to run the server
 pub async fn listen<S>(addr: impl ToSocketAddrs + Display + Clone, service: S) -> io::Result<()>
@@ -13,10 +13,15 @@ where
 {
     let tcp = match TcpListener::bind(addr.clone()).await {
         Ok(ok) => ok,
-        Err(err) => return Err(io::Error::new(err.kind(), format!("failed to bind \"{addr}\" :{err}"))),
+        Err(err) => {
+            return Err(io::Error::new(
+                err.kind(),
+                format!("failed to bind \"{addr}\" :{err}"),
+            ));
+        }
     };
 
-    let service = Arc::new(service);
+    let service = Arc::new(routing::Hyper::new(service));
 
     loop {
         let service = service.clone();
@@ -35,4 +40,3 @@ where
         }
     }
 }
-
