@@ -5,7 +5,7 @@ mod branch;
 mod matcher;
 mod state;
 
-pub mod handler;
+mod handler;
 
 pub use router::Router;
 pub use branch::{Branch, get, post, put, patch, delete};

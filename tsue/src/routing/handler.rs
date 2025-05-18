@@ -1,10 +1,10 @@
 //! functional route
 use futures_util::{FutureExt, future::Map};
 use hyper::service::Service;
-use std::{convert::Infallible, future::{ready, Ready}, marker::PhantomData};
+use std::{convert::Infallible, marker::PhantomData};
 
 use crate::{
-    request::{self, Body, FromRequest, FromRequestParts, Request},
+    request::{FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
 };
 
@@ -44,8 +44,6 @@ pub trait Handler<S> {
     fn handle(&self, req: Request) -> Self::Future;
 }
 
-use future::{Fd, Fr, Frp, FrpCall};
-
 impl<F,Fut> Handler<()> for F
 where
     F: FnOnce() -> Fut + Clone,
@@ -67,326 +65,90 @@ where
     A: FromRequest,
     A::Error: IntoResponse,
 {
-    type Future = Fd<Fr<Ready<Result<(request::Parts, ()), Response>>, (), A>, fn(((), A), F) -> Fut, Fut, F>;
+    type Future = Merge<<(A,) as FromRequest>::Future, Fut, F, fn(F, (A,)) -> Fut>;
 
     fn handle(&self, req: Request) -> Self::Future {
-        let (parts, body) = req.into_parts();
-        fn mapper<A, F, Fut>(((), a): ((), A), inner: F) -> Fut where F: FnOnce(A) -> Fut { inner(a) }
-        Fd::new(Fr::new(ready(Ok((parts, ()))), body), self.clone(), mapper)
+        merge(<(A,)>::from_request(req), self.clone(), |s,(a1,)|s(a1))
     }
 }
 
-impl<F,A1,A,Fut> Handler<(A1,A)> for F
-where
-    F: FnOnce(A1,A) -> Fut + Clone,
-    Fut: Future,
-    Fut::Output: IntoResponse,
-    A1: FromRequestParts,
-    A1::Error: IntoResponse,
-    A: FromRequest,
-    A::Error: IntoResponse,
-{
-    type Future=Fd<Fr<FrpCall<A1>,A1,A>,fn((A1,A),F)->Fut,Fut,F>;
-
-    fn handle(&self, req: Request) -> Self::Future {
-        let (parts,body) = req.into_parts();
-        fn mapper<A1,A,F,Fut>((a1,a): (A1,A), inner: F) -> Fut where F: FnOnce(A1,A) -> Fut, { inner(a1,a) }
-        Fd::new(Fr::new(FrpCall::new(parts), body), self.clone(), mapper)
-    }
-}
-
-impl<F,A1,A2,A,Fut> Handler<(A1,A2,A)> for F
-where
-    F: FnOnce(A1,A2,A) -> Fut + Clone,
-    Fut: Future,
-    Fut::Output: IntoResponse,
-    A1: FromRequestParts,
-    A1::Error: IntoResponse,
-    A2: FromRequestParts,
-    A2::Error: IntoResponse,
-    A: FromRequest,
-    A::Error: IntoResponse,
-{
-    type Future = Fd<Fr<Frp<FrpCall<A1>, A1, A2>, (A1, A2), A>, fn(((A1, A2), A), F) -> Fut, Fut, F>;
-
-    fn handle(&self, req: Request) -> Self::Future {
-        let (parts,body) = req.into_parts();
-        fn mapper<A1,A2,A,F,Fut>(((a1,a2),a): ((A1,A2),A), inner: F) -> Fut
-        where F: FnOnce(A1,A2,A) -> Fut, { inner(a1,a2,a) }
-        Fd::new(Fr::new(Frp::new(FrpCall::new(parts)), body), self.clone(), mapper)
-    }
-}
-
-impl<F,A1,A2,A3,A,Fut> Handler<(A1,A2,A3,A)> for F
-where
-    F: FnOnce(A1,A2,A3,A) -> Fut + Clone,
-    Fut: Future,
-    Fut::Output: IntoResponse,
-    A1: FromRequestParts,
-    A1::Error: IntoResponse,
-    A2: FromRequestParts,
-    A2::Error: IntoResponse,
-    A3: FromRequestParts,
-    A3::Error: IntoResponse,
-    A: FromRequest,
-    A::Error: IntoResponse,
-{
-    type Future=Fd<Fr<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A>,fn((((A1,A2),A3),A),F)->Fut,Fut,F>;
-
-    fn handle(&self, req: Request) -> Self::Future {
-        let (parts,body) = req.into_parts();
-        fn mapper<A1,A2,A3,A,F,Fut>((((a1,a2),a3),a): (((A1,A2),A3),A), inner: F) -> Fut
+macro_rules! foo {
+    ($($r:ident,)*) => {
+        impl<F,$($r,)*A,Fut> Handler<($($r,)*A)> for F
         where
-            F: FnOnce(A1,A2,A3,A) -> Fut,
+            F: FnOnce($($r,)*A) -> Fut + Clone,
+            Fut: Future,
+            Fut::Output: IntoResponse,
+            $(
+                $r: FromRequestParts,
+                $r::Error: IntoResponse,
+            )*
+            A: FromRequest,
+            A::Error: IntoResponse,
         {
-            inner(a1,a2,a3,a)
-        }
-        Fd::new(Fr::new(Frp::new(Frp::new(FrpCall::new(parts))), body), self.clone(), mapper)
-    }
-}
+            type Future = Merge<<($($r,)*A) as FromRequest>::Future, Fut, F, fn(F, ($($r,)*A)) -> Fut>;
 
-impl<F,A1,A2,A3,A4,A,Fut> Handler<(A1,A2,A3,A4,A)> for F
-where
-    F: FnOnce(A1,A2,A3,A4,A) -> Fut + Clone,
-    Fut: Future,
-    Fut::Output: IntoResponse,
-    A1: FromRequestParts,
-    A1::Error: IntoResponse,
-    A2: FromRequestParts,
-    A2::Error: IntoResponse,
-    A3: FromRequestParts,
-    A3::Error: IntoResponse,
-    A4: FromRequestParts,
-    A4::Error: IntoResponse,
-    A: FromRequest,
-    A::Error: IntoResponse,
-{
-    type Future=Fd<Fr<Frp<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A4>,(((A1,A2),A3),A4),A>,fn(((((A1,A2),A3),A4),A),F)->Fut,Fut,F>;
-
-    fn handle(&self, req: Request) -> Self::Future {
-        let (parts,body) = req.into_parts();
-        let mapper = |((((a1,a2),a3),a4),a),inner: Self|inner(a1,a2,a3,a4,a);
-        Fd::new(Fr::new(Frp::new(Frp::new(Frp::new(FrpCall::new(parts)))), body), self.clone(), mapper)
-    }
-}
-
-impl<F,A1,A2,A3,A4,A5,A,Fut> Handler<(A1,A2,A3,A4,A5,A)> for F
-where
-    F: FnOnce(A1,A2,A3,A4,A5,A) -> Fut + Clone,
-    Fut: Future,
-    Fut::Output: IntoResponse,
-    A1: FromRequestParts,
-    A1::Error: IntoResponse,
-    A2: FromRequestParts,
-    A2::Error: IntoResponse,
-    A3: FromRequestParts,
-    A3::Error: IntoResponse,
-    A4: FromRequestParts,
-    A4::Error: IntoResponse,
-    A5: FromRequestParts,
-    A5::Error: IntoResponse,
-    A: FromRequest,
-    A::Error: IntoResponse,
-{
-    type Future=Fd<Fr<Frp<Frp<Frp<Frp<FrpCall<A1>,A1,A2>,(A1,A2),A3>,((A1,A2),A3),A4>,(((A1,A2),A3),A4),A5>,((((A1,A2),A3),A4),A5),A>,fn((((((A1,A2),A3),A4),A5),A),F)->Fut,Fut,F>;
-
-    fn handle(&self, req: Request) -> Self::Future {
-        let (parts,body) = req.into_parts();
-        let mapper = |(((((a1,a2),a3),a4),a5),a),inner: Self|inner(a1,a2,a3,a4,a5,a);
-        Fd::new(Fr::new(Frp::new(Frp::new(Frp::new(Frp::new(FrpCall::new(parts))))), body), self.clone(), mapper)
-    }
-}
-
-mod future {
-    use std::{pin::Pin, task::{ready, Context, Poll::{self, *}}};
-    use http::request;
-    use super::*;
-
-    pin_project_lite::pin_project! {
-        /// future that wrap FromRequestParts future
-        pub struct FrpCall<Frp>
-        where
-            Frp: FromRequestParts,
-        {
-            #[pin] f: Frp::Future,
-            parts: Option<request::Parts>,
-        }
-    }
-
-    impl<Frp> FrpCall<Frp>
-    where
-        Frp: FromRequestParts,
-    {
-        pub fn new(mut parts: request::Parts) -> Self {
-            Self { f: Frp::from_request_parts(&mut parts), parts: Some(parts) }
-        }
-    }
-
-    impl<Frp> Future for FrpCall<Frp>
-    where
-        Frp: FromRequestParts,
-        Frp::Error: IntoResponse,
-    {
-        type Output = Result<(request::Parts,Frp),Response>;
-
-        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-            let me = self.project();
-            match ready!(me.f.poll(cx)) {
-                Ok(frp) => Ready(Ok((me.parts.take().unwrap(),frp))),
-                Err(err) => Ready(Err(err.into_response())),
+            fn handle(&self, req: Request) -> Self::Future {
+                #[allow(non_snake_case)]
+                merge(<($($r,)*A)>::from_request(req), self.clone(), |s,($($r,)*a)|s($($r,)*a))
             }
         }
+    };
+}
+
+foo!(A1,);
+foo!(A1,A2,);
+foo!(A1,A2,A3,);
+foo!(A1,A2,A3,A4,);
+foo!(A1,A2,A3,A4,A5,);
+foo!(A1,A2,A3,A4,A5,A6,);
+foo!(A1,A2,A3,A4,A5,A6,A7,);
+
+fn merge<F, F2, R, S, M>(f: F, s: S, m: M) -> Merge<F, F2, S, M>
+where
+    F: Future<Output = Result<R,Response>>,
+    M: FnOnce(S,R) -> F2,
+{
+    Merge::P1 {
+        f,
+        s: Some(s),
+        m: Some(m),
     }
+}
 
-    // ---
-
-    pin_project_lite::pin_project! {
-        /// future that wrap subsequent FromRequestParts future
-        #[project = FrpProj]
-        pub enum Frp<Fut,Frp1,Frp2>
-        where
-            Frp2: FromRequestParts,
-        {
-            Frp1 { #[pin] f: Fut, },
-            Frp2 { #[pin] f: Frp2::Future, parts: Option<request::Parts>, frp1: Option<Frp1>, },
-        }
+pin_project_lite::pin_project! {
+    #[project = MergeProj]
+    pub enum Merge<F,F2,S,M> {
+        P1 { #[pin] f: F, s: Option<S>, m: Option<M> },
+        P2 { #[pin] f: F2 },
     }
+}
 
-    impl<Fut,Frp1,Frp2> Frp<Fut,Frp1,Frp2>
-    where
-        Frp2: FromRequestParts,
-    {
-        pub fn new(f: Fut) -> Self {
-            Self::Frp1 { f }
-        }
-    }
+impl<F, F2, R, S, M> Future for Merge<F, F2, S, M>
+where
+    F: Future<Output = Result<R,Response>>,
+    F2: Future,
+    M: FnOnce(S,R) -> F2,
+    F2::Output: IntoResponse,
+{
+    type Output = Response;
 
-    impl<Fut,Frp1,Frp2> Future for Frp<Fut,Frp1,Frp2>
-    where
-        Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
-        Frp2: FromRequestParts,
-        Frp2::Error: IntoResponse,
-    {
-        type Output = Result<(request::Parts,(Frp1,Frp2)),Response>;
-
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-            loop {
-                match self.as_mut().project() {
-                    FrpProj::Frp1 { f } => match ready!(f.poll(cx)) {
-                        Ok((mut parts,frp1)) => self.set(Frp::Frp2 {
-                            f: Frp2::from_request_parts(&mut parts),
-                            frp1: Some(frp1),
-                            parts: Some(parts),
-                        }),
-                        Err(err) => return Ready(Err(err)),
-                    },
-                    FrpProj::Frp2 { f, parts, frp1, } => return match ready!(f.poll(cx)) {
-                        Ok(frp2) => Ready(Ok((parts.take().unwrap(),(frp1.take().unwrap(),frp2)))),
-                        Err(err) => Ready(Err(err.into_response())),
-                    }
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        use std::task::ready;
+        loop {
+            match self.as_mut().project() {
+                MergeProj::P1 { f, s, m } => {
+                    let ok = match ready!(f.poll(cx)) {
+                        Ok(ok) => ok,
+                        Err(_) => todo!(),
+                    };
+                    let s = s.take().unwrap();
+                    let f = m.take().unwrap()(s,ok);
+                    self.as_mut().set(Self::P2 { f });
                 }
-            }
-        }
-    }
-
-    // ---
-
-    pin_project_lite::pin_project! {
-        /// future that wrap subsequent FromRequest future
-        #[project = FrProj]
-        pub enum Fr<Fut,Frp1,Fr1>
-        where
-            Fr1: FromRequest,
-        {
-            Frp { #[pin] f: Fut, body: Option<Body>, },
-            Fr { #[pin] f: Fr1::Future, frp: Option<Frp1>, },
-        }
-    }
-
-    impl<Fut,Frp1,Fr1> Fr<Fut,Frp1,Fr1>
-    where
-        Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
-        Fr1: FromRequest,
-    {
-        pub fn new(f: Fut, body: Body) -> Self {
-            Self::Frp { f, body: Some(body) }
-        }
-    }
-
-    impl<Fut,Frp1,Fr1> Future for Fr<Fut,Frp1,Fr1>
-    where
-        Fut: Future<Output = Result<(request::Parts,Frp1),Response>>,
-        Fr1: FromRequest,
-        Fr1::Error: IntoResponse,
-    {
-        type Output = Result<(Frp1,Fr1),Response>;
-
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-            loop {
-                match self.as_mut().project() {
-                    FrProj::Frp { f, body } => match ready!(f.poll(cx)) {
-                        Ok((parts,frp)) => {
-                            let req = Request::from_parts(parts, body.take().unwrap());
-                            self.set(Fr::Fr {
-                                f: Fr1::from_request(req),
-                                frp: Some(frp)
-                            })
-                        },
-                        Err(err) => return Ready(Err(err)),
-                    },
-                    FrProj::Fr { f, frp } => return match ready!(f.poll(cx)) {
-                        Ok(fr) => Ready(Ok((frp.take().unwrap(),fr))),
-                        Err(err) => Ready(Err(err.into_response())),
-                    }
-                }
-            }
-        }
-    }
-
-    // ---
-
-    pin_project_lite::pin_project! {
-        /// future that call handle with subsequent FromRequest future
-        #[project = FProj]
-        pub enum Fd<Fut,M,MFut,F1> {
-            Fr { #[pin] f: Fut, inner: Option<F1>, mapper: Option<M>, },
-            F { #[pin] f: MFut, },
-        }
-    }
-
-    impl<Fr1,Fut,M,MFut,F1> Fd<Fut,M,MFut,F1>
-    where
-        Fut: Future<Output = Result<Fr1,Response>>,
-        M: FnOnce(Fr1,F1) -> MFut + Clone,
-        MFut: Future,
-        MFut::Output: IntoResponse,
-    {
-        pub fn new(f: Fut, inner: F1, mapper: M) -> Self {
-            Self::Fr { f, inner: Some(inner), mapper: Some(mapper) }
-        }
-    }
-
-    impl<Fr1,Fut,M,MFut,F1> Future for Fd<Fut,M,MFut,F1>
-    where
-        Fut: Future<Output = Result<Fr1,Response>>,
-        M: FnOnce(Fr1,F1) -> MFut,
-        MFut: Future,
-        MFut::Output: IntoResponse,
-    {
-        type Output = Response;
-
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-            loop {
-                match self.as_mut().project() {
-                    FProj::Fr { f, inner, mapper } => match ready!(f.poll(cx)) {
-                        Ok(fr) => {
-                            let inner = inner.take().unwrap();
-                            let mapper = mapper.take().unwrap();
-                            self.set(Fd::F { f: (mapper)(fr,inner), });
-                        },
-                        Err(err) => return Ready(err),
-                    }
-                    FProj::F { f } => return Ready(ready!(f.poll(cx)).into_response())
+                MergeProj::P2 { f } => {
+                    let ok = ready!(f.poll(cx));
+                    return std::task::Poll::Ready(ok.into_response());
                 }
             }
         }
@@ -396,7 +158,8 @@ mod future {
 #[cfg(test)]
 mod test {
     use super::Handler;
-    use http::Method;
+    use http::Method as M;
+    type S = String;
 
     #[test]
     fn assert_handler() {
@@ -407,16 +170,18 @@ mod test {
         assert(ap4);
         assert(ap5);
         assert(ap6);
+        assert(ap7);
     }
 
     pub fn assert<F,S>(_: F) where F: Handler<S>, { }
 
     async fn ap0() { }
-    async fn ap1(_: Method) { }
-    async fn ap2(_: Method, _: String) { }
-    async fn ap3(_: Method, _: Method, _: String) { }
-    async fn ap4(_: Method, _: Method, _: Method, _: String) { }
-    async fn ap5(_: Method, _: Method, _: Method, _: Method, _: String) { }
-    async fn ap6(_: Method, _: Method, _: Method, _: Method, _: Method, _: String) { }
+    async fn ap1(_: M) { }
+    async fn ap2(_: M, _: S) { }
+    async fn ap3(_: M, _: M, _: S) { }
+    async fn ap4(_: M, _: M, _: M, _: S) { }
+    async fn ap5(_: M, _: M, _: M, _: M, _: S) { }
+    async fn ap6(_: M, _: M, _: M, _: M, _: M, _: S) { }
+    async fn ap7(_: M, _: M, _: M, _: M, _: M, _: M, _: S) { }
 }
 
