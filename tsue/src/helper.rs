@@ -5,6 +5,7 @@ use http::StatusCode;
 
 mod state;
 mod json;
+mod form;
 mod html;
 mod redirect;
 
@@ -14,8 +15,15 @@ pub struct State<T>(pub T);
 
 /// JSON Request and Response helper.
 ///
+/// Parse request with `Content-Type` of `application/json`.
+///
 /// Response with `Content-Type` of `application/json`.
 pub struct Json<T>(pub T);
+
+/// Form Request helper.
+///
+/// Parse request with `Content-Type` of `application/x-www-form-urlencoded`.
+pub struct Form<T>(pub T);
 
 /// HTML Response helper.
 ///
