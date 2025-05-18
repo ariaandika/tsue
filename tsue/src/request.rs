@@ -1,5 +1,6 @@
 //! HTTP request
 mod from_request;
+mod tuples;
 
 pub use http::request::Parts;
 pub use hyper::body::Incoming as Body;
@@ -44,6 +45,7 @@ pub trait FromRequestParts: Sized {
 
 /// Extension trait for [`Request`].
 pub trait RequestExt {
+    /// Create type that implement [`FromRequest`].
     fn extract<R: FromRequest>(self) -> R::Future;
 }
 
