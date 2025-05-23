@@ -23,3 +23,22 @@ pub trait IntoResponseParts {
     fn into_response_parts(self, parts: Parts) -> Parts;
 }
 
+// ===== Box Error Response =====
+
+/// An [`std::error::Error`] and [`IntoResponse`].
+pub trait ErrorResponse: std::error::Error + IntoResponse { }
+
+impl<R: std::error::Error + IntoResponse> ErrorResponse for R { }
+
+/// A [`Box`] of [`ErrorResponse`].
+pub type BoxErrorRespone = Box<dyn ErrorResponse + Send + Sync + 'static>;
+
+impl<R: ErrorResponse + Send + Sync + 'static> From<R> for BoxErrorRespone {
+    fn from(value: R) -> Self {
+        Box::new(value)
+    }
+}
+
+/// A [`Result`][std::result::Result] with [`Err`] variant of [`BoxErrorResponse`].
+pub type Result<T,E = BoxErrorRespone> = std::result::Result<T, E>;
+
