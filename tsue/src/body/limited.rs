@@ -7,14 +7,15 @@ use crate::response::IntoResponse;
 
 pub fn limit_frame<B: Buf>(
     frame: Frame<B>,
-    remaining: &mut usize,
+    remaining: &mut u64,
 ) -> Option<Result<Frame<B>, LengthLimitError>> {
     if let Some(data) = frame.data_ref() {
-        if data.remaining() > *remaining {
+        let data_remain = u64::try_from(data.remaining()).unwrap_or(u64::MAX);
+        if data_remain as u64 > *remaining {
             *remaining = 0;
             Some(Err(LengthLimitError))
         } else {
-            *remaining -= data.remaining();
+            *remaining -= data_remain;
             Some(Ok(frame))
         }
     } else {
@@ -22,14 +23,13 @@ pub fn limit_frame<B: Buf>(
     }
 }
 
-pub fn limit_size_hint(mut hint: http_body::SizeHint, remaining: usize) -> http_body::SizeHint {
-    let n = u64::try_from(remaining).unwrap_or(u64::MAX);
-    if hint.lower() >= n {
-        hint.set_exact(n)
+pub fn limit_size_hint(mut hint: http_body::SizeHint, remaining: u64) -> http_body::SizeHint {
+    if hint.lower() >= remaining {
+        hint.set_exact(remaining)
     } else if let Some(max) = hint.upper() {
-        hint.set_upper(n.min(max))
+        hint.set_upper(remaining.min(max))
     } else {
-        hint.set_upper(n)
+        hint.set_upper(remaining)
     }
     hint
 }

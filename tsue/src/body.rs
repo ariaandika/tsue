@@ -19,12 +19,16 @@ use limited::LengthLimitError;
 
 pub struct Body {
     repr: Repr,
-    remaining: usize,
+    remaining: u64,
 }
 
 impl Body {
     pub(crate) fn new(repr: impl Into<Repr>) -> Self {
-        Self { repr: repr.into(), remaining: 2_000_000 }
+        Self::with_limit(repr, 2_000_000)
+    }
+
+    pub(crate) fn with_limit(repr: impl Into<Repr>, limit: u64) -> Self {
+        Self { repr: repr.into(), remaining: limit }
     }
 }
 
@@ -63,6 +67,12 @@ impl http_body::Body for Body {
 impl std::fmt::Debug for Body {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Body").finish()
+    }
+}
+
+impl Default for Body {
+    fn default() -> Self {
+        Self { repr: Repr::Empty, remaining: 0 }
     }
 }
 

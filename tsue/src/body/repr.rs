@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use http_body::Frame;
+use http_body::{Frame, SizeHint};
 use std::{
     fmt,
     pin::Pin,
@@ -11,6 +11,8 @@ use crate::response::{IntoResponse, Response};
 /// Agnostic implementation of [`http_body::Body`].
 pub enum Repr {
     Incoming(hyper::body::Incoming),
+    Full(Bytes),
+    Empty,
 }
 
 impl From<hyper::body::Incoming> for Repr {
@@ -30,6 +32,9 @@ impl http_body::Body for Repr {
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let ok = match self.get_mut() {
             Repr::Incoming(incoming) => ready!(Pin::new(incoming).poll_frame(cx)?),
+            Repr::Full(bytes) if bytes.is_empty() => None,
+            Repr::Full(bytes) => Some(Frame::data(std::mem::take(bytes))),
+            Repr::Empty => None,
         };
 
         Poll::Ready(ok.map(Ok))
@@ -38,13 +43,23 @@ impl http_body::Body for Repr {
     fn is_end_stream(&self) -> bool {
         match self {
             Repr::Incoming(incoming) => incoming.is_end_stream(),
+            Repr::Full(bytes) => bytes.is_empty(),
+            Repr::Empty => true,
         }
     }
 
-    fn size_hint(&self) -> http_body::SizeHint {
+    fn size_hint(&self) -> SizeHint {
         match self {
             Repr::Incoming(incoming) => incoming.size_hint(),
+            Repr::Full(bytes) => SizeHint::with_exact(bytes.len().try_into().unwrap_or(u64::MAX)),
+            Repr::Empty => SizeHint::new(),
         }
+    }
+}
+
+impl Default for Repr {
+    fn default() -> Self {
+        Self::Empty
     }
 }
 
