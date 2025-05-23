@@ -21,6 +21,30 @@ impl From<hyper::body::Incoming> for Repr {
     }
 }
 
+impl From<Vec<u8>> for Repr {
+    fn from(value: Vec<u8>) -> Self {
+        Self::Full(value.into())
+    }
+}
+
+impl From<String> for Repr {
+    fn from(value: String) -> Self {
+        Self::Full(value.into_bytes().into())
+    }
+}
+
+impl From<Bytes> for Repr {
+    fn from(value: Bytes) -> Self {
+        Self::Full(value)
+    }
+}
+
+impl From<&'static str> for Repr {
+    fn from(value: &'static str) -> Self {
+        Self::Full(value.into())
+    }
+}
+
 impl http_body::Body for Repr {
     type Data = Bytes;
 
@@ -32,8 +56,13 @@ impl http_body::Body for Repr {
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let ok = match self.get_mut() {
             Repr::Incoming(incoming) => ready!(Pin::new(incoming).poll_frame(cx)?),
-            Repr::Full(bytes) if bytes.is_empty() => None,
-            Repr::Full(bytes) => Some(Frame::data(std::mem::take(bytes))),
+            Repr::Full(bytes) => {
+                if bytes.is_empty() {
+                    None
+                } else {
+                    Some(Frame::data(std::mem::take(bytes)))
+                }
+            }
             Repr::Empty => None,
         };
 
