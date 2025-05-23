@@ -10,8 +10,11 @@ use std::{
     string::FromUtf8Error,
 };
 
-use super::{body::BodyError, Body, FromRequest, FromRequestParts, Parts, Request};
-use crate::response::{IntoResponse, Response};
+use super::{FromRequest, FromRequestParts, Parts, Request};
+use crate::{
+    body::{Body, BodyError},
+    response::{IntoResponse, Response},
+};
 
 // ===== Macros =====
 

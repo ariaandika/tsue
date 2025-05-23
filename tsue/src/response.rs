@@ -1,13 +1,12 @@
 //! HTTP response
-mod body;
+use crate::body::Body;
+
 mod into_response;
 
 pub use http::response::Parts;
 
 /// Represents an HTTP response
 pub type Response<T = Body> = hyper::http::Response<T>;
-
-pub use body::Body;
 
 /// A type that can be converted into response
 ///

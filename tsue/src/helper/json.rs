@@ -1,11 +1,17 @@
 use bytes::Bytes;
 use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE};
 use serde::{Serialize, de::DeserializeOwned};
-use std::{fmt, marker::PhantomData, pin::Pin, task::{ready, Context, Poll}};
+use std::{
+    fmt,
+    marker::PhantomData,
+    pin::Pin,
+    task::{Context, Poll, ready},
+};
 
 use super::Json;
 use crate::{
-    request::{BodyError, FromRequest, Request},
+    body::BodyError,
+    request::{FromRequest, Request},
     response::{IntoResponse, Response},
 };
 
