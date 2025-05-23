@@ -21,6 +21,7 @@
 //!     format!("{}: {}",counter.fetch_add(1, Ordering::Relaxed),body.to_uppercase())
 //! }
 //! ```
+pub mod body;
 pub mod request;
 pub mod response;
 
