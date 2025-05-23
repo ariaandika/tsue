@@ -11,7 +11,7 @@ pub fn limit_frame<B: Buf>(
 ) -> Option<Result<Frame<B>, LengthLimitError>> {
     if let Some(data) = frame.data_ref() {
         let data_remain = u64::try_from(data.remaining()).unwrap_or(u64::MAX);
-        if data_remain as u64 > *remaining {
+        if data_remain > *remaining {
             *remaining = 0;
             Some(Err(LengthLimitError))
         } else {

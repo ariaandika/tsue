@@ -19,16 +19,22 @@ use limited::LengthLimitError;
 
 pub struct Body {
     repr: Repr,
-    remaining: u64,
+    remaining: Option<u64>,
+}
+
+impl<B: Into<Repr>> From<B> for Body {
+    fn from(value: B) -> Self {
+        Self::new(value)
+    }
 }
 
 impl Body {
     pub(crate) fn new(repr: impl Into<Repr>) -> Self {
-        Self::with_limit(repr, 2_000_000)
+        Self { repr: repr.into(), remaining: None }
     }
 
     pub(crate) fn with_limit(repr: impl Into<Repr>, limit: u64) -> Self {
-        Self { repr: repr.into(), remaining: limit }
+        Self { repr: repr.into(), remaining: Some(limit) }
     }
 }
 
@@ -51,7 +57,10 @@ impl http_body::Body for Body {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let ok = tri!(ready!(Pin::new(&mut self.repr).poll_frame(cx)?));
-        let ok = tri!(limited::limit_frame(ok, &mut self.remaining));
+        let ok = match self.remaining.as_mut() {
+            Some(remaining) => tri!(limited::limit_frame(ok, remaining)),
+            None => Ok(ok),
+        };
         Poll::Ready(Some(ok.map_err(Into::into)))
     }
 
@@ -60,7 +69,10 @@ impl http_body::Body for Body {
     }
 
     fn size_hint(&self) -> http_body::SizeHint {
-        limited::limit_size_hint(self.repr.size_hint(), self.remaining)
+        match self.remaining {
+            Some(remaining) => limited::limit_size_hint(self.repr.size_hint(), remaining),
+            None => self.repr.size_hint(),
+        }
     }
 }
 
@@ -72,7 +84,7 @@ impl std::fmt::Debug for Body {
 
 impl Default for Body {
     fn default() -> Self {
-        Self { repr: Repr::Empty, remaining: 0 }
+        Self { repr: Repr::Empty, remaining: None }
     }
 }
 
