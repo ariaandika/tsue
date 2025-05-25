@@ -1,6 +1,5 @@
 use http::Request;
 use hyper::{body::Incoming, service::Service};
-use std::convert::Infallible;
 
 use crate::{body::Body, response::Response, service::HttpService};
 
@@ -22,7 +21,7 @@ where
 {
     type Response = Response;
 
-    type Error = Infallible;
+    type Error = S::Error;
 
     type Future = S::Future;
 

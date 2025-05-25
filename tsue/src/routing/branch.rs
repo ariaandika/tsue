@@ -15,7 +15,7 @@ use crate::{
 /// user typically does not interact with this directly,
 /// instead use [`route`] method, or [`get`] or [`post`] function
 ///
-/// [`route`]: Router::route
+/// [`route`]: super::Router::route
 pub struct Branch<S, F> {
     matcher: Matcher,
     inner: S,

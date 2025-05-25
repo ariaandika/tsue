@@ -1,6 +1,7 @@
 //! Multiple [`FromRequest`] and [`IntoResponse`] implementation.
 //!
 //! [`FromRequest`]: crate::request::FromRequest
+//! [`IntoResponse`]: crate::response::IntoResponse
 use http::StatusCode;
 
 mod state;
