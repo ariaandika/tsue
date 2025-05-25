@@ -6,6 +6,7 @@ use http::StatusCode;
 mod state;
 mod html;
 mod redirect;
+mod either;
 
 #[cfg(feature = "json")]
 mod json;
@@ -42,5 +43,13 @@ pub struct Html<T>(pub T);
 pub struct Redirect {
     status: StatusCode,
     location: String,
+}
+
+/// Sum type for [`Error`][std::error::Error], [`IntoResponse`][crate::response::IntoResponse],
+/// [`Debug`][std::fmt::Debug] and [`Display`][std::fmt::Display].
+#[derive(Debug)]
+pub enum Either<L,R> {
+    Left(L),
+    Right(R),
 }
 
