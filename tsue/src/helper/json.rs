@@ -56,7 +56,7 @@ impl<T: DeserializeOwned> Future for JsonFuture<T> {
             match self.as_mut().project().phase.as_mut().project() {
                 PhaseProj::P1 { content_type, req } => {
                     fn validate(ct: Option<&mut HeaderValue>) -> Option<()> {
-                        (mime::APPLICATION_JSON == ct?.to_str().ok()?).then_some(())
+                        ct?.to_str().ok()?.eq_ignore_ascii_case("application/json").then_some(())
                     }
 
                     if validate(content_type.as_mut()).is_none() {
@@ -78,11 +78,12 @@ impl<T: DeserializeOwned> Future for JsonFuture<T> {
 
 // ===== IntoResponse =====
 
-const APPLICATION_JSON: [(HeaderName, HeaderValue); 1] =
-    [(CONTENT_TYPE, HeaderValue::from_static("application/json"))];
 
 impl<T: Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
+        const APPLICATION_JSON: [(HeaderName, HeaderValue); 1] =
+            [(CONTENT_TYPE, HeaderValue::from_static("application/json"))];
+
         match serde_json::to_vec(&self.0) {
             Ok(ok) => (APPLICATION_JSON, ok).into_response(),
             Err(_err) => {

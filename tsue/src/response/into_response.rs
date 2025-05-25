@@ -1,6 +1,5 @@
 use bytes::{Bytes, BytesMut};
 use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE, response};
-use mime::{Mime, Name};
 
 use super::{IntoResponse, IntoResponseParts, Parts, Response};
 
@@ -95,24 +94,6 @@ impl IntoResponseParts for (&'static str, &'static str) {
     }
 }
 
-impl IntoResponseParts for &'static Mime {
-    fn into_response_parts(self, mut parts: Parts) -> Parts {
-        parts
-            .headers
-            .insert(CONTENT_TYPE, HeaderValue::from_static(self.as_ref()));
-        parts
-    }
-}
-
-impl IntoResponseParts for Name<'static> {
-    fn into_response_parts(self, mut parts: Parts) -> Parts {
-        parts
-            .headers
-            .insert(CONTENT_TYPE, HeaderValue::from_static(self.as_str()));
-        parts
-    }
-}
-
 macro_rules! headers {
     (
         |$h1:ident: $t1:ty|$b1:expr;
@@ -151,13 +132,15 @@ headers! {
 
 // ===== Body Implementations =====
 
+const TEXT_PLAIN_UTF_8: HeaderValue = HeaderValue::from_static("application/x-www-form-urlencoded");
+
 res!(&'static [u8], self => Response::new(Bytes::from_static(self).into()));
 res!(Bytes, self => Response::new(self.into()));
 res!(Vec<u8>, self => Response::new(self.into()));
 res!(BytesMut, self => Response::new(self.freeze().into()));
 res!(Response, self => self);
-res!(&'static str, self => (&mime::TEXT_PLAIN_UTF_8,Bytes::from_static(self.as_bytes())).into_response());
-res!(String, self => (&mime::TEXT_PLAIN_UTF_8,Bytes::from(self)).into_response());
+res!(&'static str, self => ([(CONTENT_TYPE,TEXT_PLAIN_UTF_8)],Bytes::from_static(self.as_bytes())).into_response());
+res!(String, self => ([(CONTENT_TYPE,TEXT_PLAIN_UTF_8)],Bytes::from(self)).into_response());
 
 macro_rules! into_response_tuple {
     (@$($r:ident,)*) => {

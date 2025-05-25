@@ -19,7 +19,7 @@ impl<T: DeserializeOwned> FromRequest for Form<T> {
         let content_type = req.headers().get(CONTENT_TYPE);
 
         fn validate(ct: Option<&HeaderValue>) -> Option<()> {
-            (mime::WWW_FORM_URLENCODED == ct?.to_str().ok()?).then_some(())
+            ct?.to_str().ok()?.eq_ignore_ascii_case("application/x-www-form-urlencoded").then_some(())
         }
 
         if validate(content_type).is_some() {
