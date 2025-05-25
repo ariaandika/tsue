@@ -4,10 +4,14 @@
 use http::StatusCode;
 
 mod state;
-mod json;
-mod form;
 mod html;
 mod redirect;
+
+#[cfg(feature = "json")]
+mod json;
+
+#[cfg(feature = "form")]
+mod form;
 
 /// Extract shared state.
 #[derive(Clone)]
@@ -18,11 +22,13 @@ pub struct State<T>(pub T);
 /// Parse request with `Content-Type` of `application/json`.
 ///
 /// Response with `Content-Type` of `application/json`.
+#[cfg(feature = "json")]
 pub struct Json<T>(pub T);
 
 /// Form Request helper.
 ///
 /// Parse request with `Content-Type` of `application/x-www-form-urlencoded`.
+#[cfg(feature = "form")]
 pub struct Form<T>(pub T);
 
 /// HTML Response helper.

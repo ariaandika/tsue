@@ -62,6 +62,7 @@ where
     }
 }
 
+#[cfg(feature = "json")]
 impl IntoResponse for serde_json::Error {
     fn into_response(self) -> Response {
         (StatusCode::BAD_REQUEST, self.to_string()).into_response()
