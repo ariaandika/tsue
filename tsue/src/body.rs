@@ -9,8 +9,10 @@ use crate::response::{IntoResponse, Response};
 
 mod repr;
 mod limited;
+mod collect;
 
 pub(crate) use repr::Repr;
+pub use collect::{Collect, Collected};
 
 use repr::ReprBodyError;
 use limited::LengthLimitError;
@@ -35,6 +37,10 @@ impl Body {
 
     pub(crate) fn with_limit(repr: impl Into<Repr>, limit: u64) -> Self {
         Self { repr: repr.into(), remaining: Some(limit) }
+    }
+
+    pub fn collect_body(self) -> Collect {
+        Collect::new(self)
     }
 }
 

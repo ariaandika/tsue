@@ -2,7 +2,6 @@
 use bytes::{Bytes, BytesMut};
 use futures_util::{FutureExt, future::Map};
 use http::{Extensions, HeaderMap, Method, StatusCode, Uri, Version};
-use http_body_util::{BodyExt, Collected, combinators::Collect};
 use std::{
     convert::Infallible,
     fmt,
@@ -12,7 +11,7 @@ use std::{
 
 use super::{FromRequest, FromRequestParts, Parts, Request};
 use crate::{
-    body::{Body, BodyError},
+    body::{Body, BodyError, Collect, Collected},
     response::{IntoResponse, Response},
 };
 
@@ -92,27 +91,27 @@ from_req!(Body, |req| req.into_body());
 // ===== Body Implementations =====
 
 type BytesFuture = Map<
-    Collect<Body>,
-    fn(Result<Collected<Bytes>, BodyError>) -> Result<Bytes, BytesFutureError>,
+    Collect,
+    fn(Result<Collected, BodyError>) -> Result<Bytes, BytesFutureError>,
 >;
 
 from_req! {
     Bytes,
     Error = BytesFutureError;
     Future = BytesFuture;
-    |req|req.into_body().collect().map(|e|Ok(e?.to_bytes()))
+    |req|req.into_body().collect_body().map(|e|Ok(e?.into_bytes()))
 }
 
 type BytesMutFuture = Map<
-    Collect<Body>,
-    fn(Result<Collected<Bytes>, BodyError>) -> Result<BytesMut, BytesFutureError>,
+    Collect,
+    fn(Result<Collected, BodyError>) -> Result<BytesMut, BytesFutureError>,
 >;
 
 from_req! {
     BytesMut,
     Error = BytesFutureError;
     Future = BytesMutFuture;
-    |req|req.into_body().collect().map(|e|Ok(e?.to_bytes().into()))
+    |req|req.into_body().collect_body().map(|e|Ok(e?.into_bytes_mut()))
 }
 
 type StringFuture =
