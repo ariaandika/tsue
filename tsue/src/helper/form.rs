@@ -7,12 +7,16 @@ use std::{
     task::{Context, Poll, ready},
 };
 
-use super::Form;
+use super::{Form, macros::derefm};
 use crate::{
     body::BodyError,
     request::{FromRequest, Request},
     response::IntoResponse,
 };
+
+derefm!(<T>|Form<T>| -> T);
+
+// ===== FromRequest =====
 
 impl<T: DeserializeOwned> FromRequest for Form<T> {
     type Error = FormFutureError;

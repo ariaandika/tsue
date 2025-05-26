@@ -8,12 +8,14 @@ use std::{
     task::{Context, Poll, ready},
 };
 
-use super::Json;
+use super::{Json, macros::derefm};
 use crate::{
     body::BodyError,
     request::{FromRequest, Request},
     response::{IntoResponse, Response},
 };
+
+derefm!(<T>|Json<T>| -> T);
 
 // ===== FromRequest =====
 

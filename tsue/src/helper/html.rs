@@ -1,8 +1,10 @@
 use bytes::Bytes;
 use http::{HeaderName, HeaderValue, header::CONTENT_TYPE};
 
-use super::Html;
+use super::{Html, macros::derefm};
 use crate::response::{IntoResponse, Response};
+
+derefm!(<T>|Html<T>| -> T);
 
 const TEXT_HTML: [(HeaderName, HeaderValue); 1] = [(
     CONTENT_TYPE,

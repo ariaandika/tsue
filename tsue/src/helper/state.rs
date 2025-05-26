@@ -1,11 +1,13 @@
 use http::{StatusCode, request};
 use std::future::{Ready, ready};
 
-use super::State;
+use super::{State, macros::derefm};
 use crate::{
     request::FromRequestParts,
     response::{IntoResponse, Response},
 };
+
+derefm!(<T>|State<T>| -> T);
 
 impl<T> FromRequestParts for State<T>
 where
