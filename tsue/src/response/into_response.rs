@@ -69,6 +69,13 @@ impl IntoResponse for serde_json::Error {
     }
 }
 
+#[cfg(feature = "form")]
+impl IntoResponse for serde_urlencoded::de::Error {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
+    }
+}
+
 impl IntoResponse for hyper::Error {
     fn into_response(self) -> Response {
         match self {

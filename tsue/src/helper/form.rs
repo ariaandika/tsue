@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use http::{HeaderValue, header::CONTENT_TYPE};
+use http::{HeaderValue, StatusCode, header::CONTENT_TYPE};
 use serde::de::DeserializeOwned;
 use std::{
     marker::PhantomData,
@@ -8,7 +8,10 @@ use std::{
 };
 
 use super::Form;
-use crate::request::{BytesFutureError, FromRequest, Request};
+use crate::{
+    request::{BytesFutureError, FromRequest, Request},
+    response::IntoResponse,
+};
 
 impl<T: DeserializeOwned> FromRequest for Form<T> {
     type Error = FormFutureError;
@@ -56,6 +59,8 @@ impl<T: DeserializeOwned> Future for FormFuture<T> {
     }
 }
 
+// ===== Error =====
+
 #[derive(Debug)]
 pub enum FormFutureError {
     ContentType,
@@ -83,6 +88,16 @@ impl std::fmt::Display for FormFutureError {
             FormFutureError::ContentType => f.write_str("invalid media type"),
             FormFutureError::Serde(error) => error.fmt(f),
             FormFutureError::Body(error) => error.fmt(f),
+        }
+    }
+}
+
+impl IntoResponse for FormFutureError {
+    fn into_response(self) -> crate::response::Response {
+        match self {
+            Self::ContentType => (StatusCode::BAD_REQUEST,"invalid content-type").into_response(),
+            Self::Body(error) => error.into_response(),
+            Self::Serde(error) => error.into_response(),
         }
     }
 }
