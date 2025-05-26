@@ -3,33 +3,9 @@ use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE, response};
 
 use super::{IntoResponse, IntoResponseParts, Parts, Response};
 
-macro_rules! part {
-    ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident) => $body:expr) => {
-        part!(@ $target, $($mut)* $(, $mut2)* ($self,_part) => $body);
-    };
-    ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident,$part:ident) => $body:expr) => {
-        part!(@ $target, $($mut)* $(, $mut2)* ($self,$part) => { $body; $part });
-    };
-    (@ $target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident,$part:ident) => $body:expr) => {
-        impl IntoResponseParts for $target {
-            fn into_response_parts($($mut2)* $self, $($mut)* $part: Parts) -> Parts {
-                $body
-            }
-        }
-    };
-}
+use macros::{headers, into_response_tuple, part, res};
 
-macro_rules! res {
-    ($target:ty, $self:ident => $body:expr) => {
-        impl IntoResponse for $target {
-            fn into_response($self) -> Response {
-                $body
-            }
-        }
-    };
-}
-
-// ===== Foreign Implementation =====
+// ===== Blanket Implementation =====
 
 /// Anything that implement [`IntoResponseParts`] also implement [`IntoResponse`].
 impl<R: IntoResponseParts> IntoResponse for R {
@@ -40,14 +16,13 @@ impl<R: IntoResponseParts> IntoResponse for R {
     }
 }
 
-impl IntoResponseParts for () {
-    fn into_response_parts(self, parts: Parts) -> Parts {
-        parts
-    }
-}
+// ===== Foreign Implementation =====
 
+part!((), (self,parts) => {});
 part!(std::convert::Infallible, (self) => match self { });
 part!(StatusCode, mut (self,parts) => parts.status = self);
+
+into_response_tuple!(R1, R2, R3, R4, R5, R6, R7, R8,);
 
 impl<T, E> IntoResponse for Result<T, E>
 where
@@ -59,20 +34,6 @@ where
             Ok(ok) => ok.into_response(),
             Err(err) => err.into_response(),
         }
-    }
-}
-
-#[cfg(feature = "json")]
-impl IntoResponse for serde_json::Error {
-    fn into_response(self) -> Response {
-        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
-    }
-}
-
-#[cfg(feature = "form")]
-impl IntoResponse for serde_urlencoded::de::Error {
-    fn into_response(self) -> Response {
-        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
     }
 }
 
@@ -102,22 +63,6 @@ impl IntoResponseParts for (&'static str, &'static str) {
     }
 }
 
-macro_rules! headers {
-    (
-        |$h1:ident: $t1:ty|$b1:expr;
-        |$h2:ident: $t2:ty|$b2:expr;
-    ) => {
-        impl<const N: usize> IntoResponseParts for [($t1, $t2); N] {
-            fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
-                for ($h1, $h2) in self {
-                    parts.headers.append($b1, $b2);
-                }
-                parts
-            }
-        }
-    };
-}
-
 headers! {
     |key: &'static str|HeaderName::from_static(key);
     |val: &'static str|HeaderValue::from_static(val);
@@ -140,37 +85,84 @@ headers! {
 
 // ===== Body Implementations =====
 
-const TEXT_PLAIN_UTF_8: HeaderValue = HeaderValue::from_static("application/x-www-form-urlencoded");
+const UTF8: [(HeaderName,HeaderValue);1] = [(CONTENT_TYPE,HeaderValue::from_static("application/x-www-form-urlencoded"))];
 
 res!(&'static [u8], self => Response::new(Bytes::from_static(self).into()));
 res!(Bytes, self => Response::new(self.into()));
 res!(Vec<u8>, self => Response::new(self.into()));
 res!(BytesMut, self => Response::new(self.freeze().into()));
 res!(Response, self => self);
-res!(&'static str, self => ([(CONTENT_TYPE,TEXT_PLAIN_UTF_8)],Bytes::from_static(self.as_bytes())).into_response());
-res!(String, self => ([(CONTENT_TYPE,TEXT_PLAIN_UTF_8)],Bytes::from(self)).into_response());
+res!(&'static str, self => (UTF8,Bytes::from_static(self.as_bytes())).into_response());
+res!(String, self => (UTF8,Bytes::from(self)).into_response());
 
-macro_rules! into_response_tuple {
-    (@$($r:ident,)*) => {
-        impl<$($r,)*R> IntoResponse for ($($r,)*R)
-        where
-            $($r: IntoResponseParts,)*
-            R: IntoResponse,
-        {
-            fn into_response(self) -> Response {
-                #![allow(non_snake_case)]
-                let ($($r,)*r) = self;
-                let (mut parts,body) = r.into_response().into_parts();
-                $(parts = $r.into_response_parts(parts);)*
-                Response::from_parts(parts, body)
+// ===== Macros =====
+
+mod macros {
+    macro_rules! part {
+        ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident) => $body:expr) => {
+            part!(@ $target, $($mut)* $(, $mut2)* ($self,_part) => $body);
+        };
+        ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident,$part:ident) => $body:expr) => {
+            part!(@ $target, $($mut)* $(, $mut2)* ($self,$part) => { $body; $part });
+        };
+        (@ $target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident,$part:ident) => $body:expr) => {
+            impl IntoResponseParts for $target {
+                fn into_response_parts($($mut2)* $self, $($mut)* $part: Parts) -> Parts {
+                    $body
+                }
             }
-        }
-    };
-    () => { };
-    ($r:ident,$($r2:ident,)*) => {
-        into_response_tuple!($($r2,)*);
-        into_response_tuple!(@ $r, $($r2,)*);
-    };
+        };
+    }
+
+    macro_rules! res {
+        ($target:ty, $self:ident => $body:expr) => {
+            impl IntoResponse for $target {
+                fn into_response($self) -> Response {
+                    $body
+                }
+            }
+        };
+    }
+
+    macro_rules! headers {
+        (
+            |$h1:ident: $t1:ty|$b1:expr;
+            |$h2:ident: $t2:ty|$b2:expr;
+        ) => {
+            impl<const N: usize> IntoResponseParts for [($t1, $t2); N] {
+                fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
+                    for ($h1, $h2) in self {
+                        parts.headers.append($b1, $b2);
+                    }
+                    parts
+                }
+            }
+        };
+    }
+
+    macro_rules! into_response_tuple {
+        (@$($r:ident,)*) => {
+            impl<$($r,)*R> IntoResponse for ($($r,)*R)
+            where
+                $($r: IntoResponseParts,)*
+                R: IntoResponse,
+            {
+                fn into_response(self) -> Response {
+                    #![allow(non_snake_case)]
+                    let ($($r,)*r) = self;
+                    let (mut parts,body) = r.into_response().into_parts();
+                    $(parts = $r.into_response_parts(parts);)*
+                    Response::from_parts(parts, body)
+                }
+            }
+        };
+        () => { };
+        ($r:ident,$($r2:ident,)*) => {
+            into_response_tuple!($($r2,)*);
+            into_response_tuple!(@ $r, $($r2,)*);
+        };
+    }
+
+    pub(crate) use {part, res, into_response_tuple, headers};
 }
 
-into_response_tuple!(R1, R2, R3, R4, R5, R6, R7, R8,);

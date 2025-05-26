@@ -6,17 +6,9 @@ use crate::{
     response::{IntoResponse, Response},
 };
 
-// pub use hyper::service::Service;
+pub use hyper::service::Service;
 
-pub trait Service<Request> {
-    type Response;
-
-    type Error;
-
-    type Future: Future<Output = Result<Self::Response, Self::Error>>;
-
-    fn call(&self, req: Request) -> Self::Future;
-}
+// ===== HttpService =====
 
 /// A [`Service`] that accept http request and return http response.
 pub trait HttpService:
@@ -35,6 +27,8 @@ where
 {
     type HttpFuture = Self::Future;
 }
+
+// ===== Layer =====
 
 /// A [`Service`] which holds another service.
 pub trait Layer<S> {

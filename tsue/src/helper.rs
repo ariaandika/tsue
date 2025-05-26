@@ -16,7 +16,7 @@ mod json;
 mod form;
 
 /// Extract shared state.
-#[derive(Clone)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct State<T>(pub T);
 
 /// JSON Request and Response helper.
@@ -25,29 +25,37 @@ pub struct State<T>(pub T);
 ///
 /// Response with `Content-Type` of `application/json`.
 #[cfg(feature = "json")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Json<T>(pub T);
 
 /// Form Request helper.
 ///
 /// Parse request with `Content-Type` of `application/x-www-form-urlencoded`.
 #[cfg(feature = "form")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Form<T>(pub T);
 
 /// HTML Response helper.
 ///
 /// Response with `Content-Type` of `text/html; charset=utf-8`
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Html<T>(pub T);
 
 /// HTTP Redirect helper.
 ///
 /// Response with `3xx` status code
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Redirect {
     status: StatusCode,
     location: String,
 }
 
-/// Sum type for [`Error`][std::error::Error], [`IntoResponse`][crate::response::IntoResponse],
-/// [`Debug`][std::fmt::Debug] and [`Display`][std::fmt::Display].
+/// Sum type for [`Error`][1], [`Debug`][3], [`Display`][4], and [`IntoResponse`][2].
+///
+/// [1]: std::error::Error
+/// [2]: crate::response::IntoResponse
+/// [3]: std::fmt::Debug
+/// [4]: std::fmt::Display
 #[derive(Debug)]
 pub enum Either<L,R> {
     Left(L),

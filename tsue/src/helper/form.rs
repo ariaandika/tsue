@@ -9,7 +9,8 @@ use std::{
 
 use super::Form;
 use crate::{
-    request::{BytesFutureError, FromRequest, Request},
+    body::BodyError,
+    request::{FromRequest, Request},
     response::IntoResponse,
 };
 
@@ -65,7 +66,7 @@ impl<T: DeserializeOwned> Future for FormFuture<T> {
 pub enum FormFutureError {
     ContentType,
     Serde(serde_urlencoded::de::Error),
-    Body(BytesFutureError),
+    Body(BodyError),
 }
 
 impl From<serde_urlencoded::de::Error> for FormFutureError {
@@ -74,8 +75,8 @@ impl From<serde_urlencoded::de::Error> for FormFutureError {
     }
 }
 
-impl From<BytesFutureError> for FormFutureError {
-    fn from(v: BytesFutureError) -> Self {
+impl From<BodyError> for FormFutureError {
+    fn from(v: BodyError) -> Self {
         Self::Body(v)
     }
 }
@@ -99,5 +100,11 @@ impl IntoResponse for FormFutureError {
             Self::Body(error) => error.into_response(),
             Self::Serde(error) => error.into_response(),
         }
+    }
+}
+
+impl IntoResponse for serde_urlencoded::de::Error {
+    fn into_response(self) -> crate::response::Response {
+        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
     }
 }

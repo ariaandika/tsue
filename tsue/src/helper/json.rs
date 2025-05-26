@@ -107,7 +107,7 @@ pub enum JsonFutureError {
 
 impl From<BytesFutureError> for JsonFutureError {
     fn from(e: BytesFutureError) -> Self {
-        Self::Body(e.into())
+        Self::Body(e)
     }
 }
 impl From<serde_json::Error> for JsonFutureError {
@@ -137,3 +137,10 @@ impl fmt::Display for JsonFutureError {
         }
     }
 }
+
+impl IntoResponse for serde_json::Error {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
+    }
+}
+
