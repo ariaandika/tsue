@@ -6,7 +6,7 @@ mod into_response;
 pub use http::response::Parts;
 
 /// Represents an HTTP response
-pub type Response<T = Body> = hyper::http::Response<T>;
+pub type Response<T = Body> = http::Response<T>;
 
 /// A type that can be converted into response
 ///

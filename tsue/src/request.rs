@@ -8,7 +8,7 @@ pub use http::request::Parts;
 pub use from_request::{BytesFutureError, StringFutureError};
 
 /// Represents an HTTP request.
-pub type Request<T = Body> = hyper::http::Request<T>;
+pub type Request<T = Body> = http::Request<T>;
 
 // NOTE: Previously, `FromRequest` only accept mutable reference of `request::Parts`
 // that allow `IntoResponse` access it, things get absurdly complicated realy quick

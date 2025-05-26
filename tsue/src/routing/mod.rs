@@ -8,13 +8,17 @@ mod matcher;
 
 // utilities
 mod state;
-mod adapter;
 
 // async fn as a Service
 mod handler;
 
+#[cfg(feature = "hyper")]
+mod adapter;
+
 pub use router::Router;
 pub use branch::{Branch, get, post, put, patch, delete};
 pub use state::State;
+
+#[cfg(feature = "hyper")]
 pub use adapter::Hyper;
 

@@ -1,11 +1,10 @@
-use hyper::service::Service;
 use std::convert::Infallible;
 
 use super::{Branch, State, matcher::Matcher, nest::Nest};
 use crate::{
     request::Request,
     response::Response,
-    service::{HttpService, Layer, NotFound},
+    service::{HttpService, Layer, NotFound, Service},
 };
 
 /// Routes builder.

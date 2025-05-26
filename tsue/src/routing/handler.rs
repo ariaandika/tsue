@@ -1,11 +1,11 @@
 //! functional route
 use futures_util::{FutureExt, future::Map};
-use hyper::service::Service;
 use std::{convert::Infallible, marker::PhantomData};
 
 use crate::{
     request::{FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
+    service::Service,
 };
 
 /// functional service

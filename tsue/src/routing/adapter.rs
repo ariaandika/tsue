@@ -1,9 +1,8 @@
-use http::Request;
-use hyper::{body::Incoming, service::Service};
+use hyper::body::Incoming;
 
-use crate::{body::Body, response::Response, service::HttpService};
+use crate::{body::Body, request::Request, service::HttpService};
 
-/// Service adapter to allow use with [`hyper::service::HttpService`].
+/// Service adapter to allow use with [`hyper::service::Service`].
 #[derive(Debug)]
 pub struct Hyper<S> {
     inner: S,
@@ -15,17 +14,26 @@ impl<S> Hyper<S> {
     }
 }
 
-impl<S> Service<Request<Incoming>> for Hyper<S>
+impl<S> hyper::service::Service<Request<Incoming>> for Hyper<S>
 where
     S: HttpService,
 {
-    type Response = Response;
-
+    type Response = S::Response;
     type Error = S::Error;
-
     type Future = S::Future;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         self.inner.call(req.map(Body::new))
     }
 }
+
+impl<S: HttpService> crate::service::Service<Request> for Hyper<S> {
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn call(&self, req: Request) -> Self::Future {
+        self.inner.call(req)
+    }
+}
+

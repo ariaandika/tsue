@@ -1,6 +1,5 @@
 use futures_util::{FutureExt, future::Either};
 use http::Method;
-use hyper::service::Service;
 use std::convert::Infallible;
 
 use super::{
@@ -10,7 +9,7 @@ use super::{
 use crate::{
     request::Request,
     response::Response,
-    service::{HttpService, MethodNotAllowed},
+    service::{HttpService, MethodNotAllowed, Service},
 };
 
 /// Service that match request and delegate to either service.

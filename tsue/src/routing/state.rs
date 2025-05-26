@@ -1,6 +1,7 @@
-use hyper::service::Service;
-
-use crate::{request::Request, service::HttpService};
+use crate::{
+    request::Request,
+    service::{HttpService, Service},
+};
 
 /// A service that assign a shared state.
 ///

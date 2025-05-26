@@ -1,10 +1,12 @@
 use futures_util::{FutureExt, future::Either};
-use hyper::service::Service;
 use std::convert::Infallible;
 
 use super::matcher::RequestInternal;
 use crate::{
-    request::Request, response::Response, routing::matcher::Matched, service::HttpService,
+    request::Request,
+    response::Response,
+    routing::matcher::Matched,
+    service::{HttpService, Service},
 };
 
 #[derive(Debug)]
