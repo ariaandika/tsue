@@ -1,7 +1,7 @@
 use hyper::service::Service;
 use std::convert::Infallible;
 
-use super::{Branch, Matcher, State};
+use super::{Branch, State, matcher::Matcher, nest::Nest};
 use crate::{
     request::Request,
     response::Response,
@@ -41,9 +41,22 @@ impl<S> Router<S> {
     }
 
     /// Register new route.
-    pub fn route<R>(self, matcher: impl Into<Matcher>, route: R) -> Router<Branch<R, S>> {
+    pub fn route<R>(self, matcher: impl Matcher, route: R) -> Router<Branch<R, S>> {
         Router {
             inner: Branch::new(matcher, route, self.inner),
+        }
+    }
+
+    /// Nest another router.
+    ///
+    /// Nested `prefix` should starts with "/".
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `prefix` is not starts with "/".
+    pub fn nest<R>(self, prefix: &'static str, route: R) -> Router<Nest<R, S>> {
+        Router {
+            inner: Nest::new(prefix, route, self.inner),
         }
     }
 

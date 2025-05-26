@@ -1,42 +1,53 @@
-use crate::request::Request;
 use http::Method;
 
-/// Partially match request.
+use crate::request::Request;
+
+/// Helper trait to conviniently setup route matcher.
 ///
-/// Use [`PartialEq`]
-#[derive(Clone, Default)]
-pub struct Matcher {
-    path: Option<&'static str>,
-    method: Option<Method>,
+/// Implemented for:
+/// - `&'static str`
+/// - `Method`
+/// - `(&'static str, Method)`
+/// - `(Method, &'static str)`
+pub trait Matcher {
+    fn matcher(self) -> (Option<Method>,Option<&'static str>);
 }
 
-impl PartialEq<Request> for Matcher {
-    fn eq(&self, other: &Request) -> bool {
-        if let Some(path) = self.path {
-            if path != other.uri().path() {
-                return false;
-            }
-        }
-        if let Some(method) = &self.method {
-            if method != other.method() {
-                return false;
-            }
-        }
-        true
-    }
-}
-
-macro_rules! matcher_from {
-    ($id:pat,$ty:ty => $($tt:tt)*) => {
-        impl From<$ty> for Matcher {
-            fn from($id: $ty) -> Self {
-                Self $($tt)*
+macro_rules! impl_matcher {
+    ($me:ty,$id:ident => $body:expr) => {
+        impl Matcher for $me {
+            fn matcher($id) -> (Option<Method>,Option<&'static str>) {
+                $body
             }
         }
     };
 }
 
-matcher_from!(_,() => { path: None, method: None });
-matcher_from!(value,Method => { method: Some(value), path: None });
-matcher_from!(value,&'static str => { path: Some(value), method: None });
-matcher_from!((p,m),(&'static str,Method) => { path: Some(p), method: Some(m) });
+impl_matcher!(&'static str, self => (None,Some(self)));
+impl_matcher!(Method, self => (Some(self),None));
+impl_matcher!((Method, &'static str), self => (Some(self.0),Some(self.1)));
+impl_matcher!((&'static str, Method), self => (Some(self.1),Some(self.0)));
+
+// ===== Internals =====
+
+pub(crate) trait RequestInternal {
+    fn match_path(&self) -> &str;
+}
+
+impl RequestInternal for Request {
+    fn match_path(&self) -> &str {
+        // PERF: accessing `extensions` in hot code path, especially O(n) of routes count, may have
+        // performance hit
+
+        match self.extensions().get::<Matched>() {
+            Some(m) => self.uri().path().split_at(m.midpoint as _).1,
+            None => self.uri().path(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Matched {
+    pub(crate) midpoint: u32,
+}
+

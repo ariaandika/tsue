@@ -3,7 +3,10 @@ use http::Method;
 use hyper::service::Service;
 use std::convert::Infallible;
 
-use super::{Matcher, handler::HandlerService};
+use super::{
+    handler::HandlerService,
+    matcher::{Matcher, RequestInternal},
+};
 use crate::{
     request::Request,
     response::Response,
@@ -17,9 +20,17 @@ use crate::{
 ///
 /// [`route`]: super::Router::route
 pub struct Branch<S, F> {
-    matcher: Matcher,
+    method: Option<Method>,
+    path: Option<&'static str>,
     inner: S,
     fallback: F,
+}
+
+impl<S, F> Branch<S, F> {
+    pub fn new(matcher: impl Matcher, inner: S, fallback: F) -> Self {
+        let (method,path) = matcher.matcher();
+        Self { method, path, inner, fallback }
+    }
 }
 
 macro_rules! fn_router {
@@ -27,19 +38,21 @@ macro_rules! fn_router {
         #[doc = $doc]
         pub fn $name<F, S>(f: F) -> Branch<HandlerService<F, S>, MethodNotAllowed> {
             Branch {
-                matcher: Method::$method.into(),
+                method: Some(Method::$method),
+                path: None,
                 inner: HandlerService::new(f),
                 fallback: MethodNotAllowed,
             }
         }
-    };
-    (self $name:ident $method:ident $doc:literal) => {
-        #[doc = $doc]
-        pub fn $name<S2, F2>(self, f: F2) -> Branch<HandlerService<F2, S2>, Branch<S, F>> {
-            Branch {
-                matcher: Method::$method.into(),
-                inner: HandlerService::new(f),
-                fallback: self,
+        impl<S, F> Branch<S, F> {
+            #[doc = $doc]
+            pub fn $name<S2, F2>(self, f: F2) -> Branch<HandlerService<F2, S2>, Branch<S, F>> {
+                Branch {
+                    method: Some(Method::$method),
+                    path: None,
+                    inner: HandlerService::new(f),
+                    fallback: self,
+                }
             }
         }
     };
@@ -51,17 +64,7 @@ fn_router!(put PUT "Setup PUT service.");
 fn_router!(patch PATCH "Setup PATCH service.");
 fn_router!(delete DELETE "Setup DELETE service.");
 
-impl<S, F> Branch<S, F> {
-    pub fn new(matcher: impl Into<Matcher>, inner: S, fallback: F) -> Self {
-        Self { matcher: matcher.into(), inner, fallback }
-    }
-
-    fn_router!(self get GET "Add GET service.");
-    fn_router!(self post POST "Add POST service.");
-    fn_router!(self put PUT "Add PUT service.");
-    fn_router!(self patch PATCH "Add PATCH service.");
-    fn_router!(self delete DELETE "Add DELETE service.");
-}
+// ===== Service =====
 
 impl<S, F> Service<Request> for Branch<S, F>
 where
@@ -73,9 +76,25 @@ where
     type Future = Either<S::Future, F::Future>;
 
     fn call(&self, req: Request) -> Self::Future {
-        match self.matcher == req {
-            true => self.inner.call(req).left_future(),
-            false => self.fallback.call(req).right_future(),
+        if matcher(&self.method, self.path, &req) {
+            self.inner.call(req).left_future()
+        } else {
+            self.fallback.call(req).right_future()
         }
     }
 }
+
+fn matcher(method: &Option<Method>, path: Option<&'static str>, req: &Request) -> bool {
+    if let Some(method) = method {
+        if method != req.method() {
+            return false;
+        }
+    }
+    if let Some(path) = path {
+        if path != req.match_path() {
+            return false;
+        }
+    }
+    true
+}
+
