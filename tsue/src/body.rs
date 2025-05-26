@@ -1,8 +1,9 @@
 use bytes::Bytes;
 use http_body::Frame;
 use std::{
+    backtrace::Backtrace,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use crate::response::{IntoResponse, Response};
@@ -35,6 +36,7 @@ impl Body {
         Self { repr: repr.into(), remaining: Some(2_000_000) }
     }
 
+    /// Buffer the entire body into memory.
     pub fn collect_body(self) -> Collect {
         Collect::new(self)
     }
@@ -94,11 +96,17 @@ impl Default for Body {
 
 pub struct BodyError {
     kind: Kind,
+    backtrace: Backtrace,
 }
 
 impl BodyError {
     fn new(kind: Kind) -> Self {
-        Self { kind }
+        Self { kind, backtrace: Backtrace::capture() }
+    }
+
+    /// Returns the underlying [`Backtrace`].
+    pub fn backtrace(&self) -> &Backtrace {
+        &self.backtrace
     }
 }
 
@@ -133,7 +141,7 @@ impl From<LengthLimitError> for BodyError {
 impl std::error::Error for BodyError { }
 
 impl std::fmt::Debug for BodyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut f = f.debug_tuple("BodyError");
         match &self.kind {
             Kind::Incoming(r) => f.field(&r),
@@ -143,11 +151,19 @@ impl std::fmt::Debug for BodyError {
 }
 
 impl std::fmt::Display for BodyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &self.kind {
-            Kind::Incoming(r) => r.fmt(f),
-            Kind::Limited(l) => l.fmt(f),
+            Kind::Incoming(r) => r.fmt(f)?,
+            Kind::Limited(l) => l.fmt(f)?,
         }
+
+        if let std::backtrace::BacktraceStatus::Captured = self.backtrace.status() {
+            let backtrace = self.backtrace.to_string();
+            writeln!(f, "\n\nBodyError stack backtrace:")?;
+            write!(f, "{}", backtrace.trim_end())?;
+        }
+
+        Ok(())
     }
 }
 
