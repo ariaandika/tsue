@@ -1,6 +1,8 @@
 //! Entrypoint of the server
-use hyper::server::conn::http1::Builder as Hyper;
-use hyper_util::rt::TokioIo;
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder as Hyper,
+};
 use std::{fmt::Display, io, sync::Arc};
 use tokio::net::{TcpListener, ToSocketAddrs};
 
@@ -27,11 +29,13 @@ where
         let service = service.clone();
         match tcp.accept().await {
             Ok((stream, _)) => {
-                tokio::spawn(
-                    Hyper::new()
-                        .serve_connection(TokioIo::new(stream), service)
-                        .with_upgrades(),
-                );
+                tokio::spawn(async move {
+                    let rt = Hyper::new(TokioExecutor::new());
+                    if let Err(_err) = rt.serve_connection_with_upgrades(TokioIo::new(stream), service).await {
+                        #[cfg(feature = "log")]
+                        log::error!("{_err}");
+                    }
+                });
             }
             Err(_err) => {
                 #[cfg(feature = "log")]

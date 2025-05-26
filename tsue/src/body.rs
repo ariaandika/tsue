@@ -32,12 +32,12 @@ impl<B: Into<Repr>> From<B> for Body {
 
 impl Body {
     pub(crate) fn new(repr: impl Into<Repr>) -> Self {
-        Self { repr: repr.into(), remaining: None }
+        Self { repr: repr.into(), remaining: Some(2_000_000) }
     }
 
-    pub(crate) fn with_limit(repr: impl Into<Repr>, limit: u64) -> Self {
-        Self { repr: repr.into(), remaining: Some(limit) }
-    }
+    // pub(crate) fn with_limit(repr: impl Into<Repr>, limit: u64) -> Self {
+    //     Self { repr: repr.into(), remaining: Some(limit) }
+    // }
 
     pub fn collect_body(self) -> Collect {
         Collect::new(self)

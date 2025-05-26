@@ -26,10 +26,6 @@ where
     type Future = S::Future;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let (parts, body) = req.into_parts();
-        self.inner.call(Request::from_parts(
-            parts,
-            Body::with_limit(body, 2_000_000),
-        ))
+        self.inner.call(req.map(Body::new))
     }
 }
