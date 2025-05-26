@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use futures_util::FutureExt;
 use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE};
 use serde::{Serialize, de::DeserializeOwned};
@@ -24,8 +23,6 @@ fn validate(req: &Request) -> Option<()> {
 }
 
 // ===== FromRequest =====
-
-type BytesFutureError = <Bytes as FromRequest>::Error;
 
 type JsonMap<V = Value> =
     fn(Result<crate::body::Collected, BodyError>) -> Result<V, JsonFutureError>;
@@ -60,7 +57,7 @@ impl<T: DeserializeOwned> FromRequest for Json<T> {
             Some(()) => req
                 .into_body()
                 .collect_body()
-                .map((|e| Ok(Json(serde_json::from_slice(&e?.into_bytes())?))) as JsonMap<Json<T>>)
+                .map((|e| Ok(Json(serde_json::from_slice(&e?.into_bytes_mut())?))) as JsonMap<Json<T>>)
                 .left_future(),
             None => ready(Err(JsonFutureError::ContentType)).right_future(),
         }
@@ -122,8 +119,8 @@ pub enum JsonFutureError {
     Serde(serde_json::Error),
 }
 
-impl From<BytesFutureError> for JsonFutureError {
-    fn from(e: BytesFutureError) -> Self {
+impl From<BodyError> for JsonFutureError {
+    fn from(e: BodyError) -> Self {
         Self::Body(e)
     }
 }
@@ -136,7 +133,9 @@ impl From<serde_json::Error> for JsonFutureError {
 impl IntoResponse for JsonFutureError {
     fn into_response(self) -> Response {
         match self {
-            Self::ContentType => (StatusCode::BAD_REQUEST,"invalid content-type").into_response(),
+            Self::ContentType => {
+                (StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported media type").into_response()
+            }
             Self::Body(error) => error.into_response(),
             Self::Serde(error) => error.into_response(),
         }
@@ -148,7 +147,7 @@ impl std::error::Error for JsonFutureError {}
 impl fmt::Display for JsonFutureError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ContentType => f.write_str("invalid content-type"),
+            Self::ContentType => f.write_str("unsupported media type"),
             Self::Body(hyper) => hyper.fmt(f),
             Self::Serde(serde) => serde.fmt(f),
         }
