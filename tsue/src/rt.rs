@@ -6,12 +6,26 @@ use hyper_util::{
 use std::{fmt::Display, io, sync::Arc};
 use tokio::net::{TcpListener, ToSocketAddrs};
 
-use crate::{routing, service::HttpService};
+use crate::{
+    routing::{self, Router},
+    service::HttpService,
+};
+
+impl<S> Router<S> {
+    pub fn listen(self, addr: impl ToSocketAddrs + Display + Clone) -> impl Future<Output = io::Result<()>>
+    where
+        S: HttpService,
+        S::Error: std::error::Error + Send + Sync + 'static,
+    {
+        listen(addr, self)
+    }
+}
 
 /// Entrypoint to run the server
 pub async fn listen<S>(addr: impl ToSocketAddrs + Display + Clone, service: S) -> io::Result<()>
 where
     S: HttpService,
+    S::Error: std::error::Error + Send + Sync + 'static,
 {
     let tcp = match TcpListener::bind(addr.clone()).await {
         Ok(ok) => ok,

@@ -1,8 +1,11 @@
-use futures_util::{FutureExt, future::Either};
-use std::convert::Infallible;
+use futures_util::{
+    FutureExt,
+    future::{Either, Map},
+};
 
 use super::matcher::RequestInternal;
 use crate::{
+    helper::Either as Either2,
     request::Request,
     response::Response,
     routing::matcher::Matched,
@@ -29,14 +32,27 @@ where
     F: HttpService,
 {
     type Response = Response;
-    type Error = Infallible;
-    type Future = Either<S::Future, F::Future>;
+    type Error = Either2<S::Error, F::Error>;
+    type Future = Either<
+        Map<
+            S::Future,
+            fn(Result<S::Response, S::Error>) -> Result<S::Response, Either2<S::Error, F::Error>>,
+        >,
+        Map<
+            F::Future,
+            fn(Result<F::Response, F::Error>) -> Result<F::Response, Either2<S::Error, F::Error>>,
+        >,
+    >;
 
     fn call(&self, req: Request) -> Self::Future {
         if match_path(&req, self.prefix) {
-            self.inner.call(with_prefixed(req, self.prefix)).left_future()
+            Either::Left(
+                self.inner
+                    .call(with_prefixed(req, self.prefix))
+                    .map(|e| e.map_err(Either2::Left)),
+            )
         } else {
-            self.fallback.call(req).right_future()
+            Either::Right(self.fallback.call(req).map(|e| e.map_err(Either2::Right)))
         }
     }
 }

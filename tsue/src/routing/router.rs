@@ -1,11 +1,11 @@
-use std::convert::Infallible;
-
 use super::{Branch, State, matcher::Matcher, nest::Nest};
 use crate::{
     request::Request,
     response::Response,
-    service::{HttpService, Layer, NotFound, Service},
+    service::{HttpService, Layer, Service, StatusService},
 };
+
+type NotFound = StatusService;
 
 /// Routes builder.
 pub struct Router<S> {
@@ -15,7 +15,7 @@ pub struct Router<S> {
 impl Router<NotFound> {
     /// Create new `Router`.
     pub fn new() -> Router<NotFound> {
-        Router { inner: NotFound }
+        Router { inner: StatusService(http::StatusCode::NOT_FOUND) }
     }
 }
 
@@ -67,26 +67,12 @@ impl<S> Router<S> {
     }
 }
 
-impl<S> Router<S>
-where
-    S: HttpService,
-{
-    /// Alternative way to start server
-    #[cfg(feature = "tokio")]
-    pub fn listen(
-        self,
-        addr: impl tokio::net::ToSocketAddrs + std::fmt::Display + Clone,
-    ) -> impl Future<Output = Result<(), std::io::Error>> {
-        crate::listen(addr, self)
-    }
-}
-
 impl<S> Service<Request> for Router<S>
 where
     S: HttpService,
 {
     type Response = Response;
-    type Error = Infallible;
+    type Error = S::Error;
     type Future = S::Future;
 
     fn call(&self, req: Request) -> Self::Future {

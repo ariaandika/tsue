@@ -1,16 +1,21 @@
-use futures_util::{FutureExt, future::Either};
+use futures_util::{
+    FutureExt,
+    future::{Either, Map},
+};
 use http::Method;
-use std::convert::Infallible;
 
 use super::{
     handler::HandlerService,
     matcher::{Matcher, RequestInternal},
 };
 use crate::{
+    helper::Either as Either2,
     request::Request,
     response::Response,
-    service::{HttpService, MethodNotAllowed, Service},
+    service::{HttpService, Service, StatusService},
 };
+
+type MethodNotAllowed = StatusService;
 
 /// Service that match request and delegate to either service.
 ///
@@ -40,7 +45,7 @@ macro_rules! fn_router {
                 method: Some(Method::$method),
                 path: None,
                 inner: HandlerService::new(f),
-                fallback: MethodNotAllowed,
+                fallback: StatusService(http::StatusCode::METHOD_NOT_ALLOWED),
             }
         }
         impl<S, F> Branch<S, F> {
@@ -71,14 +76,23 @@ where
     F: HttpService,
 {
     type Response = Response;
-    type Error = Infallible;
-    type Future = Either<S::Future, F::Future>;
+    type Error = Either2<S::Error, F::Error>;
+    type Future = Either<
+        Map<
+            S::Future,
+            fn(Result<S::Response, S::Error>) -> Result<S::Response, Either2<S::Error, F::Error>>,
+        >,
+        Map<
+            F::Future,
+            fn(Result<F::Response, F::Error>) -> Result<F::Response, Either2<S::Error, F::Error>>,
+        >,
+    >;
 
     fn call(&self, req: Request) -> Self::Future {
         if matcher(&self.method, self.path, &req) {
-            self.inner.call(req).left_future()
+            Either::Left(self.inner.call(req).map(|e| e.map_err(Either2::Left)))
         } else {
-            self.fallback.call(req).right_future()
+            Either::Right(self.fallback.call(req).map(|e| e.map_err(Either2::Right)))
         }
     }
 }
