@@ -35,10 +35,6 @@ impl Body {
         Self { repr: repr.into(), remaining: Some(2_000_000) }
     }
 
-    // pub(crate) fn with_limit(repr: impl Into<Repr>, limit: u64) -> Self {
-    //     Self { repr: repr.into(), remaining: Some(limit) }
-    // }
-
     pub fn collect_body(self) -> Collect {
         Collect::new(self)
     }
@@ -62,12 +58,12 @@ impl http_body::Body for Body {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let ok = tri!(ready!(Pin::new(&mut self.repr).poll_frame(cx)?));
-        let ok = match self.remaining.as_mut() {
-            Some(remaining) => tri!(limited::limit_frame(ok, remaining)),
-            None => Ok(ok),
+        let frame = tri!(ready!(Pin::new(&mut self.repr).poll_frame(cx)?));
+        let frame_result = match self.remaining.as_mut() {
+            Some(remaining) => tri!(limited::limit_frame(frame, remaining)),
+            None => Ok(frame),
         };
-        Poll::Ready(Some(ok.map_err(Into::into)))
+        Poll::Ready(Some(frame_result.map_err(Into::into)))
     }
 
     fn is_end_stream(&self) -> bool {
@@ -100,24 +96,37 @@ pub struct BodyError {
     kind: Kind,
 }
 
+impl BodyError {
+    fn new(kind: Kind) -> Self {
+        Self { kind }
+    }
+}
+
 enum Kind {
-    Repr(ReprBodyError),
+    Incoming(hyper::Error),
     Limited(LengthLimitError),
+}
+
+impl IntoResponse for BodyError {
+    fn into_response(self) -> Response {
+        match self.kind {
+            Kind::Incoming(r) => r.into_response(),
+            Kind::Limited(l) => l.into_response(),
+        }
+    }
 }
 
 impl From<ReprBodyError> for BodyError {
     fn from(v: ReprBodyError) -> Self {
-        Self {
-            kind: Kind::Repr(v),
+        match v {
+            ReprBodyError::Incoming(error) => Self::new(Kind::Incoming(error)),
         }
     }
 }
 
 impl From<LengthLimitError> for BodyError {
     fn from(v: LengthLimitError) -> Self {
-        Self {
-            kind: Kind::Limited(v),
-        }
+        Self::new(Kind::Limited(v))
     }
 }
 
@@ -127,7 +136,7 @@ impl std::fmt::Debug for BodyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut f = f.debug_tuple("BodyError");
         match &self.kind {
-            Kind::Repr(r) => f.field(&r),
+            Kind::Incoming(r) => f.field(&r),
             Kind::Limited(l) => f.field(&l),
         }.finish()
     }
@@ -136,17 +145,8 @@ impl std::fmt::Debug for BodyError {
 impl std::fmt::Display for BodyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
-            Kind::Repr(r) => r.fmt(f),
+            Kind::Incoming(r) => r.fmt(f),
             Kind::Limited(l) => l.fmt(f),
-        }
-    }
-}
-
-impl IntoResponse for BodyError {
-    fn into_response(self) -> Response {
-        match self.kind {
-            Kind::Repr(r) => r.into_response(),
-            Kind::Limited(l) => l.into_response(),
         }
     }
 }

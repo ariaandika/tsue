@@ -76,7 +76,6 @@ impl IntoResponse for serde_urlencoded::de::Error {
     }
 }
 
-#[cfg(feature = "hyper")]
 impl IntoResponse for hyper::Error {
     fn into_response(self) -> Response {
         match self {
