@@ -50,6 +50,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "tokio",
+ "tour",
  "tsue",
 ]
 
@@ -370,6 +371,33 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tour"
+version = "0.1.0"
+source = "git+https://github.com/ariaandika/tour.git#c15143565140ee774f89666b47adb7b6faa1e77b"
+dependencies = [
+ "bytes",
+ "itoa",
+ "tour-core",
+ "tour-macros",
+]
+
+[[package]]
+name = "tour-core"
+version = "0.1.0"
+source = "git+https://github.com/ariaandika/tour.git#c15143565140ee774f89666b47adb7b6faa1e77b"
+
+[[package]]
+name = "tour-macros"
+version = "0.1.0"
+source = "git+https://github.com/ariaandika/tour.git#c15143565140ee774f89666b47adb7b6faa1e77b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "tour-core",
 ]
 
 [[package]]

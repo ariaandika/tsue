@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use tour::Template;
 use tsue::{
-    helper::{Json, State},
-    routing::{Router, get, post},
+    helper::{Form, Html, State},
+    response::IntoResponse,
+    routing::{Router, get},
     service::HttpService,
 };
 
@@ -16,20 +18,27 @@ async fn main() -> std::io::Result<()> {
 
 fn routes(state: Db) -> Router<impl HttpService> {
     Router::new()
-        .route("/tasks", get(list))
-        .route("/tasks/add", post(add))
+        .route("/", get(index).post(index_post))
         .state(state)
 }
 
-async fn list(State(db): State<Db>) -> Json<Vec<Tasks>> {
-    Json(db.lock().unwrap().clone())
+// ===== Routes =====
+
+async fn index(State(db): State<Db>) -> impl IntoResponse {
+    let tasks = db.lock().unwrap();
+    Html(Index { tasks: tasks.iter().map(|e|e.name.clone()).collect() }.render().unwrap())
 }
 
-async fn add(State(db): State<Db>, Json(user_add): Json<AddTask>) {
-    let mut db = db.lock().unwrap();
-    let id = db.len();
-    db.push(Tasks { id, name: user_add.name, });
+async fn index_post(State(db): State<Db>, Form(task): Form<TaskAdd>) -> impl IntoResponse {
+    {
+        let mut tasks = db.lock().unwrap();
+        let id = tasks.len();
+        tasks.push(Tasks { id, name: task.name });
+    }
+    index(State(db)).await
 }
+
+// ===== Models =====
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Tasks {
@@ -38,7 +47,15 @@ struct Tasks {
 }
 
 #[derive(Debug, Deserialize)]
-struct AddTask {
+struct TaskAdd {
     pub name: String,
+}
+
+// ===== Pages =====
+
+#[derive(Template)]
+#[template(root = "example/index.html")]
+struct Index {
+    tasks: Vec<String>,
 }
 
