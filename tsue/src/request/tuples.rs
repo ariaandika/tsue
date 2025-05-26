@@ -157,7 +157,7 @@ pin_project_lite::pin_project! {
     }
 }
 
-pub fn fc<Frp>(mut parts: request::Parts) -> FrpCall<Frp>
+fn fc<Frp>(mut parts: request::Parts) -> FrpCall<Frp>
 where
     Frp: FromRequestParts,
 {

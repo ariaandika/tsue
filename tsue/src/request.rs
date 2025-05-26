@@ -5,7 +5,7 @@ mod from_request;
 mod tuples;
 
 pub use http::request::Parts;
-pub use from_request::{BytesFutureError, StringFutureError};
+pub use from_request::StringFutureError;
 
 /// Represents an HTTP request.
 pub type Request<T = Body> = http::Request<T>;
