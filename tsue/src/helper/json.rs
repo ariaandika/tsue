@@ -1,12 +1,9 @@
 use bytes::Bytes;
+use futures_util::FutureExt;
 use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE};
 use serde::{Serialize, de::DeserializeOwned};
-use std::{
-    fmt,
-    marker::PhantomData,
-    pin::Pin,
-    task::{Context, Poll, ready},
-};
+use serde_json::Value;
+use std::{fmt, future::ready};
 
 use super::{Json, macros::derefm};
 use crate::{
@@ -17,69 +14,67 @@ use crate::{
 
 derefm!(<T>|Json<T>| -> T);
 
+fn validate(req: &Request) -> Option<()> {
+    req.headers()
+        .get(CONTENT_TYPE)?
+        .to_str()
+        .ok()?
+        .eq_ignore_ascii_case("application/json")
+        .then_some(())
+}
+
 // ===== FromRequest =====
 
 type BytesFutureError = <Bytes as FromRequest>::Error;
 
-impl<T: DeserializeOwned> FromRequest for Json<T> {
+type JsonMap<V = Value> =
+    fn(Result<crate::body::Collected, BodyError>) -> Result<V, JsonFutureError>;
+
+type JsonFuture<V = Value> = futures_util::future::Either<
+    futures_util::future::Map<crate::body::Collect, JsonMap<V>>,
+    std::future::Ready<Result<V, JsonFutureError>>,
+>;
+
+impl FromRequest for Value {
     type Error = JsonFutureError;
-    type Future = JsonFuture<T>;
+    type Future = JsonFuture;
 
     fn from_request(req: Request) -> Self::Future {
-        let content_type = req.headers().get(CONTENT_TYPE).cloned();
-        JsonFuture {
-            phase: Phase::P1 { content_type, req: Some(req) },
-            _p: PhantomData,
+        match validate(&req) {
+            Some(()) => req
+                .into_body()
+                .collect_body()
+                .map((|e| serde_json::from_slice(&e?.into_bytes()).map_err(Into::into)) as JsonMap)
+                .left_future(),
+            None => ready(Err(JsonFutureError::ContentType)).right_future(),
         }
     }
 }
 
-pin_project_lite::pin_project! {
-    pub struct JsonFuture<T> {
-        #[pin]
-        phase: Phase<<Bytes as FromRequest>::Future>,
-        _p: PhantomData<T>,
-    }
-}
+impl<T: DeserializeOwned> FromRequest for Json<T> {
+    type Error = JsonFutureError;
+    type Future = JsonFuture<Json<T>>;
 
-pin_project_lite::pin_project! {
-    #[project = PhaseProj]
-    enum Phase<F> {
-        P1 { content_type: Option<HeaderValue>, req: Option<Request> },
-        P2 { #[pin] f: F }
-    }
-}
-
-impl<T: DeserializeOwned> Future for JsonFuture<T> {
-    type Output = Result<Json<T>, JsonFutureError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            match self.as_mut().project().phase.as_mut().project() {
-                PhaseProj::P1 { content_type, req } => {
-                    fn validate(ct: Option<&mut HeaderValue>) -> Option<()> {
-                        ct?.to_str().ok()?.eq_ignore_ascii_case("application/json").then_some(())
-                    }
-
-                    if validate(content_type.as_mut()).is_none() {
-                        return Poll::Ready(Err(JsonFutureError::ContentType))
-                    };
-
-                    let f = Bytes::from_request(req.take().unwrap());
-                    self.as_mut().project().phase.set(Phase::P2 { f });
-                },
-                PhaseProj::P2 { f } => {
-                    let v = ready!(f.poll(cx)?);
-                    let ok = serde_json::from_slice(&v)?;
-                    return Poll::Ready(Ok(Json(ok)))
-                },
-            }
+    fn from_request(req: Request) -> Self::Future {
+        match validate(&req) {
+            Some(()) => req
+                .into_body()
+                .collect_body()
+                .map((|e| Ok(Json(serde_json::from_slice(&e?.into_bytes())?))) as JsonMap<Json<T>>)
+                .left_future(),
+            None => ready(Err(JsonFutureError::ContentType)).right_future(),
         }
     }
 }
 
 // ===== IntoResponse =====
 
+impl IntoResponse for Value {
+    #[inline]
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
+}
 
 impl<T: Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
@@ -94,6 +89,26 @@ impl<T: Serialize> IntoResponse for Json<T> {
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }
+    }
+}
+
+// ===== serde =====
+
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Json<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(Json)
+    }
+}
+
+impl<T: serde::Serialize> serde::Serialize for Json<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }
 
