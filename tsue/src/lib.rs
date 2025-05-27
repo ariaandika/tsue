@@ -30,7 +30,6 @@ pub mod helper;
 
 pub mod routing;
 
-#[cfg(feature = "tokio")]
 pub mod rt;
 
 #[cfg(feature = "tokio")]

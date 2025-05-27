@@ -22,11 +22,7 @@ impl<S> Hyper<S> {
     }
 }
 
-impl<S> hyper::service::Service<Request<Incoming>> for Hyper<S>
-where
-    S: HttpService,
-    S::Error: std::error::Error,
-{
+impl<S: HttpService> hyper::service::Service<Request<Incoming>> for Hyper<S> {
     type Response = Response;
     type Error = Infallible;
     type Future =

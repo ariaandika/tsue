@@ -70,11 +70,7 @@ fn_router!(delete DELETE "Setup DELETE service.");
 
 // ===== Service =====
 
-impl<S, F> Service<Request> for Branch<S, F>
-where
-    S: HttpService,
-    F: HttpService,
-{
+impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
     type Response = Response;
     type Error = Either2<S::Error, F::Error>;
     type Future = Either<

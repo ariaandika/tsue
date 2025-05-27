@@ -67,10 +67,7 @@ impl<S> Router<S> {
     }
 }
 
-impl<S> Service<Request> for Router<S>
-where
-    S: HttpService,
-{
+impl<S: HttpService> Service<Request> for Router<S> {
     type Response = Response;
     type Error = S::Error;
     type Future = S::Future;

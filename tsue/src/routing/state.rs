@@ -19,11 +19,7 @@ impl<T, S> State<T, S> {
     }
 }
 
-impl<T, S> Service<Request> for State<T, S>
-where
-    T: Clone + Send + Sync + 'static,
-    S: HttpService,
-{
+impl<T: Clone + Send + Sync + 'static, S: HttpService> Service<Request> for State<T, S> {
     type Response = S::Response;
     type Error = S::Error;
     type Future = S::Future;
