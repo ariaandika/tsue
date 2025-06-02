@@ -22,3 +22,10 @@ pub trait IntoResponseParts {
     fn into_response_parts(self, parts: Parts) -> Parts;
 }
 
+/// Assert a type to implement [`IntoResponse`].
+#[doc(hidden)]
+pub const fn assert_rs<T: IntoResponse>() { }
+
+/// Assert a type to implement [`IntoResponseParts`].
+#[doc(hidden)]
+pub const fn assert_rp<T: IntoResponseParts>() { }

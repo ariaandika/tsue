@@ -56,3 +56,10 @@ impl RequestExt for Request {
     }
 }
 
+/// Assert a type to implement [`FromRequest`].
+#[doc(hidden)]
+pub const fn assert_fr<T: FromRequest>() { }
+
+/// Assert a type to implement [`FromRequestParts`].
+#[doc(hidden)]
+pub const fn assert_fp<T: FromRequestParts>() { }

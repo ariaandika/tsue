@@ -37,4 +37,4 @@ pub mod rt;
 pub use rt::listen;
 
 #[cfg(feature = "macros")]
-pub use tsue_macros::FromRequest;
+pub use tsue_macros::{FromRequest, IntoResponse};
