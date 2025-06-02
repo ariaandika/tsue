@@ -10,6 +10,40 @@ pub fn from_request(input: DeriveInput) -> Result<TokenStream> {
         _ => return Err(Error::new(ident.span(), "only struct are supported")),
     };
 
+    let assertions = match &fields {
+        Fields::Named(fields) => {
+            let len = fields.named.len();
+            let asserts = fields
+                .named
+                .iter()
+                .take(len.saturating_sub(1))
+                .map(|e|&e.ty)
+                .map(|ty| quote! {::tsue::request::assert_fp::<#ty>();});
+            let last = fields
+                .named
+                .last()
+                .map(|e|&e.ty)
+                .map(|ty| quote! {::tsue::request::assert_fr::<#ty>();});
+            quote! { #(#asserts)* #last }
+        },
+        Fields::Unnamed(fields) => {
+            let len = fields.unnamed.len();
+            let asserts = fields
+                .unnamed
+                .iter()
+                .take(len.saturating_sub(1))
+                .map(|e|&e.ty)
+                .map(|ty| quote! {::tsue::request::assert_fp::<#ty>();});
+            let last = fields
+                .unnamed
+                .last()
+                .map(|e|&e.ty)
+                .map(|ty| quote! {::tsue::request::assert_fr::<#ty>();});
+            quote! { #(#asserts)* #last }
+        }
+        Fields::Unit => quote! {}
+    };
+
     let me = match &fields {
         Fields::Named(fields) => fields.named.iter().map(|e| &e.ty).collect(),
         Fields::Unnamed(fields) => fields.unnamed.iter().map(|e| &e.ty).collect(),
@@ -43,6 +77,7 @@ pub fn from_request(input: DeriveInput) -> Result<TokenStream> {
     Ok(quote! {
         const _: () = {
             use ::tsue::request::FromRequest;
+            #assertions
             type Me = (#me,);
             #[automatically_derived]
             impl #g1 FromRequest for #ident #g2 #g3 {
