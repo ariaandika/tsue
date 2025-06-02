@@ -1,5 +1,5 @@
 [workspace]
-members = ["tsue","example"]
+members = ["tsue","example", "tsue-macros"]
 default-members = ["tsue"]
 resolver = "2"
 

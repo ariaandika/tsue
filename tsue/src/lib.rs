@@ -36,3 +36,5 @@ pub mod rt;
 #[cfg(feature = "tokio")]
 pub use rt::listen;
 
+#[cfg(feature = "macros")]
+pub use tsue_macros::FromRequest;
