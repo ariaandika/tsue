@@ -2,12 +2,11 @@ use bytes::Bytes;
 use http_body::{Frame, SizeHint};
 use hyper::body::Incoming;
 use std::{
-    fmt,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
-use crate::response::{IntoResponse, Response};
+use super::BodyError;
 
 /// Agnostic implementation of [`http_body::Body`].
 pub enum Repr {
@@ -49,7 +48,7 @@ impl From<&'static str> for Repr {
 impl http_body::Body for Repr {
     type Data = Bytes;
 
-    type Error = ReprBodyError;
+    type Error = BodyError;
 
     fn poll_frame(
         self: Pin<&mut Self>,
@@ -93,40 +92,3 @@ impl Default for Repr {
     }
 }
 
-// ===== Error =====
-
-pub enum ReprBodyError {
-    Incoming(hyper::Error),
-}
-
-impl From<hyper::Error> for ReprBodyError {
-    fn from(v: hyper::Error) -> Self {
-        Self::Incoming(v)
-    }
-}
-
-impl std::error::Error for ReprBodyError {}
-
-impl fmt::Display for ReprBodyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Incoming(error) => error.fmt(f),
-        }
-    }
-}
-
-impl fmt::Debug for ReprBodyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Incoming(error) => error.fmt(f),
-        }
-    }
-}
-
-impl IntoResponse for ReprBodyError {
-    fn into_response(self) -> Response {
-        match self {
-            Self::Incoming(error) => error.into_response(),
-        }
-    }
-}

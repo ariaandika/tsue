@@ -3,7 +3,7 @@ use http::StatusCode;
 use http_body::Frame;
 use std::fmt;
 
-use crate::response::IntoResponse;
+use crate::response::{IntoResponse, Response};
 
 pub fn limit_frame<B: Buf>(
     frame: Frame<B>,
@@ -44,7 +44,7 @@ impl fmt::Display for LengthLimitError {
 }
 
 impl IntoResponse for LengthLimitError {
-    fn into_response(self) -> crate::response::Response {
+    fn into_response(self) -> Response {
         (StatusCode::PAYLOAD_TOO_LARGE, "payload too large").into_response()
     }
 }

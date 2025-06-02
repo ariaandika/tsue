@@ -1,25 +1,23 @@
 use bytes::Bytes;
 use http_body::Frame;
 use std::{
-    backtrace::Backtrace,
-    pin::Pin,
-    task::{Context, Poll, ready},
+    fmt, pin::Pin, task::{ready, Context, Poll}
 };
-
-use crate::response::{IntoResponse, Response};
 
 mod repr;
 mod limited;
 mod collect;
+mod error;
 
-pub(crate) use repr::Repr;
+use repr::Repr;
+
+pub use limited::LengthLimitError;
 pub use collect::{Collect, Collected};
-
-use repr::ReprBodyError;
-use limited::LengthLimitError;
+pub use error::{BodyError, Kind};
 
 // ===== Body =====
 
+/// HTTP Body.
 pub struct Body {
     repr: Repr,
     remaining: Option<u64>,
@@ -80,90 +78,15 @@ impl http_body::Body for Body {
     }
 }
 
-impl std::fmt::Debug for Body {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Body").finish()
-    }
-}
-
 impl Default for Body {
     fn default() -> Self {
-        Self { repr: Repr::Empty, remaining: None }
+        Self::new(Repr::Empty)
     }
 }
 
-// ===== Error =====
-
-pub struct BodyError {
-    kind: Kind,
-    backtrace: Backtrace,
-}
-
-impl BodyError {
-    fn new(kind: Kind) -> Self {
-        Self { kind, backtrace: Backtrace::capture() }
-    }
-
-    /// Returns the underlying [`Backtrace`].
-    pub fn backtrace(&self) -> &Backtrace {
-        &self.backtrace
-    }
-}
-
-enum Kind {
-    Incoming(hyper::Error),
-    Limited(LengthLimitError),
-}
-
-impl IntoResponse for BodyError {
-    fn into_response(self) -> Response {
-        match self.kind {
-            Kind::Incoming(r) => r.into_response(),
-            Kind::Limited(l) => l.into_response(),
-        }
-    }
-}
-
-impl From<ReprBodyError> for BodyError {
-    fn from(v: ReprBodyError) -> Self {
-        match v {
-            ReprBodyError::Incoming(error) => Self::new(Kind::Incoming(error)),
-        }
-    }
-}
-
-impl From<LengthLimitError> for BodyError {
-    fn from(v: LengthLimitError) -> Self {
-        Self::new(Kind::Limited(v))
-    }
-}
-
-impl std::error::Error for BodyError { }
-
-impl std::fmt::Debug for BodyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut f = f.debug_tuple("BodyError");
-        match &self.kind {
-            Kind::Incoming(r) => f.field(&r),
-            Kind::Limited(l) => f.field(&l),
-        }.finish()
-    }
-}
-
-impl std::fmt::Display for BodyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match &self.kind {
-            Kind::Incoming(r) => r.fmt(f)?,
-            Kind::Limited(l) => l.fmt(f)?,
-        }
-
-        if let std::backtrace::BacktraceStatus::Captured = self.backtrace.status() {
-            let backtrace = self.backtrace.to_string();
-            writeln!(f, "\n\nBodyError stack backtrace:")?;
-            write!(f, "{}", backtrace.trim_end())?;
-        }
-
-        Ok(())
+impl fmt::Debug for Body {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Body").finish()
     }
 }
 
