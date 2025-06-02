@@ -7,4 +7,4 @@ edition = "2024"
 serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.45.0", features = ["macros", "rt-multi-thread"] }
 tour = { git = "https://github.com/ariaandika/tour.git", version = "0.1.0" }
-tsue = { version = "0.1.0", path = "../tsue", features = ["tokio","form","log"] }
+tsue = { version = "0.1.0", path = "../tsue", features = ["tokio","form","log","macros"] }

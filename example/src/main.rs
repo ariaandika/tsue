@@ -6,6 +6,7 @@ use tsue::{
     response::IntoResponse,
     routing::{Router, get},
     service::HttpService,
+    FromRequest,
 };
 
 type Db = Arc<Mutex<Vec<Tasks>>>;
@@ -29,26 +30,32 @@ async fn index(State(db): State<Db>) -> impl IntoResponse {
     Html(Index { tasks: tasks.iter().map(|e|e.name.clone()).collect() }.render().unwrap())
 }
 
-async fn index_post(State(db): State<Db>, Form(task): Form<TaskAdd>) -> impl IntoResponse {
+async fn index_post(IndexArgs { db, task }: IndexArgs) -> impl IntoResponse {
     {
         let mut tasks = db.lock().unwrap();
         let id = tasks.len();
-        tasks.push(Tasks { id, name: task.name });
+        tasks.push(Tasks { id, name: task.0.name });
     }
-    index(State(db)).await
+    index(db).await
 }
 
 // ===== Models =====
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, FromRequest)]
+struct IndexArgs {
+    db: State<Db>,
+    task: Form<TaskAdd>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Tasks {
-    pub id: usize,
-    pub name: String,
+    id: usize,
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct TaskAdd {
-    pub name: String,
+    name: String,
 }
 
 // ===== Pages =====

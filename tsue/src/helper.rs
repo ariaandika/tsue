@@ -42,6 +42,12 @@ pub struct Form<T>(pub T);
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Html<T>(pub T);
 
+impl<T> From<T> for Html<T> {
+    fn from(value: T) -> Self {
+        Self(value)
+    }
+}
+
 /// HTTP Redirect helper.
 ///
 /// Response with `3xx` status code
