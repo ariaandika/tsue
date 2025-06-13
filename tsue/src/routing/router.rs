@@ -1,4 +1,4 @@
-use super::{Branch, State, matcher::Matcher, nest::Nest};
+use super::{Branch, State, nest::Nest};
 use crate::{
     request::Request,
     response::Response,
@@ -40,9 +40,9 @@ impl<S> Router<S> {
     }
 
     /// Register new route.
-    pub fn route<R>(self, matcher: impl Matcher, route: R) -> Router<Branch<R, S>> {
+    pub fn route<R>(self, path: &'static str, route: R) -> Router<Branch<R, S>> {
         Router {
-            inner: Branch::new(matcher, route, self.inner),
+            inner: Branch::new(path, route, self.inner),
         }
     }
 

@@ -4,10 +4,7 @@ use futures_util::{
 };
 use http::Method;
 
-use super::{
-    handler::HandlerService,
-    matcher::{Matcher, RequestInternal},
-};
+use super::{handler::HandlerService, matcher::Path};
 use crate::{
     helper::Either as Either2,
     request::Request,
@@ -24,42 +21,27 @@ type MethodNotAllowed = StatusService;
 ///
 /// [`route`]: super::Router::route
 pub struct Branch<S, F> {
-    method: Option<Method>,
-    path: Option<&'static str>,
+    filter: Filter,
     inner: S,
     fallback: F,
 }
 
-impl<S, F> Branch<S, F> {
-    pub fn new(matcher: impl Matcher, inner: S, fallback: F) -> Self {
-        let (method,path) = matcher.matcher();
-        Self { method, path, inner, fallback }
-    }
+enum Filter {
+    Path(Path),
+    Method(Method),
 }
 
-macro_rules! fn_router {
-    ($name:ident $method:ident $doc:literal) => {
-        #[doc = $doc]
-        pub fn $name<F, S>(f: F) -> Branch<HandlerService<F, S>, MethodNotAllowed> {
-            Branch {
-                method: Some(Method::$method),
-                path: None,
-                inner: HandlerService::new(f),
-                fallback: StatusService(http::StatusCode::METHOD_NOT_ALLOWED),
-            }
+impl<S, F> Branch<S, F> {
+    pub fn new(path: &'static str, inner: S, fallback: F) -> Self {
+        Self { filter: Filter::Path(Path::new(path)), inner, fallback }
+    }
+
+    fn matches(&self, req: &Request) -> bool {
+        match &self.filter {
+            Filter::Method(method) => method == req.method(),
+            Filter::Path(path) => path.matches(req),
         }
-        impl<S, F> Branch<S, F> {
-            #[doc = $doc]
-            pub fn $name<S2, F2>(self, f: F2) -> Branch<HandlerService<F2, S2>, Branch<S, F>> {
-                Branch {
-                    method: Some(Method::$method),
-                    path: None,
-                    inner: HandlerService::new(f),
-                    fallback: self,
-                }
-            }
-        }
-    };
+    }
 }
 
 fn_router!(get GET "Setup GET service.");
@@ -85,7 +67,7 @@ impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
     >;
 
     fn call(&self, req: Request) -> Self::Future {
-        if matcher(&self.method, self.path, &req) {
+        if self.matches(&req) {
             Either::Left(self.inner.call(req).map(|e| e.map_err(Either2::Left)))
         } else {
             Either::Right(self.fallback.call(req).map(|e| e.map_err(Either2::Right)))
@@ -93,17 +75,30 @@ impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
     }
 }
 
-fn matcher(method: &Option<Method>, path: Option<&'static str>, req: &Request) -> bool {
-    if let Some(method) = method {
-        if method != req.method() {
-            return false;
+// ===== Macros =====
+
+macro_rules! fn_router {
+    ($name:ident $method:ident $doc:literal) => {
+        #[doc = $doc]
+        pub fn $name<F, S>(f: F) -> Branch<HandlerService<F, S>, MethodNotAllowed> {
+            Branch {
+                filter: Filter::Method(Method::$method),
+                inner: HandlerService::new(f),
+                fallback: StatusService(http::StatusCode::METHOD_NOT_ALLOWED),
+            }
         }
-    }
-    if let Some(path) = path {
-        if path != req.match_path() {
-            return false;
+        impl<S, F> Branch<S, F> {
+            #[doc = $doc]
+            pub fn $name<S2, F2>(self, f: F2) -> Branch<HandlerService<F2, S2>, Branch<S, F>> {
+                Branch {
+                    filter: Filter::Method(Method::$method),
+                    inner: HandlerService::new(f),
+                    fallback: self,
+                }
+            }
         }
-    }
-    true
+    };
 }
+
+pub(crate) use fn_router;
 

@@ -19,6 +19,7 @@ pub use error::{BodyError, Kind};
 
 /// HTTP Body.
 pub struct Body {
+    shared: crate::routing::Shared,
     repr: Repr,
     remaining: Option<u64>,
 }
@@ -31,12 +32,20 @@ impl<B: Into<Repr>> From<B> for Body {
 
 impl Body {
     pub(crate) fn new(repr: impl Into<Repr>) -> Self {
-        Self { repr: repr.into(), remaining: Some(2_000_000) }
+        Self { repr: repr.into(), remaining: Some(2_000_000), shared: <_>::default() }
     }
 
     /// Buffer the entire body into memory.
     pub fn collect_body(self) -> Collect {
         Collect::new(self)
+    }
+
+    pub(crate) fn shared(&self) -> &crate::routing::Shared {
+        &self.shared
+    }
+
+    pub(crate) fn shared_mut(&mut self) -> &mut crate::routing::Shared {
+        &mut self.shared
     }
 }
 

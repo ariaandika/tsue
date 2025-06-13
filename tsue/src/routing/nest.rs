@@ -8,7 +8,6 @@ use crate::{
     helper::Either as Either2,
     request::Request,
     response::Response,
-    routing::matcher::Matched,
     service::{HttpService, Service},
 };
 
@@ -58,7 +57,7 @@ where
 }
 
 fn match_path(req: &Request, prefix: &'static str) -> bool {
-    let path = req.match_path();
+    let path = req.matches_path();
 
     if !path.starts_with(prefix) {
         return false;
@@ -68,18 +67,8 @@ fn match_path(req: &Request, prefix: &'static str) -> bool {
 }
 
 fn with_prefixed(mut req: Request, prefix: &'static str) -> Request {
-    let prefix_len = prefix.len().try_into().expect("prefix too large");
-
-    match req.extensions_mut().get_mut::<Matched>() {
-        Some(m) => {
-            m.midpoint += prefix_len;
-        }
-        None => {
-            req.extensions_mut().insert(Matched {
-                midpoint: prefix_len,
-            });
-        }
-    }
+    let prefix_len: u32 = prefix.len().try_into().expect("prefix too large");
+    req.body_mut().shared_mut().path_offset += prefix_len;
     req
 }
 

@@ -1,53 +1,61 @@
-use http::Method;
-
 use crate::request::Request;
 
-/// Helper trait to conviniently setup route matcher.
-///
-/// Implemented for:
-/// - `&'static str`
-/// - `Method`
-/// - `(&'static str, Method)`
-/// - `(Method, &'static str)`
-pub trait Matcher {
-    fn matcher(self) -> (Option<Method>,Option<&'static str>);
+/// Internal state for routing.
+#[derive(Default)]
+pub struct Shared {
+    pub(crate) path_offset: u32,
 }
 
-macro_rules! impl_matcher {
-    ($me:ty,$id:ident => $body:expr) => {
-        impl Matcher for $me {
-            fn matcher($id) -> (Option<Method>,Option<&'static str>) {
-                $body
-            }
+#[derive(Debug)]
+pub struct Path {
+    repr: Repr,
+}
+
+#[derive(Debug)]
+enum Repr {
+    Static(&'static str),
+    Params(&'static str),
+}
+
+impl Path {
+    pub fn new(value: &'static str) -> Self {
+        if value.contains(':') || value.contains('*') {
+            Self { repr: Repr::Params(value) }
+        } else {
+            Self { repr: Repr::Static(value) }
         }
-    };
-}
+    }
 
-impl_matcher!(&'static str, self => (None,Some(self)));
-impl_matcher!(Method, self => (Some(self),None));
-impl_matcher!((Method, &'static str), self => (Some(self.0),Some(self.1)));
-impl_matcher!((&'static str, Method), self => (Some(self.1),Some(self.0)));
+    pub fn matches(&self, req: &Request) -> bool {
+        let path = match self.repr {
+            Repr::Static(p) => return req.uri().path() == p,
+            Repr::Params(p) => p,
+        };
 
-// ===== Internals =====
+        let mut p1 = req.uri().path().split('/');
+        let mut p2 = path.split('/');
 
-pub(crate) trait RequestInternal {
-    fn match_path(&self) -> &str;
-}
-
-impl RequestInternal for Request {
-    fn match_path(&self) -> &str {
-        // PERF: accessing `extensions` in hot code path, especially O(n) of routes count, may have
-        // performance hit
-
-        match self.extensions().get::<Matched>() {
-            Some(m) => self.uri().path().split_at(m.midpoint as _).1,
-            None => self.uri().path(),
+        loop {
+            match (p1.next(), p2.next()) {
+                (None, None) => return true,
+                (Some(_), Some(p2)) if p2.starts_with(':') => {}
+                (Some(_), Some("*")) => {}
+                (Some(p1), Some(p2)) => if p1 != p2 { return false },
+                _ => return false,
+            }
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Matched {
-    pub(crate) midpoint: u32,
+// ===== Internals =====
+
+pub(crate) trait RequestInternal {
+    fn matches_path(&self) -> &str;
+}
+
+impl RequestInternal for Request {
+    fn matches_path(&self) -> &str {
+        self.uri().path().split_at(self.body().shared().path_offset as _).1
+    }
 }
 
