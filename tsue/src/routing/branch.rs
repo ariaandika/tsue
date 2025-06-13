@@ -26,6 +26,7 @@ pub struct Branch<S, F> {
     fallback: F,
 }
 
+#[derive(Debug)]
 enum Filter {
     Path(Path),
     Method(Method),
@@ -34,13 +35,6 @@ enum Filter {
 impl<S, F> Branch<S, F> {
     pub fn new(path: &'static str, inner: S, fallback: F) -> Self {
         Self { filter: Filter::Path(Path::new(path)), inner, fallback }
-    }
-
-    fn matches(&self, req: &Request) -> bool {
-        match &self.filter {
-            Filter::Method(method) => method == req.method(),
-            Filter::Path(path) => path.matches(req),
-        }
     }
 }
 
@@ -67,7 +61,10 @@ impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
     >;
 
     fn call(&self, req: Request) -> Self::Future {
-        if self.matches(&req) {
+        if match &self.filter {
+            Filter::Method(method) => method == req.method(),
+            Filter::Path(path) => path.matches(&req),
+        } {
             Either::Left(self.inner.call(req).map(|e| e.map_err(Either2::Left)))
         } else {
             Either::Right(self.fallback.call(req).map(|e| e.map_err(Either2::Right)))

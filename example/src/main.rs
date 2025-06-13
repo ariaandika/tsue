@@ -22,7 +22,15 @@ fn routes(state: Db) -> Router<impl HttpService> {
     Router::new()
         .route("/", get(index).post(index_post))
         .route("/example", get(example))
+        .nest("/users", users())
         .state(state)
+}
+
+fn users() -> Router<impl HttpService> {
+    Router::new()
+        .route("/", get(async||"Users All"))
+        .route("/:id", get(async||"Users Id"))
+        .route("/add/:id", get(async||"Users Add"))
 }
 
 // ===== Routes =====

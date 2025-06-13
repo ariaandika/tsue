@@ -28,17 +28,21 @@ impl Path {
 
     pub fn matches(&self, req: &Request) -> bool {
         let path = match self.repr {
-            Repr::Static(p) => return req.uri().path() == p,
+            Repr::Static(p) => return req.matches_path() == p,
             Repr::Params(p) => p,
         };
 
-        let mut p1 = req.uri().path().split('/');
+        let mut p1 = req.matches_path().split('/');
         let mut p2 = path.split('/');
 
         loop {
             match (p1.next(), p2.next()) {
                 (None, None) => return true,
-                (Some(_), Some(p2)) if p2.starts_with(':') => {}
+                (Some(p1), Some(p2)) if p2.starts_with(':') => {
+                    if p1.is_empty() {
+                        return false;
+                    }
+                }
                 (Some(_), Some("*")) => {}
                 (Some(p1), Some(p2)) => if p1 != p2 { return false },
                 _ => return false,
@@ -55,7 +59,12 @@ pub(crate) trait RequestInternal {
 
 impl RequestInternal for Request {
     fn matches_path(&self) -> &str {
-        self.uri().path().split_at(self.body().shared().path_offset as _).1
+        let path = self.uri().path().split_at(self.body().shared().path_offset as _).1;
+        if path.is_empty() {
+            "/"
+        } else {
+            path
+        }
     }
 }
 
