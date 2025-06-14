@@ -60,12 +60,12 @@ impl<S> Router<S> {
     }
 
     /// Merge two router.
-    pub fn merge<R>(self, inner: R) -> Router<<S as Zip<R>>::Output>
+    pub fn merge<R>(self, router: Router<R>) -> Router<<S as Zip<R>>::Output>
     where
         S: Zip<R>,
     {
         Router {
-            inner: self.inner.zip(inner),
+            inner: self.inner.zip(router.inner),
         }
     }
 
