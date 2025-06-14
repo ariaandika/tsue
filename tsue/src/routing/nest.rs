@@ -3,7 +3,7 @@ use futures_util::{
     future::{Either, Map},
 };
 
-use super::matcher::RequestInternal;
+use super::{matcher::RequestInternal, zip::Zip};
 use crate::{
     helper::Either as Either2,
     request::Request,
@@ -24,6 +24,24 @@ impl<S, F> Nest<S, F> {
         Self { prefix: prefix.trim_end_matches("/"), inner, fallback, }
     }
 }
+
+fn match_path(req: &Request, prefix: &'static str) -> bool {
+    let path = req.matches_path();
+
+    if !path.starts_with(prefix) {
+        return false;
+    }
+
+    matches!(path.as_bytes().get(prefix.len()), Some(b'/') | None)
+}
+
+fn with_prefixed(mut req: Request, prefix: &'static str) -> Request {
+    let prefix_len: u32 = prefix.len().try_into().expect("prefix too large");
+    req.body_mut().shared_mut().path_offset += prefix_len;
+    req
+}
+
+// ===== Service =====
 
 impl<S, F> Service<Request> for Nest<S, F>
 where
@@ -56,19 +74,16 @@ where
     }
 }
 
-fn match_path(req: &Request, prefix: &'static str) -> bool {
-    let path = req.matches_path();
+// ===== Merge =====
 
-    if !path.starts_with(prefix) {
-        return false;
+impl<S1, F: Zip<S2>, S2> Zip<S2> for Nest<S1, F> {
+    type Output = Nest<S1, F::Output>;
+
+    fn zip(self, inner: S2) -> Self::Output {
+        Nest {
+            prefix: self.prefix,
+            inner: self.inner,
+            fallback: self.fallback.zip(inner)
+        }
     }
-
-    matches!(path.as_bytes().get(prefix.len()), Some(b'/') | None)
 }
-
-fn with_prefixed(mut req: Request, prefix: &'static str) -> Request {
-    let prefix_len: u32 = prefix.len().try_into().expect("prefix too large");
-    req.body_mut().shared_mut().path_offset += prefix_len;
-    req
-}
-

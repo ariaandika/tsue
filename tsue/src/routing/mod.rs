@@ -7,6 +7,7 @@ mod matcher;
 mod router;
 mod branch;
 mod nest;
+mod zip;
 
 // utilities
 mod state;

@@ -4,7 +4,7 @@ use futures_util::{
 };
 use http::Method;
 
-use super::{handler::HandlerService, matcher::Path};
+use super::{handler::HandlerService, matcher::Path, zip::Zip};
 use crate::{
     helper::Either as Either2,
     request::Request,
@@ -68,6 +68,20 @@ impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
             Either::Left(self.inner.call(req).map(|e| e.map_err(Either2::Left)))
         } else {
             Either::Right(self.fallback.call(req).map(|e| e.map_err(Either2::Right)))
+        }
+    }
+}
+
+// ===== Merge =====
+
+impl<S1, F: Zip<S2>, S2> Zip<S2> for Branch<S1, F> {
+    type Output = Branch<S1, F::Output>;
+
+    fn zip(self, inner: S2) -> Self::Output {
+        Branch {
+            filter: self.filter,
+            inner: self.inner,
+            fallback: self.fallback.zip(inner)
         }
     }
 }

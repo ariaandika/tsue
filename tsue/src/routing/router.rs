@@ -1,4 +1,4 @@
-use super::{Branch, State, nest::Nest};
+use super::{Branch, State, zip::Zip, nest::Nest};
 use crate::{
     request::Request,
     response::Response,
@@ -20,10 +20,12 @@ impl Router<NotFound> {
 }
 
 impl<S> Router<S> {
-    /// Create new `Router` with custom fallback instead of 404 NotFound.
-    pub fn with_fallback(fallback: S) -> Router<S> {
-        Router { inner: fallback }
-    }
+    // NOTE: fallback requires to set a runtime flag for merge to work
+    //
+    // /// Create new `Router` with custom fallback instead of 404 NotFound.
+    // pub fn with_fallback(fallback: S) -> Router<S> {
+    //     Router { inner: fallback }
+    // }
 
     /// Layer current router service.
     ///
@@ -59,6 +61,16 @@ impl<S> Router<S> {
         }
     }
 
+    /// Merge two router.
+    pub fn merge<R>(self, inner: R) -> Router<<S as Zip<R>>::Output>
+    where
+        S: Zip<R>,
+    {
+        Router {
+            inner: self.inner.zip(inner),
+        }
+    }
+
     /// Add shared state.
     pub fn state<T>(self, state: T) -> Router<State<T, S>> {
         Router {
@@ -66,6 +78,14 @@ impl<S> Router<S> {
         }
     }
 }
+
+impl Default for Router<NotFound> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ===== Service =====
 
 impl<S: HttpService> Service<Request> for Router<S> {
     type Response = Response;
@@ -77,8 +97,23 @@ impl<S: HttpService> Service<Request> for Router<S> {
     }
 }
 
-impl Default for Router<NotFound> {
-    fn default() -> Self {
-        Self::new()
+// ===== Merge =====
+
+impl<S1: Zip<S2>, S2> Zip<S2> for Router<S1> {
+    type Output = Router<S1::Output>;
+
+    fn zip(self, inner: S2) -> Self::Output {
+        Router {
+            inner: self.inner.zip(inner),
+        }
     }
 }
+
+impl<S> Zip<S> for StatusService {
+    type Output = S;
+
+    fn zip(self, inner: S) -> Self::Output {
+        inner
+    }
+}
+
