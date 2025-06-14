@@ -15,22 +15,33 @@ type Db = Arc<Mutex<Vec<Tasks>>>;
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let db = Db::new(Mutex::new(<_>::default()));
-    routes(db).listen("0.0.0.0:3000").await
+
+    let routes = Router::new()
+        .merge(common())
+        .merge(foo())
+        .state(db);
+
+    routes.listen("0.0.0.0:3000").await
 }
 
-fn routes(state: Db) -> Router<impl HttpService> {
+fn common() -> Router<impl HttpService> {
     Router::new()
         .route("/", get(index).post(index_post))
         .route("/example", get(example))
-        .nest("/users", users())
-        .state(state)
 }
 
-fn users() -> Router<impl HttpService> {
+// fn users() -> Router<impl HttpService> {
+//     Router::new().nest("/users", Router::new()
+//         .route("/", get(async || "Users All"))
+//         .route("/:id", get(async || "Users Id"))
+//         .route("/add/:id", get(async || "Users Add")))
+// }
+
+fn foo() -> Router<impl HttpService> {
     Router::new()
-        .route("/", get(async||"Users All"))
-        .route("/:id", get(async||"Users Id"))
-        .route("/add/:id", get(async||"Users Add"))
+        .route("/", get(async || "Users All"))
+        .route("/:id", get(async || "Users Id"))
+        .route("/add/:id", get(async || "Users Add"))
 }
 
 // ===== Routes =====

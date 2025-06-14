@@ -2,13 +2,13 @@
 
 // shared state
 mod matcher;
+mod zip;
 
 // core routings
 mod router;
 mod fallback;
 mod branch;
 mod nest;
-mod zip;
 
 // async fn
 mod handler;
