@@ -91,7 +91,7 @@ impl<S1, F: Zip<S2>, S2> Zip<S2> for Branch<S1, F> {
 macro_rules! fn_router {
     ($name:ident $method:ident $doc:literal) => {
         #[doc = $doc]
-        pub fn $name<F, S>(f: F) -> Branch<HandlerService<F, S>, MethodNotAllowed> {
+        pub fn $name<F: super::handler::Handler<S>, S>(f: F) -> Branch<HandlerService<F, S>, MethodNotAllowed> {
             Branch {
                 filter: Filter::Method(Method::$method),
                 inner: HandlerService::new(f),
@@ -100,7 +100,7 @@ macro_rules! fn_router {
         }
         impl<S, F> Branch<S, F> {
             #[doc = $doc]
-            pub fn $name<S2, F2>(self, f: F2) -> Branch<HandlerService<F2, S2>, Branch<S, F>> {
+            pub fn $name<F2: super::handler::Handler<S2>, S2>(self, f: F2) -> Branch<HandlerService<F2, S2>, Branch<S, F>> {
                 Branch {
                     filter: Filter::Method(Method::$method),
                     inner: HandlerService::new(f),
