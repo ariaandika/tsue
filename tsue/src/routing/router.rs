@@ -1,21 +1,19 @@
-use super::{Branch, State, zip::Zip, nest::Nest};
+use super::{Branch, State, fallback::Fallback, nest::Nest, zip::Zip};
 use crate::{
     request::Request,
     response::Response,
-    service::{HttpService, Layer, Service, StatusService},
+    service::{HttpService, Layer, Service},
 };
-
-type NotFound = StatusService;
 
 /// Routes builder.
 pub struct Router<S> {
     inner: S,
 }
 
-impl Router<NotFound> {
+impl Router<Fallback> {
     /// Create new `Router`.
-    pub fn new() -> Router<NotFound> {
-        Router { inner: StatusService(http::StatusCode::NOT_FOUND) }
+    pub fn new() -> Router<Fallback> {
+        Router { inner: Fallback }
     }
 }
 
@@ -79,7 +77,7 @@ impl<S> Router<S> {
     }
 }
 
-impl Default for Router<NotFound> {
+impl Default for Router<Fallback> {
     fn default() -> Self {
         Self::new()
     }
@@ -108,12 +106,3 @@ impl<S1: Zip<S2>, S2> Zip<S2> for Router<S1> {
         }
     }
 }
-
-impl<S> Zip<S> for StatusService {
-    type Output = S;
-
-    fn zip(self, inner: S) -> Self::Output {
-        inner
-    }
-}
-

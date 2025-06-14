@@ -5,16 +5,19 @@ mod matcher;
 
 // core routings
 mod router;
+mod fallback;
 mod branch;
 mod nest;
 mod zip;
 
+// async fn
+mod handler;
+
 // utilities
 mod state;
-
-// async fn as a Service
-mod handler;
 mod adapter;
+
+// ===== reexports =====
 
 pub(crate) use matcher::Shared;
 
