@@ -63,11 +63,3 @@ impl Service<Request> for StatusService {
     }
 }
 
-impl Zip for StatusService {
-    type Output<S: HttpService> = S;
-
-    fn zip<S: HttpService>(self, inner: S) -> Self::Output<S> {
-        inner
-    }
-}
-
