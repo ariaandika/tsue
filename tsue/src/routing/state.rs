@@ -36,10 +36,10 @@ impl<T: Clone + Send + Sync + 'static, S: HttpService> Service<Request> for Stat
 
 // ===== Merge =====
 
-impl<T, S1: Zip<S2>, S2> Zip<S2> for State<T, S1> {
-    type Output = State<T, S1::Output>;
+impl<T: Clone + Send + Sync + 'static, S1: Zip> Zip for State<T, S1> {
+    type Output<S2: HttpService> = State<T, S1::Output<S2>>;
 
-    fn zip(self, inner: S2) -> Self::Output {
+    fn zip<S2: HttpService>(self, inner: S2) -> Self::Output<S2> {
         State {
             state: self.state,
             inner: self.inner.zip(inner),

@@ -20,6 +20,7 @@ mod adapter;
 // ===== reexports =====
 
 pub(crate) use matcher::Shared;
+pub(crate) use zip::Zip;
 
 pub use router::Router;
 pub use branch::{Branch, get, post, put, patch, delete};

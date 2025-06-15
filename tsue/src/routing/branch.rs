@@ -74,10 +74,10 @@ impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
 
 // ===== Merge =====
 
-impl<S1, F: Zip<S2>, S2> Zip<S2> for Branch<S1, F> {
-    type Output = Branch<S1, F::Output>;
+impl<S1: HttpService, F: Zip> Zip for Branch<S1, F> {
+    type Output<S2: HttpService> = Branch<S1, F::Output<S2>>;
 
-    fn zip(self, inner: S2) -> Self::Output {
+    fn zip<S2: HttpService>(self, inner: S2) -> Self::Output<S2> {
         Branch {
             filter: self.filter,
             inner: self.inner,

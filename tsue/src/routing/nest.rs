@@ -36,7 +36,7 @@ fn match_path(req: &Request, prefix: &'static str) -> bool {
 }
 
 fn with_prefixed(mut req: Request, prefix: &'static str) -> Request {
-    let prefix_len: u32 = prefix.len().try_into().expect("prefix too large");
+    let prefix_len: u16 = prefix.len().try_into().expect("prefix too large");
     req.body_mut().shared_mut().path_offset += prefix_len;
     req
 }
@@ -76,10 +76,10 @@ where
 
 // ===== Merge =====
 
-impl<S1, F: Zip<S2>, S2> Zip<S2> for Nest<S1, F> {
-    type Output = Nest<S1, F::Output>;
+impl<S1: HttpService, F: Zip> Zip for Nest<S1, F> {
+    type Output<S2: HttpService> = Nest<S1, F::Output<S2>>;
 
-    fn zip(self, inner: S2) -> Self::Output {
+    fn zip<S2: HttpService>(self, inner: S2) -> Self::Output<S2> {
         Nest {
             prefix: self.prefix,
             inner: self.inner,

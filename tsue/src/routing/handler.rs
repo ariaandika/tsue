@@ -5,7 +5,8 @@ use std::{convert::Infallible, marker::PhantomData};
 use crate::{
     request::{FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
-    service::Service,
+    routing::Zip,
+    service::{HttpService, Service},
 };
 
 /// functional service
@@ -31,6 +32,14 @@ where
 
     fn call(&self, req: Request) -> Self::Future {
         self.inner.handle(req).map(Ok)
+    }
+}
+
+impl<F, S> Zip for HandlerService<F, S> {
+    type Output<S2: HttpService> = S2;
+
+    fn zip<S2: HttpService>(self, inner: S2) -> Self::Output<S2> {
+        inner
     }
 }
 

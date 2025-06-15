@@ -60,9 +60,9 @@ impl<S> Router<S> {
     }
 
     /// Merge two router.
-    pub fn merge<R>(self, router: Router<R>) -> Router<<S as Zip<R>>::Output>
+    pub fn merge<R: HttpService>(self, router: Router<R>) -> Router<<S as Zip>::Output<R>>
     where
-        S: Zip<R>,
+        S: Zip,
     {
         Router {
             inner: self.inner.zip(router.inner),
@@ -97,12 +97,13 @@ impl<S: HttpService> Service<Request> for Router<S> {
 
 // ===== Merge =====
 
-impl<S1: Zip<S2>, S2> Zip<S2> for Router<S1> {
-    type Output = Router<S1::Output>;
+impl<S1: Zip> Zip for Router<S1> {
+    type Output<S2: HttpService> = Router<S1::Output<S2>>;
 
-    fn zip(self, inner: S2) -> Self::Output {
+    fn zip<S2: HttpService>(self, inner: S2) -> Self::Output<S2> {
         Router {
             inner: self.inner.zip(inner),
         }
     }
 }
+

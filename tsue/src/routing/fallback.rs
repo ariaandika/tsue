@@ -8,7 +8,7 @@ use std::{
 use super::zip::Zip;
 use crate::{
     request::Request,
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response}, service::HttpService,
 };
 
 /// Special service to handle fallback for [`Router`][super::Router].
@@ -39,10 +39,10 @@ impl Service<Request> for Fallback {
 
 // ===== Merge =====
 
-impl<S> Zip<S> for Fallback {
-    type Output = S;
+impl Zip for Fallback {
+    type Output<S: HttpService> = S;
 
-    fn zip(self, inner: S) -> Self::Output {
+    fn zip<S: HttpService>(self, inner: S) -> Self::Output<S> {
         inner
     }
 }

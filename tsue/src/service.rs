@@ -4,6 +4,7 @@ use std::convert::Infallible;
 use crate::{
     request::Request,
     response::{IntoResponse, Response},
+    routing::Zip,
 };
 
 pub use hyper::service::Service;
@@ -31,6 +32,13 @@ where
 {
 }
 
+// ===== RouterService =====
+
+/// A [`Service`] that accept http request and return http response.
+pub trait RouterService: HttpService + Zip { }
+
+impl<S: HttpService + Zip> RouterService for S { }
+
 // ===== Layer =====
 
 /// A [`Service`] which holds another service.
@@ -39,6 +47,8 @@ pub trait Layer<S> {
 
     fn layer(self, service: S) -> Self::Service;
 }
+
+// ===== Helpers =====
 
 /// [`Service`] that response with given stats code.
 pub struct StatusService(pub http::StatusCode);
@@ -50,6 +60,14 @@ impl Service<Request> for StatusService {
 
     fn call(&self, _: Request) -> Self::Future {
         std::future::ready(Ok(self.0.into_response()))
+    }
+}
+
+impl Zip for StatusService {
+    type Output<S: HttpService> = S;
+
+    fn zip<S: HttpService>(self, inner: S) -> Self::Output<S> {
+        inner
     }
 }
 

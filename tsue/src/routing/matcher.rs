@@ -3,7 +3,7 @@ use crate::request::Request;
 /// Internal state for routing.
 #[derive(Default)]
 pub struct Shared {
-    pub(crate) path_offset: u32,
+    pub(crate) path_offset: u16,
 }
 
 #[derive(Debug)]
