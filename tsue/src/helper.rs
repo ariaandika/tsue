@@ -5,6 +5,8 @@
 use http::StatusCode;
 
 mod macros;
+mod util;
+
 mod state;
 mod html;
 mod redirect;
@@ -41,12 +43,6 @@ pub struct Form<T>(pub T);
 /// Response with `Content-Type` of `text/html; charset=utf-8`
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Html<T>(pub T);
-
-impl<T> From<T> for Html<T> {
-    fn from(value: T) -> Self {
-        Self(value)
-    }
-}
 
 /// HTTP Redirect helper.
 ///
