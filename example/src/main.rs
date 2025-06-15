@@ -6,7 +6,7 @@ use tsue::{
     helper::{Form, Html, State},
     response::IntoResponse,
     routing::{get, Router},
-    service::HttpService,
+    service::RouterService,
     FromRequest, IntoResponse,
 };
 
@@ -17,6 +17,7 @@ async fn main() -> std::io::Result<()> {
     let db = Db::new(Mutex::new(<_>::default()));
 
     let routes = Router::new()
+        .nest("/users", users())
         .merge(common())
         .merge(foo())
         .state(db);
@@ -24,20 +25,23 @@ async fn main() -> std::io::Result<()> {
     routes.listen("0.0.0.0:3000").await
 }
 
-fn common() -> Router<impl HttpService> {
+fn common() -> Router<impl RouterService> {
     Router::new()
         .route("/", get(index).post(index_post))
-        .route("/example", get(example))
+        .route(
+            "/example",
+            get(async |arg: ExampleReq| -> ExampleRes { arg.into() }),
+        )
 }
 
-// fn users() -> Router<impl HttpService> {
-//     Router::new().nest("/users", Router::new()
-//         .route("/", get(async || "Users All"))
-//         .route("/:id", get(async || "Users Id"))
-//         .route("/add/:id", get(async || "Users Add")))
-// }
+fn users() -> Router<impl RouterService> {
+    Router::new()
+        .route("/", get(async || "Users All"))
+        .route("/:id", get(async || "Users Id"))
+        .route("/add/:id", get(async || "Users Add"))
+}
 
-fn foo() -> Router<impl HttpService> {
+fn foo() -> Router<impl RouterService> {
     Router::new()
         .route("/", get(async || "Users All"))
         .route("/:id", get(async || "Users Id"))
@@ -60,11 +64,7 @@ async fn index_post(db: State<Db>, task: Form<TaskAdd>) -> impl IntoResponse {
     index(db).await
 }
 
-// ===== Macro =====
-
-async fn example(args: ExampleReq) -> ExampleRes {
-    args.into()
-}
+// ===== Derive Macros =====
 
 #[derive(FromRequest)]
 struct ExampleReq {
