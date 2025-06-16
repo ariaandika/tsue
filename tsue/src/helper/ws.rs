@@ -1,6 +1,6 @@
 use base64ct::{Base64, Encoding};
 use http::{
-    HeaderValue, StatusCode,
+    HeaderMap, HeaderValue, StatusCode,
     header::{CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE},
 };
 use hyper::upgrade::Upgraded;
@@ -67,14 +67,22 @@ impl WsUpgrade {
             }
         });
 
-        const UPGRADE_RES: HeaderValue = HeaderValue::from_static("Upgrade");
-        const WEBSOCKET_RES: HeaderValue = HeaderValue::from_static("websocket");
+        static DEFAULT_HEADERS: std::sync::LazyLock<HeaderMap> = std::sync::LazyLock::new(||{
+            const UPGRADE_RES: HeaderValue = HeaderValue::from_static("Upgrade");
+            const WEBSOCKET_RES: HeaderValue = HeaderValue::from_static("websocket");
+            const KEY_RES: HeaderValue = HeaderValue::from_static("default");
+
+            let mut headers = HeaderMap::new();
+            headers.append(CONNECTION, UPGRADE_RES);
+            headers.append(UPGRADE, WEBSOCKET_RES);
+            headers.append(SEC_WEBSOCKET_ACCEPT, KEY_RES);
+            headers
+        });
 
         let mut res = Response::new(Body::default());
         *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
-        res.headers_mut().append(CONNECTION, UPGRADE_RES);
-        res.headers_mut().append(UPGRADE, WEBSOCKET_RES);
-        res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived);
+        *res.headers_mut() = DEFAULT_HEADERS.clone();
+        res.headers_mut().insert(SEC_WEBSOCKET_ACCEPT, derived);
         res
     }
 }
