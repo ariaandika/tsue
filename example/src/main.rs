@@ -19,10 +19,9 @@ async fn main() -> std::io::Result<()> {
     let routes = Router::new()
         .nest("/users", users())
         .merge(common())
-        .merge(foo())
         .state(db);
 
-    routes.listen("0.0.0.0:3000").await
+    tsue::listen("0.0.0.0:3000", routes).await
 }
 
 fn common() -> Router<impl RouterService> {
@@ -35,13 +34,6 @@ fn common() -> Router<impl RouterService> {
 }
 
 fn users() -> Router<impl RouterService> {
-    Router::new()
-        .route("/", get(async || "Users All"))
-        .route("/:id", get(async || "Users Id"))
-        .route("/add/:id", get(async || "Users Add"))
-}
-
-fn foo() -> Router<impl RouterService> {
     Router::new()
         .route("/", get(async || "Users All"))
         .route("/:id", get(async || "Users Id"))
