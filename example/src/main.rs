@@ -91,7 +91,7 @@ struct TaskAdd {
 // ===== Pages =====
 
 #[derive(Debug, Template)]
-#[template(root = "example/index.html")]
+#[template(path = "/example/index.html")]
 struct Index {
     tasks: Vec<String>,
 }

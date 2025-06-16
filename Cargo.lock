@@ -522,7 +522,8 @@ dependencies = [
 [[package]]
 name = "tour"
 version = "0.1.0"
-source = "git+https://github.com/ariaandika/tour.git#9ae144a52b9f4f0b0698688b72617d35d034a64b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1731655e3fc59c3792c2cb5b01885caa2bf2e8f930cfdad8efad31850a3b4f43"
 dependencies = [
  "bytes",
  "itoa",
@@ -533,12 +534,14 @@ dependencies = [
 [[package]]
 name = "tour-core"
 version = "0.1.0"
-source = "git+https://github.com/ariaandika/tour.git#9ae144a52b9f4f0b0698688b72617d35d034a64b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a5c1df7575cfa6e73e6d7e5b30c8a793c01876575ae22db14f26170925dfc35"
 
 [[package]]
 name = "tour-macros"
 version = "0.1.0"
-source = "git+https://github.com/ariaandika/tour.git#9ae144a52b9f4f0b0698688b72617d35d034a64b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "964eaae2b6f1c70f758927ff0009c0b202d20844021cfa332a401ea04051fac4"
 dependencies = [
  "syn",
  "tour-parser",
@@ -547,7 +550,8 @@ dependencies = [
 [[package]]
 name = "tour-parser"
 version = "0.1.0"
-source = "git+https://github.com/ariaandika/tour.git#9ae144a52b9f4f0b0698688b72617d35d034a64b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ec1cec12262ff0be60e3f7c574e70666372fc8d0bbb7b99a58d4c6970f37ef6"
 dependencies = [
  "proc-macro2",
  "quote",
