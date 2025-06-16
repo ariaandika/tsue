@@ -27,7 +27,7 @@ tsue-macros = { version = "0.1.0", path = "../tsue-macros", optional = true }
 tokio = ["dep:tokio","hyper-util/tokio"]
 
 http2 = ["hyper-util/http2"]
-ws = ["dep:sha1","dep:base64ct"]
+ws = ["dep:sha1","dep:base64ct","tokio"]
 
 serde = ["dep:serde"]
 

@@ -18,8 +18,8 @@ mod json;
 #[cfg(feature = "form")]
 mod form;
 
-#[cfg(all(feature = "tokio", feature = "ws"))]
-mod ws;
+#[cfg(feature = "ws")]
+pub mod ws;
 
 /// Extract shared state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -59,8 +59,8 @@ pub struct Redirect {
 /// WebSocket Service handler.
 #[cfg(all(feature = "tokio", feature = "ws"))]
 #[derive(Debug)]
-pub struct WSUpgrade<H> {
-    _p: std::marker::PhantomData<H>,
+pub struct WsUpgrade {
+    req: crate::request::Request,
 }
 
 /// Sum type for [`Error`][1], [`Debug`][3], [`Display`][4], and [`IntoResponse`][2].

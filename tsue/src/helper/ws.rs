@@ -3,59 +3,67 @@ use http::{
     HeaderValue, StatusCode,
     header::{CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE},
 };
-use hyper::{service::Service, upgrade::Upgraded};
+use hyper::upgrade::Upgraded;
+use hyper_util::rt::TokioIo;
 use sha1::{Digest, Sha1};
 use std::{
-    convert::Infallible,
+    fmt,
     future::{Ready, ready},
 };
 
 use crate::{
     body::Body,
-    helper::WSUpgrade,
-    request::Request,
+    helper::WsUpgrade,
+    request::{FromRequest, Request},
     response::{IntoResponse, Response},
 };
 
-macro_rules! get_and_eq {
-    ($h:ident,$id:ident,$target:literal) => {
-        $h.get($id).map(|e|e == &$target[..]).unwrap_or(false)
+macro_rules! assert_hdr {
+    ($h:ident,$id:ident,$target:literal,$err:literal) => {
+        match $h.get($id) {
+            Some(header) => if header != &$target[..] {
+                return ready(Err(WsUpgradeError::Header($err)))
+            },
+            None => return ready(Err(WsUpgradeError::Header($err)))
+        }
     };
 }
 
-impl<H> Service<Request> for WSUpgrade<H>
-where
-    H: WSHandler + Send + Sync + 'static
-{
-    type Response = Response;
-    type Error = Infallible;
-    type Future = Ready<Result<Self::Response,Self::Error>>;
+// https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
 
-    fn call(&self, mut req: Request) -> Self::Future {
-        // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
+impl FromRequest for WsUpgrade {
+    type Error = WsUpgradeError;
+    type Future = Ready<Result<Self,Self::Error>>;
 
+    fn from_request(req: Request) -> Self::Future {
         let headers = req.headers();
-        let conn = get_and_eq!(headers, CONNECTION, b"Upgrade");
-        let upgrade = get_and_eq!(headers, UPGRADE, b"websocket");
-        let wsver = get_and_eq!(headers, SEC_WEBSOCKET_VERSION, b"13");
+        assert_hdr!(headers, CONNECTION, b"Upgrade", "not an connection upgrade");
+        assert_hdr!(headers, UPGRADE, b"websocket", "not an websocket upgrade");
+        assert_hdr!(headers, SEC_WEBSOCKET_VERSION, b"13", "unsupported websocket version");
+        ready(Ok(Self { req }))
+    }
+}
 
+impl WsUpgrade {
+    pub fn upgrade<F, U>(self, handle: F) -> Response
+    where
+        F: FnOnce(WebSocket) -> U + Send + 'static,
+        U: Future + Send,
+    {
+        let headers = self.req.headers();
         let key = headers.get(SEC_WEBSOCKET_KEY);
-
-        if conn && upgrade && wsver && key.is_some() {
-            return ready(Ok(StatusCode::BAD_REQUEST.into_response()));
-        }
-
         let derived = HeaderValue::from_bytes(&derive_accept(key.unwrap().as_bytes())).unwrap();
 
         tokio::spawn(async move {
+            let mut req = self.req;
             match hyper::upgrade::on(&mut req).await {
-                Ok(upgraded) => {
-                    H::upgraded(upgraded, req).await;
+                Ok(io) => {
+                    handle(WebSocket { io: TokioIo::new(io) }).await;
                 },
                 Err(err) => {
                     #[cfg(feature = "log")]
-                    log::error!("failed to upgrade websocket {err}");
-                },
+                    log::error!("failed to upgrade websocket: {err}");
+                }
             }
         });
 
@@ -67,8 +75,7 @@ where
         res.headers_mut().append(CONNECTION, UPGRADE_RES);
         res.headers_mut().append(UPGRADE, WEBSOCKET_RES);
         res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived);
-
-        ready(Ok(res))
+        res
     }
 }
 
@@ -90,9 +97,42 @@ fn derive_accept(key: &[u8]) -> Vec<u8> {
     dst
 }
 
-// ===== Post Handshake =====
+// ===== WebSocket =====
 
-pub trait WSHandler {
-    fn upgraded(upgraded: Upgraded, req: Request) -> impl Future + Send;
+#[derive(Debug)]
+pub struct WebSocket {
+    io: TokioIo<Upgraded>,
+}
+
+impl WebSocket {
+    pub fn read(&self) {
+        let _ = &self.io;
+        todo!()
+    }
+}
+
+// ===== Error =====
+
+/// An Error which can occur during http upgrade.
+#[derive(Debug)]
+pub enum WsUpgradeError {
+    /// Header did not represent http upgrade.
+    Header(&'static str),
+}
+
+impl std::error::Error for WsUpgradeError { }
+
+impl fmt::Display for WsUpgradeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WsUpgradeError::Header(s) => f.write_str(s),
+        }
+    }
+}
+
+impl IntoResponse for WsUpgradeError {
+    fn into_response(self) -> Response {
+        StatusCode::BAD_REQUEST.into_response()
+    }
 }
 
