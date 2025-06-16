@@ -18,6 +18,9 @@ mod json;
 #[cfg(feature = "form")]
 mod form;
 
+#[cfg(all(feature = "tokio", feature = "ws"))]
+mod ws;
+
 /// Extract shared state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct State<T>(pub T);
@@ -51,6 +54,13 @@ pub struct Html<T>(pub T);
 pub struct Redirect {
     status: StatusCode,
     location: String,
+}
+
+/// WebSocket Service handler.
+#[cfg(all(feature = "tokio", feature = "ws"))]
+#[derive(Debug)]
+pub struct WSUpgrade<H> {
+    _p: std::marker::PhantomData<H>,
 }
 
 /// Sum type for [`Error`][1], [`Debug`][3], [`Display`][4], and [`IntoResponse`][2].
