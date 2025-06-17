@@ -21,7 +21,7 @@ pub use error::{BodyError, Kind};
 pub struct Body {
     shared: crate::routing::Shared,
     repr: Repr,
-    remaining: Option<u64>,
+    remaining: u64,
 }
 
 impl<B: Into<Repr>> From<B> for Body {
@@ -32,7 +32,7 @@ impl<B: Into<Repr>> From<B> for Body {
 
 impl Body {
     pub(crate) fn new(repr: impl Into<Repr>) -> Self {
-        Self { repr: repr.into(), remaining: Some(2_000_000), shared: <_>::default() }
+        Self { repr: repr.into(), remaining: 2_000_000, shared: <_>::default() }
     }
 
     /// Buffer the entire body into memory.
@@ -68,10 +68,7 @@ impl http_body::Body for Body {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let frame = tri!(ready!(Pin::new(&mut self.repr).poll_frame(cx)?));
-        let frame_result = match self.remaining.as_mut() {
-            Some(remaining) => tri!(limited::limit_frame(frame, remaining)),
-            None => Ok(frame),
-        };
+        let frame_result = tri!(limited::limit_frame(frame, &mut self.remaining));
         Poll::Ready(Some(frame_result.map_err(Into::into)))
     }
 
@@ -80,10 +77,7 @@ impl http_body::Body for Body {
     }
 
     fn size_hint(&self) -> http_body::SizeHint {
-        match self.remaining {
-            Some(remaining) => limited::limit_size_hint(self.repr.size_hint(), remaining),
-            None => self.repr.size_hint(),
-        }
+        limited::limit_size_hint(self.repr.size_hint(), self.remaining)
     }
 }
 
