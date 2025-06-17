@@ -31,6 +31,7 @@ impl OpCode {
     }
 }
 
+#[derive(Debug)]
 pub struct Frame {
     fin: bool,
     opcode: OpCode,

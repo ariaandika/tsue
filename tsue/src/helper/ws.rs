@@ -230,7 +230,7 @@ impl WebSocket {
         };
         let payload_len_read = extra_payload_size + MASK_SIZE;
 
-        let Some(mut header) = self.read_buf.get(2..payload_len_read) else {
+        let Some(mut header) = self.read_buf.get(2..2 + payload_len_read) else {
             self.read_buf.reserve(payload_len_read);
             ready!(poll_read(&mut self.io, &mut self.read_buf, cx)?);
             return self.poll_frame(cx)
