@@ -9,8 +9,10 @@ use hyper_util::rt::TokioIo;
 use sha1::{Digest, Sha1};
 use std::{
     fmt,
-    future::{ready, Ready},
-    io, task::{ready, Poll},
+    future::{poll_fn, ready, Ready},
+    io::{self, IoSlice},
+    pin::Pin,
+    task::{ready, Poll},
 };
 
 use crate::{
@@ -27,6 +29,7 @@ pub use frame::{Frame, OpCode};
 /// 64 MiB
 const MAX_FRAME_SIZE: usize = 64 << 20;
 const MAX_HEADER_SIZE: usize = 14;
+const MASK_SIZE: usize = 4;
 
 // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
 
@@ -155,16 +158,19 @@ impl WebSocket {
     ///
     /// This call handles ping frame automatically.
     pub async fn read_frame(&mut self) -> io::Result<Frame> {
+        if self.closed {
+            return Err(io_err!(ConnectionAborted, "connection already closed"));
+        }
+
         loop {
-            let frame = std::future::poll_fn(|cx|self.poll_frame(cx)).await?;
+            let frame = poll_fn(|cx|self.poll_frame(cx)).await?;
 
             match frame.opcode() {
                 OpCode::Close => {
                     self.closed = true;
                 },
                 OpCode::Ping => {
-                    // TODO:
-                    // self.send_frame(Frame::pong()).await?;
+                    self.send_pong(&frame.into_payload()).await?;
                     continue;
                 },
                 OpCode::Text => {},
@@ -216,8 +222,6 @@ impl WebSocket {
         // ===== Payload Length =====
         // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#decoding_payload_length
 
-        const MASK_SIZE: usize = 4;
-
         let extra_payload_size = match length {
             126 => 2,
             127 => 8,
@@ -249,6 +253,7 @@ impl WebSocket {
         debug_assert!(masked);
         let mask_key = header.get_u32().to_be_bytes();
 
+        // for pings and pongs, the max payload length is 125
         if opcode == OpCode::Ping && payload_len > 125 {
             return Poll::Ready(Err(io_err!("ping frame too large")));
         }
@@ -271,11 +276,76 @@ impl WebSocket {
         Poll::Ready(Ok(Frame::new(fin, opcode, payload)))
     }
 
+    /// Send string frame to the client.
+    pub async fn send_string(&mut self, string: &str) -> io::Result<()> {
+        if self.closed {
+            return Err(io_err!(ConnectionAborted, "connection already closed"));
+        }
+        self.send(true, OpCode::Text, string.as_bytes()).await
+    }
+
+    /// Send binary frame to the client.
+    pub async fn send_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if self.closed {
+            return Err(io_err!(ConnectionAborted, "connection already closed"));
+        }
+        self.send(true, OpCode::Binary, bytes).await
+    }
+
+    /// Send ping frame to the client.
+    pub async fn ping(&mut self, payload: &[u8]) -> io::Result<()> {
+        if self.closed {
+            return Err(io_err!(ConnectionAborted, "connection already closed"));
+        }
+        self.send(true, OpCode::Ping, payload).await
+    }
+
+    /// Send close frame to the client.
+    pub async fn close(mut self) -> io::Result<()> {
+        if self.closed {
+            return Err(io_err!(ConnectionAborted, "connection already closed"));
+        }
+        self.send(true, OpCode::Close, &[]).await
+    }
+
+    async fn send_pong(&mut self, payload: &[u8]) -> io::Result<()> {
+        self.flush().await?;
+        self.send(true, OpCode::Pong, payload).await
+    }
+
+    fn send<'a>(&'a mut self, fin: bool, opcode: OpCode, payload: &'a [u8]) -> FrameSendFuture<'a> {
+        let mut head = [0u8;MAX_HEADER_SIZE - MASK_SIZE];
+        head[0] = (fin as u8) << 7 | opcode as u8;
+
+        let len = payload.len();
+        let header_size = match len {
+            _ if len < 126 => {
+                head[1] = len as u8;
+                2
+            },
+            _ if len < 65536 => {
+                head[1] = 126;
+                head[2..4].copy_from_slice(&(len as u16).to_be_bytes());
+                4
+            },
+            _ => {
+                head[1] = 127;
+                head[2..10].copy_from_slice(&(len as u64).to_be_bytes());
+                10
+            }
+        };
+
+        FrameSendFuture { head, header_size, payload, io: &mut self.io, phase: Phase::Init }
+    }
+
     pub async fn flush(&mut self) -> io::Result<()> {
+        if self.closed {
+            return Err(io_err!(ConnectionAborted, "connection already closed"));
+        }
         if self.write_buf.is_empty() {
             return Ok(())
         }
-        std::future::poll_fn(|cx|poll_write_all(&mut self.io, &mut self.write_buf, cx)).await
+        poll_fn(|cx|poll_write_all(&mut self.io, &mut self.write_buf, cx)).await
     }
 }
 
@@ -286,7 +356,6 @@ where
     R: tokio::io::AsyncRead + Unpin + ?Sized,
     B: bytes::BufMut + ?Sized,
 {
-    use std::{pin::Pin, task::ready};
     use tokio::io::ReadBuf;
 
     if !buf.has_remaining_mut() {
@@ -342,6 +411,64 @@ where
     }
 
     Poll::Ready(Ok(()))
+}
+
+// ===== Futures =====
+
+#[must_use = "`Future` do nothing unless being polled/awaited"]
+pub struct FrameSendFuture<'a> {
+    head: [u8; 10],
+    header_size: usize,
+    payload: &'a [u8],
+    io: &'a mut TokioIo<Upgraded>,
+    phase: Phase,
+}
+
+enum Phase {
+    Init,
+    Partial(usize),
+    Payload,
+}
+
+impl<'a> Future for FrameSendFuture<'a> {
+    type Output = io::Result<()>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        use tokio::io::AsyncWrite;
+        let me = self.get_mut();
+        let total = me.header_size + me.payload.len();
+
+        loop {
+            match &mut me.phase {
+                Phase::Init => {
+                    let io_slice = [IoSlice::new(&me.head[..me.header_size]),IoSlice::new(me.payload)];
+                    let write = ready!(Pin::new(&mut *me.io).poll_write_vectored(cx, &io_slice)?);
+                    if write == total {
+                        return Poll::Ready(Ok(()))
+                    }
+                    me.phase = Phase::Partial(write);
+                }
+                Phase::Partial(write) => {
+                    let mut io_slice = [IoSlice::new(&me.head[*write..me.header_size]),IoSlice::new(me.payload)];
+                    while *write <= me.header_size {
+                        io_slice[0] = IoSlice::new(&me.head[*write..me.header_size]);
+                        *write += ready!(Pin::new(&mut *me.io).poll_write_vectored(cx, &io_slice)?);
+                    }
+                    if *write == total {
+                        return Poll::Ready(Ok(()));
+                    }
+                    me.payload = &me.payload[*write..];
+                    me.phase = Phase::Payload;
+                }
+                Phase::Payload => {
+                    if !me.payload.is_empty() {
+                        ready!(poll_write_all(me.io, &mut me.payload, cx)?);
+                    }
+                    return Poll::Ready(Ok(()))
+                }
+            }
+        }
+    }
 }
 
 // ===== Masking =====
