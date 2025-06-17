@@ -57,5 +57,9 @@ impl Frame {
     pub fn payload_mut(&mut self) -> &mut BytesMut {
         &mut self.payload
     }
+
+    pub fn into_payload(self) -> BytesMut {
+        self.payload
+    }
 }
 

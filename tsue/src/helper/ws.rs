@@ -126,7 +126,35 @@ impl WebSocket {
 }
 
 impl WebSocket {
-    pub async fn recv(&mut self) -> io::Result<Frame> {
+    /// Read for a frame.
+    ///
+    /// This call collects fragmented messages.
+    ///
+    /// This call handles ping frame automatically.
+    pub async fn read(&mut self) -> io::Result<Frame> {
+        let mut frame = self.read_frame().await?;
+        let mut is_fin = frame.fin();
+
+        while !is_fin {
+            let fragment = self.read_frame().await?;
+            is_fin = fragment.fin();
+
+            if fragment.opcode() != OpCode::Continuation {
+                return Err(io_err!("fragment opcode is not a continuation"))
+            }
+
+            frame.payload_mut().unsplit(fragment.into_payload());
+        }
+
+        Ok(frame)
+    }
+
+    /// Read for single frame.
+    ///
+    /// This call does not handle message fragmentation, use [`WebSocket::read`] instead.
+    ///
+    /// This call handles ping frame automatically.
+    pub async fn read_frame(&mut self) -> io::Result<Frame> {
         loop {
             let frame = std::future::poll_fn(|cx|self.poll_frame(cx)).await?;
 
@@ -140,8 +168,8 @@ impl WebSocket {
                     continue;
                 },
                 OpCode::Text => {},
-                OpCode::Continuation => {}
                 OpCode::Binary => {}
+                OpCode::Continuation => {}
                 OpCode::Pong => {}
             }
 
