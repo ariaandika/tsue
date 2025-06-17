@@ -39,7 +39,7 @@ impl FromRequest for WsUpgrade {
 
     fn from_request(req: Request) -> Self::Future {
         let headers = req.headers();
-        assert_hdr!(headers, CONNECTION, b"Upgrade", "not a connection upgrade");
+        assert_hdr!(headers, CONNECTION, headers.split(',').any(|e|e.trim() == "Upgrade"), "not a connection upgrade");
         assert_hdr!(headers, UPGRADE, b"websocket", "not a websocket upgrade");
         assert_hdr!(headers, SEC_WEBSOCKET_VERSION, b"13", "unsupported websocket version");
         ready(Ok(Self { req }))
@@ -526,7 +526,9 @@ impl fmt::Display for WsUpgradeError {
 
 impl IntoResponse for WsUpgradeError {
     fn into_response(self) -> Response {
-        StatusCode::BAD_REQUEST.into_response()
+        match self {
+            WsUpgradeError::Header(msg) => (StatusCode::BAD_REQUEST,msg).into_response(),
+        }
     }
 }
 
@@ -537,6 +539,14 @@ macro_rules! assert_hdr {
     ($h:ident,$id:ident,$target:literal,$err:literal) => {
         match $h.get($id) {
             Some(header) => if header != &$target[..] {
+                return ready(Err(WsUpgradeError::Header($err)))
+            },
+            None => return ready(Err(WsUpgradeError::Header($err)))
+        }
+    };
+    ($h:ident,$id:ident,$target:expr,$err:literal) => {
+        match $h.get($id).and_then(|e|e.to_str().ok()) {
+            Some($h) => if $target { } else {
                 return ready(Err(WsUpgradeError::Header($err)))
             },
             None => return ready(Err(WsUpgradeError::Header($err)))
