@@ -140,7 +140,7 @@ where
                 MergeProj::P1 { f, s, m } => {
                     let ok = match ready!(f.poll(cx)) {
                         Ok(ok) => ok,
-                        Err(_) => todo!(),
+                        Err(err) => return std::task::Poll::Ready(err),
                     };
                     let s = s.take().unwrap();
                     let f = m.take().unwrap()(s,ok);
