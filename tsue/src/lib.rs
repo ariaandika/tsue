@@ -2,23 +2,23 @@
 //!
 //! # Quick Start
 //!
-//! ```no_run
-//! use std::{io, sync::{atomic::{AtomicU8, Ordering}, Arc}};
-//! use vice::{extractor::State, router::{get,Router}};
-//! 
-//! fn main() -> io::Result<()> {
-//!     Router::new()
-//!         .route("/", get(index).post(up))
-//!         .state(Arc::new(AtomicU8::new(0)))
-//!         .listen("0.0.0.0:3000")
+//! ```ignore
+//! use tsue::routing::{Router, get};
+//!
+//! #[tokio::main]
+//! async fn main() -> std::io::Result<()> {
+//!     let routes = Router::new()
+//!         .route("/", get(index).post(up));
+//!
+//!     tsue::listen("0.0.0.0:3000", routes).await
 //! }
 //!
 //! async fn index() -> &'static str {
-//!     "Vice Dev!"
+//!     "Tsue Dev!"
 //! }
 //!
-//! async fn up(State(counter): State<Arc<AtomicU8>>, body: String) -> String {
-//!     format!("{}: {}",counter.fetch_add(1, Ordering::Relaxed),body.to_uppercase())
+//! async fn up(body: String) {
+//!     println!("Client sends: {body}");
 //! }
 //! ```
 pub mod body;
