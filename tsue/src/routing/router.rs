@@ -6,6 +6,7 @@ use crate::{
 };
 
 /// Routes builder.
+#[derive(Debug)]
 pub struct Router<S> {
     inner: S,
 }
@@ -15,16 +16,16 @@ impl Router<Fallback> {
     pub fn new() -> Router<Fallback> {
         Router { inner: Fallback }
     }
+
+    // TODO: create separate type for Nested
+
+    /// Create new nested `Router`.
+    pub fn nested(prefix: &'static str) -> Router<Nest<Fallback, Fallback>> {
+        Router { inner: Nest::new(prefix, Fallback, Fallback) }
+    }
 }
 
 impl<S> Router<S> {
-    // NOTE: fallback requires to set a runtime flag for merge to work
-    //
-    // /// Create new `Router` with custom fallback instead of 404 NotFound.
-    // pub fn with_fallback(fallback: S) -> Router<S> {
-    //     Router { inner: fallback }
-    // }
-
     /// Layer current router service.
     ///
     /// This is low level way to interact with `Router`.
