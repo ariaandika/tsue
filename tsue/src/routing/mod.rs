@@ -230,6 +230,8 @@
 //! [`IntoResponseParts`]: crate::response::IntoResponseParts
 //! [`Either`]: crate::helper::Either
 
+// TODO: middleware
+
 // shared state
 mod matcher;
 mod zip;
@@ -245,18 +247,20 @@ mod handler;
 
 // utilities
 mod state;
+
+#[cfg(feature = "tokio")]
 mod adapter;
 
 // ===== reexports =====
 
-pub(crate) use matcher::Shared;
 pub(crate) use zip::Zip;
 
 pub use router::Router;
-pub use branch::{Branch, get, post, put, patch, delete};
-pub use nest::Nest;
+pub use branch::{get, post, put, patch, delete};
 pub use state::State;
-pub use adapter::Hyper;
+
+#[cfg(feature = "tokio")]
+pub(crate) use adapter::Hyper;
 
 #[doc(inline)]
 pub use crate::service::RouterService;

@@ -1,4 +1,4 @@
-use super::{Branch, State, fallback::Fallback, nest::Nest, zip::Zip};
+use super::{State, branch::Branch, fallback::Fallback, nest::Nest, zip::Zip};
 use crate::{
     request::Request,
     response::Response,
@@ -13,7 +13,7 @@ pub struct Router<S> {
 
 impl Router<Fallback> {
     /// Create new `Router`.
-    pub fn new() -> Router<Fallback> {
+    pub fn new() -> Self {
         Router { inner: Fallback }
     }
 
@@ -21,7 +21,9 @@ impl Router<Fallback> {
 
     /// Create new nested `Router`.
     pub fn nested(prefix: &'static str) -> Router<Nest<Fallback, Fallback>> {
-        Router { inner: Nest::new(prefix, Fallback, Fallback) }
+        Router {
+            inner: Nest::new(prefix, Fallback, Fallback),
+        }
     }
 }
 
@@ -49,11 +51,15 @@ impl<S> Router<S> {
 
     /// Nest another router.
     ///
-    /// Nested `prefix` should starts with "/".
+    /// `prefix` should:
+    ///
+    /// - not be empty
+    /// - not be exactly `/`
+    /// - starts with `/`
     ///
     /// # Panics
     ///
-    /// This function will panic if `prefix` is not starts with "/".
+    /// This function will panic if one of previous conditions are violated.
     pub fn nest<R>(self, prefix: &'static str, route: R) -> Router<Nest<R, S>> {
         Router {
             inner: Nest::new(prefix, route, self.inner),
@@ -96,7 +102,7 @@ impl<S: HttpService> Service<Request> for Router<S> {
     }
 }
 
-// ===== Merge =====
+// ===== Zip =====
 
 impl<S1: Zip> Zip for Router<S1> {
     type Output<S2: HttpService> = Router<S1::Output<S2>>;
