@@ -54,6 +54,8 @@
 //!     .route("/users/:id", get(index));
 //! ```
 //!
+//! Note that parameter only available in [`Router::route`].
+//!
 //! ## Nesting
 //!
 //! In most cases, similar routes will be grouped with the same prefix, this is often called
@@ -234,6 +236,8 @@
 
 // shared state
 mod matcher;
+#[cfg(feature = "serde")]
+mod extract;
 mod zip;
 
 // core routings
