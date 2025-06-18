@@ -13,32 +13,27 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Nest<S, F> {
+    /// not empty
+    /// not exactly `/`
+    /// starts with `/`
+    /// will not ends with `/`
     prefix: &'static str,
     inner: S,
     fallback: F,
 }
 
 impl<S, F> Nest<S, F> {
+    /// prefix cannot be empty
+    /// prefix cannot be exactly `/`
+    /// prefix should starts with `/`
+    /// ends of `/` will be trimmed
     pub(crate) fn new(prefix: &'static str, inner: S, fallback: F) -> Self {
+        assert!(!prefix.is_empty(), "nested prefix cannot be empty");
+        assert!(prefix.ne("/"), "nested prefix cannot be exactly `/`");
         assert!(prefix.starts_with("/"), "nested prefix should starts with `/`");
+
         Self { prefix: prefix.trim_end_matches("/"), inner, fallback, }
     }
-}
-
-fn match_path(req: &Request, prefix: &'static str) -> bool {
-    let path = req.matches_path();
-
-    if !path.starts_with(prefix) {
-        return false;
-    }
-
-    matches!(path.as_bytes().get(prefix.len()), Some(b'/') | None)
-}
-
-fn with_prefixed(mut req: Request, prefix: &'static str) -> Request {
-    let prefix_len: u16 = prefix.len().try_into().expect("prefix too large");
-    req.body_mut().shared_mut().path_offset += prefix_len;
-    req
 }
 
 // ===== Service =====
@@ -62,10 +57,10 @@ where
     >;
 
     fn call(&self, req: Request) -> Self::Future {
-        if match_path(&req, self.prefix) {
+        if req.uri().path().starts_with(self.prefix) {
             Either::Left(
                 self.inner
-                    .call(with_prefixed(req, self.prefix))
+                    .call(req.with_prefixed(self.prefix))
                     .map(|e| e.map_err(Either2::Left)),
             )
         } else {

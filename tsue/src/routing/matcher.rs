@@ -1,39 +1,24 @@
+use http::Uri;
 use crate::request::Request;
-
-/// Internal state for routing.
-#[derive(Default)]
-pub struct Shared {
-    pub(crate) path_offset: u16,
-}
 
 #[derive(Debug)]
 pub struct Path {
-    repr: Repr,
-}
-
-#[derive(Debug)]
-enum Repr {
-    Static(&'static str),
-    Params(&'static str),
+    value: &'static str,
+    is_params: bool,
 }
 
 impl Path {
     pub fn new(value: &'static str) -> Self {
-        if value.contains(':') || value.contains('*') {
-            Self { repr: Repr::Params(value) }
-        } else {
-            Self { repr: Repr::Static(value) }
-        }
+        Self { value, is_params: value.contains(':') || value.contains('*') }
     }
 
     pub fn matches(&self, req: &Request) -> bool {
-        let path = match self.repr {
-            Repr::Static(p) => return req.matches_path() == p,
-            Repr::Params(p) => p,
-        };
+        if !self.is_params {
+            return req.uri().path() == self.value;
+        }
 
-        let mut p1 = req.matches_path().split('/');
-        let mut p2 = path.split('/');
+        let mut p1 = req.uri().path().split('/');
+        let mut p2 = self.value.split('/');
 
         loop {
             match (p1.next(), p2.next()) {
@@ -54,17 +39,25 @@ impl Path {
 // ===== Internals =====
 
 pub(crate) trait RequestInternal {
-    fn matches_path(&self) -> &str;
+    fn with_prefixed(self, prefix: &str) -> Self;
 }
 
 impl RequestInternal for Request {
-    fn matches_path(&self) -> &str {
-        let path = self.uri().path().split_at(self.body().shared().path_offset as _).1;
-        if path.is_empty() {
-            "/"
-        } else {
-            path
+    fn with_prefixed(mut self, prefix: &str) -> Self {
+        let trimmed = match self.uri().path_and_query() {
+            Some(p) => p.as_str(),
+            None => self.uri().path(),
         }
+        .trim_start_matches(prefix);
+
+        // TODO: set original path extension
+        // let _original = self.uri().path();
+
+        let mut parts = self.uri().clone().into_parts();
+        parts.path_and_query = Some(trimmed.parse().expect("cloned from valid Uri"));
+        *self.uri_mut() = Uri::from_parts(parts).expect("cloned from valid Uri");
+
+        self
     }
 }
 
