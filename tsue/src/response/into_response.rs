@@ -2,6 +2,7 @@ use bytes::{Bytes, BytesMut};
 use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE, response};
 
 use super::{IntoResponse, IntoResponseParts, Parts, Response};
+use crate::common::log;
 
 use macros::{headers, into_response_tuple, part, res};
 
@@ -42,9 +43,8 @@ impl IntoResponse for hyper::Error {
         match self {
             me if me.is_parse() => StatusCode::BAD_REQUEST.into_response(),
             me if me.is_timeout() => StatusCode::REQUEST_TIMEOUT.into_response(),
-            _err => {
-                #[cfg(feature = "log")]
-                log::error!("{_err}");
+            err => {
+                log!("hyper error: {err}");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }

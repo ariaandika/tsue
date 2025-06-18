@@ -7,6 +7,7 @@ use std::{fmt, future::ready};
 use super::{Json, macros::derefm};
 use crate::{
     body::BodyError,
+    common::log,
     request::{FromRequest, Request},
     response::{IntoResponse, Response},
 };
@@ -81,8 +82,7 @@ impl<T: Serialize> IntoResponse for Json<T> {
         match serde_json::to_vec(&self.0) {
             Ok(ok) => (APPLICATION_JSON, ok).into_response(),
             Err(_err) => {
-                #[cfg(feature = "log")]
-                log::error!("failed to serialize json response: {_err}");
+                log!("failed to serialize json response: {_err}");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }

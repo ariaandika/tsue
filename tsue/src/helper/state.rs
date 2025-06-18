@@ -3,6 +3,7 @@ use std::future::{Ready, ready};
 
 use super::{State, macros::derefm};
 use crate::{
+    common::log,
     request::FromRequestParts,
     response::{IntoResponse, Response},
 };
@@ -20,8 +21,7 @@ where
         ready(match parts.extensions.get::<T>().cloned() {
             Some(ok) => Ok(Self(ok)),
             None => {
-                #[cfg(feature = "log")]
-                log::error!("State is not declared");
+                log!("State is not declared");
                 Err(StatusCode::INTERNAL_SERVER_ERROR.into_response())
             }
         })

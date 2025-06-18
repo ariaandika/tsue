@@ -21,6 +21,7 @@
 //!     println!("Client sends: {body}");
 //! }
 //! ```
+mod common;
 pub mod body;
 pub mod request;
 pub mod response;

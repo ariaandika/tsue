@@ -5,6 +5,7 @@ use std::convert::Infallible;
 
 use crate::{
     body::Body,
+    common::log,
     request::Request,
     response::{IntoResponse, Response},
     service::HttpService,
@@ -33,9 +34,8 @@ impl<S: HttpService> hyper::service::Service<Request<Incoming>> for Hyper<S> {
             .call(req.map(Body::new))
             .map(|result| match result {
                 Ok(ok) => Ok(ok),
-                Err(_err) => {
-                    #[cfg(feature = "log")]
-                    log::error!("{_err}");
+                Err(err) => {
+                    log!("service level error: {err}");
                     Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response())
                 }
             })

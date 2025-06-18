@@ -5,8 +5,7 @@ use hyper_util::{
 use std::{fmt, io, sync::Arc};
 use tokio::net::{TcpListener, ToSocketAddrs};
 
-use crate::routing;
-use crate::service::HttpService;
+use crate::{common::log, routing, service::HttpService};
 
 /// Start server using hyper and tokio.
 pub async fn listen<S: HttpService>(
@@ -32,19 +31,15 @@ pub async fn listen<S: HttpService>(
             Ok((stream, _)) => {
                 tokio::spawn(async move {
                     let rt = Hyper::new(TokioExecutor::new());
-                    if let Err(_err) = rt
+                    if let Err(err) = rt
                         .serve_connection_with_upgrades(TokioIo::new(stream), service)
                         .await
                     {
-                        #[cfg(feature = "log")]
-                        log::error!("{_err}");
+                        log!("{err}")
                     }
                 });
             }
-            Err(_err) => {
-                #[cfg(feature = "log")]
-                log::error!("failed to connect peer: {_err}");
-            }
+            Err(err) => log!("failed to connect peer: {err}"),
         }
     }
 }

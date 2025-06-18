@@ -9,14 +9,15 @@ use hyper_util::rt::TokioIo;
 use sha1::{Digest, Sha1};
 use std::{
     fmt,
-    future::{poll_fn, ready, Ready},
+    future::{Ready, poll_fn, ready},
     io::{self, IoSlice},
     pin::Pin,
-    task::{ready, Poll},
+    task::{Poll, ready},
 };
 
 use crate::{
     body::Body,
+    common::log,
     helper::WsUpgrade,
     request::{FromRequest, Request},
     response::{IntoResponse, Response},
@@ -50,7 +51,7 @@ impl WsUpgrade {
     pub fn upgrade<F, U>(self, handle: F) -> Response
     where
         F: FnOnce(WebSocket) -> U + Send + 'static,
-        U: Future + Send,
+        U: Future<Output = ()> + Send,
     {
         let headers = self.req.headers();
         let key = headers.get(SEC_WEBSOCKET_KEY);
@@ -59,13 +60,8 @@ impl WsUpgrade {
         tokio::spawn(async move {
             let mut req = self.req;
             match hyper::upgrade::on(&mut req).await {
-                Ok(io) => {
-                    handle(WebSocket::new(TokioIo::new(io))).await;
-                },
-                Err(_err) => {
-                    #[cfg(feature = "log")]
-                    log::error!("failed to upgrade websocket: {_err}");
-                }
+                Ok(io) => handle(WebSocket::new(TokioIo::new(io))).await,
+                Err(err) => log!("failed to upgrade websocket: {err}"),
             }
         });
 
