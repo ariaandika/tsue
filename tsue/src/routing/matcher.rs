@@ -34,6 +34,10 @@ impl Path {
             }
         }
     }
+
+    pub fn value(&self) -> &'static str {
+        self.value
+    }
 }
 
 // ===== Internals =====

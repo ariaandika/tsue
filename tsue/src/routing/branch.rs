@@ -2,12 +2,14 @@ use futures_util::{
     FutureExt,
     future::{Either, Map},
 };
-use http::Method;
+use http::{Method, StatusCode};
+use std::future::{Ready, ready};
 
 use super::{handler::HandlerService, matcher::Path, zip::Zip};
 use crate::{
-    helper::Either as Either2,
-    request::Request,
+    common::log,
+    helper::{Either as Either2, MatchedRoute},
+    request::{FromRequestParts, Request},
     response::Response,
     service::{HttpService, Service, StatusService},
 };
@@ -60,11 +62,14 @@ impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
         >,
     >;
 
-    fn call(&self, req: Request) -> Self::Future {
+    fn call(&self, mut req: Request) -> Self::Future {
         if match &self.filter {
             Filter::Method(method) => method == req.method(),
             Filter::Path(path) => path.matches(&req),
         } {
+            if let Filter::Path(path) = &self.filter {
+                req.extensions_mut().insert(MatchedRoute(path.value()));
+            }
             Either::Left(self.inner.call(req).map(|e| e.map_err(Either2::Left)))
         } else {
             Either::Right(self.fallback.call(req).map(|e| e.map_err(Either2::Right)))
@@ -72,7 +77,31 @@ impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
     }
 }
 
-// ===== Merge =====
+impl MatchedRoute {
+    pub(crate) fn extract(ext: &http::Extensions) -> Result<Self, StatusCode> {
+        match ext.get::<Self>() {
+            Some(ok) => Ok(ok.clone()),
+            None => {
+                log!(
+                    "failed to get route parameteer, handler probably called in non-route service"
+                );
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        }
+    }
+}
+
+impl FromRequestParts for MatchedRoute {
+    type Error = StatusCode;
+
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request_parts(parts: &mut http::request::Parts) -> Self::Future {
+        ready(Self::extract(&parts.extensions))
+    }
+}
+
+// ===== Zip =====
 
 impl<S1: HttpService, F: Zip> Zip for Branch<S1, F> {
     type Output<S2: HttpService> = Branch<S1, F::Output<S2>>;

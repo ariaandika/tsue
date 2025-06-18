@@ -237,7 +237,7 @@
 // shared state
 mod matcher;
 #[cfg(feature = "serde")]
-mod extract;
+pub(crate) mod extract;
 mod zip;
 
 // core routings

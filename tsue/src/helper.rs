@@ -12,6 +12,9 @@ mod html;
 mod redirect;
 mod either;
 
+#[cfg(feature = "serde")]
+mod params;
+
 #[cfg(feature = "json")]
 mod json;
 
@@ -21,9 +24,18 @@ mod form;
 #[cfg(feature = "ws")]
 pub mod ws;
 
-/// Extract shared state.
+/// Get shared state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct State<T>(pub T);
+
+/// Get matched route path.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MatchedRoute(pub &'static str);
+
+/// Extract path paremeters.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Params<T>(pub T);
 
 /// JSON Request and Response helper.
 ///
