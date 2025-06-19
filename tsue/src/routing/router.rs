@@ -1,6 +1,5 @@
 use super::{
-    Next, State, branch::Branch, fallback::Fallback, middleware::FromFn, middleware::from_fn,
-    nest::Nest, zip::Zip,
+    Next, State, branch::Branch, fallback::Fallback, middleware::FromFn, nest::Nest, zip::Zip,
 };
 use crate::{
     request::Request,
@@ -50,14 +49,14 @@ impl<S> Router<S> {
         }
     }
 
-    /// Register new route.
+    /// Register a middleware.
     pub fn middleware<F, Fut>(self, f: F) -> Router<FromFn<F, S>>
     where
         F: Fn(Request, Next) -> Fut,
         Fut: Future<Output: IntoResponse>,
     {
         Router {
-            inner: from_fn(f, self.inner),
+            inner: FromFn::new(f, self.inner),
         }
     }
 

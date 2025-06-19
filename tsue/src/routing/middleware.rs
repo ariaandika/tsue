@@ -9,8 +9,11 @@ use std::{
 use crate::{
     request::Request,
     response::{IntoResponse, Response},
+    routing::Zip,
     service::HttpService,
 };
+
+/// ===== Middleware Service =====
 
 #[derive(Debug, Clone)]
 pub struct FromFn<F, S> {
@@ -18,11 +21,13 @@ pub struct FromFn<F, S> {
     inner: Arc<S>,
 }
 
-pub fn from_fn<F, S>(f: F, inner: S) -> FromFn<F, S> {
-    FromFn { f, inner: Arc::new(inner) }
+impl<F, S> FromFn<F, S> {
+    pub(crate) fn new(f: F, inner: S) -> Self {
+        Self { f, inner: Arc::new(inner) }
+    }
 }
 
-// ===== HttpService =====
+// ===== Service =====
 
 impl<F, Fut, S> Service<Request> for FromFn<F, S>
 where
@@ -34,7 +39,6 @@ where
 
     type Error = Infallible;
 
-    // type Future = Map<Fut, fn(Fut::Output) -> Result<Response,Infallible>>;
     type Future = FromFnFuture<S, S::Future, Fut>;
 
     fn call(&self, req: Request) -> Self::Future {
@@ -49,13 +53,34 @@ where
     }
 }
 
-// ===== HttpServiceV2 =====
+// ===== Zip =====
+
+impl<F, Fut, S1> Zip for FromFn<F, S1>
+where
+    S1: Zip,
+    F: Fn(Request, Next) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output: IntoResponse> + Send + Sync + 'static,
+{
+    type Output<S2: HttpService> = FromFn<F, S1::Output<S2>>;
+
+    fn zip<S2: HttpService>(self, inner: S2) -> Self::Output<S2> {
+        FromFn {
+            f: self.f,
+            inner: Arc::new(Arc::into_inner(self.inner).expect("somehow cloned").zip(inner)),
+        }
+    }
+}
+
+// ===== Next =====
+
+/// A signal to continue middleware chain.
 #[derive(Debug)]
 pub struct Next {
     shared: Arc<Mutex<Shared>>,
 }
 
 impl Next {
+    /// Continue the middleware chain.
     pub fn next(self, req: Request) -> NextFuture {
         NextFuture { req: Some(req), shared: self.shared }
     }
@@ -75,8 +100,9 @@ impl Shared {
     }
 }
 
+/// A future returned by [`Next::next`];
 #[derive(Debug)]
-#[must_use]
+#[must_use = "future does nothing unless being polled/awaited"]
 pub struct NextFuture {
     req: Option<Request>,
     shared: Arc<Mutex<Shared>>,
