@@ -324,6 +324,16 @@ impl<'de> de::VariantAccess<'de> for UnitOnlyVariantAccess {
     }
 }
 
+// ===== Error =====
+
+impl crate::response::IntoResponse for serde::de::value::Error {
+    fn into_response(self) -> crate::response::Response {
+        (http::StatusCode::BAD_REQUEST, self.to_string()).into_response()
+    }
+}
+
+// ===== Macros =====
+
 macro_rules! forward_parsed_value {
     ($($ty:ident => $method:ident,)*) => {
         $(

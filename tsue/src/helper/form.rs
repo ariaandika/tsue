@@ -111,9 +111,3 @@ impl std::fmt::Display for FormFutureError {
     }
 }
 
-impl IntoResponse for serde_urlencoded::de::Error {
-    fn into_response(self) -> crate::response::Response {
-        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
-    }
-}
-
