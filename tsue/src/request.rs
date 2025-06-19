@@ -46,11 +46,21 @@ pub trait FromRequestParts: Sized {
 
 /// Extension trait for [`Request`].
 pub trait RequestExt {
+    /// Create type that implement [`FromRequestParts`].
+    fn extract_parts<R: FromRequestParts>(&mut self) -> impl Future<Output = Result<R, R::Error>>;
+
     /// Create type that implement [`FromRequest`].
     fn extract<R: FromRequest>(self) -> R::Future;
 }
 
 impl RequestExt for Request {
+    async fn extract_parts<R: FromRequestParts>(&mut self) -> Result<R, R::Error> {
+        let (mut parts,body) = std::mem::take(self).into_parts();
+        let result = R::from_request_parts(&mut parts).await;
+        *self = Request::from_parts(parts, body);
+        result
+    }
+
     fn extract<R: FromRequest>(self) -> R::Future {
         R::from_request(self)
     }
