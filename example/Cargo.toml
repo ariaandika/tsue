@@ -24,3 +24,7 @@ path = "ws.rs"
 [[example]]
 name = "param"
 path = "param.rs"
+
+[[example]]
+name = "middleware"
+path = "middleware.rs"
