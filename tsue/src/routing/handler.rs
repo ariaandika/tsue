@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// functional service
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct HandlerService<F,S> {
     inner: F,
     _s: PhantomData<S>

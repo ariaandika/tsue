@@ -1,7 +1,7 @@
 use http::Uri;
 use crate::request::Request;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Path {
     value: &'static str,
     is_params: bool,

@@ -1,3 +1,5 @@
+// #![deny(missing_docs)]
+#![warn(missing_debug_implementations)]
 //! http server framework
 //!
 //! # Quick Start

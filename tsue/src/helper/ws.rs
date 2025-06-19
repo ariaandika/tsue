@@ -420,6 +420,12 @@ pub struct FrameSendFuture<'a> {
     phase: Phase,
 }
 
+impl<'a> fmt::Debug for FrameSendFuture<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FrameSendFuture").finish_non_exhaustive()
+    }
+}
+
 enum Phase {
     Init,
     Partial(usize),

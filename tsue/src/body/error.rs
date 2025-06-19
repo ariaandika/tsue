@@ -21,6 +21,7 @@ impl From<Kind> for BodyError {
     }
 }
 
+#[derive(Debug)]
 pub enum Kind {
     Incoming(hyper::Error),
     Limited(LengthLimitError),

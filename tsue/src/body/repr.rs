@@ -9,6 +9,7 @@ use std::{
 use super::BodyError;
 
 /// Agnostic implementation of [`http_body::Body`].
+#[derive(Debug)]
 pub enum Repr {
     Incoming(Incoming),
     Full(Bytes),

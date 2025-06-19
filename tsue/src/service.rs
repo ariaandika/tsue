@@ -51,6 +51,7 @@ pub trait Layer<S> {
 // ===== Helpers =====
 
 /// [`Service`] that response with given stats code.
+#[derive(Debug, Clone)]
 pub struct StatusService(pub http::StatusCode);
 
 impl Service<Request> for StatusService {

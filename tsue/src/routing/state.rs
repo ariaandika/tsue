@@ -9,6 +9,7 @@ use super::zip::Zip;
 ///
 /// User typically does not interact with this directly,
 /// instead use the [`Router::state`][super::Router::state] method.
+#[derive(Debug, Clone)]
 pub struct State<T, S> {
     state: T,
     inner: S,

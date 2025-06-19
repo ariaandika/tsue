@@ -22,13 +22,14 @@ type MethodNotAllowed = StatusService;
 /// instead use [`route`] method, or [`get`] or [`post`] function
 ///
 /// [`route`]: super::Router::route
+#[derive(Debug, Clone)]
 pub struct Branch<S, F> {
     filter: Filter,
     inner: S,
     fallback: F,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Filter {
     Path(Path),
     Method(Method),
