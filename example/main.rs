@@ -69,6 +69,17 @@ struct ExampleRes {
     content: String,
 }
 
+#[derive(IntoResponse)]
+#[allow(unused)]
+enum EnumRes {
+    Ok(String),
+    Error {
+        code: http::StatusCode,
+        msg: String,
+    },
+    Unknown,
+}
+
 impl From<ExampleReq> for ExampleRes {
     fn from(ExampleReq { method, uri }: ExampleReq) -> Self {
         ExampleRes { content: format!("{method} {uri}",) }

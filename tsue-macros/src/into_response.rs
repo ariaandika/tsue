@@ -64,8 +64,10 @@ pub(crate) fn into_response(input: DeriveInput) -> Result<proc_macro::TokenStrea
                 Data::Enum(data) => {
                     tokens.extend(quote! { match self });
 
-                    paren(tokens, |tokens|{
+                    brace(tokens, |tokens|{
                         for Variant { ident, fields, .. } in &data.variants {
+                            <Token![Self]>::default().to_tokens(tokens);
+                            <Token![::]>::default().to_tokens(tokens);
                             ident.to_tokens(tokens);
 
                             match fields {
@@ -85,6 +87,8 @@ pub(crate) fn into_response(input: DeriveInput) -> Result<proc_macro::TokenStrea
                                 Fields::Unnamed(f) => paren(tokens, |t|unamed(f, t)),
                                 Fields::Unit => tokens.extend(quote!{()}),
                             });
+
+                            <Token![,]>::default().to_tokens(tokens);
                         }
                     });
                 },
