@@ -6,7 +6,7 @@ use crate::{
     helper::{MatchedRoute, Params},
     request::FromRequestParts,
     response::{IntoResponse, Response},
-    routing::extract::Extractor,
+    routing::extract::Deserializer,
 };
 
 derefm!(<T>|Params<T>| -> T);
@@ -21,7 +21,7 @@ impl<T: DeserializeOwned> FromRequestParts for Params<T> {
             MatchedRoute::extract(&parts.extensions)
                 .map_err(<_>::into_response)
                 .and_then(
-                    |e| match T::deserialize(Extractor::<T>::new(parts.uri.path(), e.0)) {
+                    |e| match T::deserialize(Deserializer::new(parts.uri.path(), e.0)) {
                         Ok(ok) => Ok(Self(ok)),
                         Err(err) => Err(err.into_response()),
                     },
