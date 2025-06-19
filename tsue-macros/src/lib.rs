@@ -3,6 +3,10 @@ use proc_macro::TokenStream;
 mod from_request;
 mod into_response;
 
+// TODO: field attributes
+// - skip to default
+// TODO: FromRequestParts and IntoResponseParts derive
+
 #[proc_macro_derive(FromRequest)]
 pub fn from_request(input: TokenStream) -> TokenStream {
     match from_request::from_request(syn::parse_macro_input!(input as syn::DeriveInput)) {
