@@ -16,7 +16,7 @@ pub trait HttpService:
     Service<
         Request,
         Response = Response,
-        Error: std::error::Error + Send + Sync + 'static,
+        Error = Infallible,
         Future: Send + Sync + 'static,
     > + Send
     + Sync
@@ -26,9 +26,8 @@ pub trait HttpService:
 
 impl<S> HttpService for S
 where
-    S: Service<Request, Response = Response> + Send + Sync + 'static,
+    S: Service<Request, Response = Response, Error = Infallible> + Send + Sync + 'static,
     S::Future: Send + Sync + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
 {
 }
 

@@ -1,11 +1,8 @@
-use futures_util::{
-    FutureExt,
-    future::{Either, Map},
-};
+use futures_util::future::Either;
+use std::convert::Infallible;
 
 use super::{matcher::RequestInternal, zip::Zip};
 use crate::{
-    helper::Either as Either2,
     request::Request,
     response::Response,
     service::{HttpService, Service},
@@ -38,33 +35,16 @@ impl<S, F> Nest<S, F> {
 
 // ===== Service =====
 
-impl<S, F> Service<Request> for Nest<S, F>
-where
-    S: HttpService,
-    F: HttpService,
-{
+impl<S: HttpService, F: HttpService> Service<Request> for Nest<S, F> {
     type Response = Response;
-    type Error = Either2<S::Error, F::Error>;
-    type Future = Either<
-        Map<
-            S::Future,
-            fn(Result<S::Response, S::Error>) -> Result<S::Response, Either2<S::Error, F::Error>>,
-        >,
-        Map<
-            F::Future,
-            fn(Result<F::Response, F::Error>) -> Result<F::Response, Either2<S::Error, F::Error>>,
-        >,
-    >;
+    type Error = Infallible;
+    type Future = Either<S::Future, F::Future>;
 
     fn call(&self, req: Request) -> Self::Future {
         if req.uri().path().starts_with(self.prefix) {
-            Either::Left(
-                self.inner
-                    .call(req.with_prefixed(self.prefix))
-                    .map(|e| e.map_err(Either2::Left)),
-            )
+            Either::Left(self.inner.call(req.with_prefixed(self.prefix)))
         } else {
-            Either::Right(self.fallback.call(req).map(|e| e.map_err(Either2::Right)))
+            Either::Right(self.fallback.call(req))
         }
     }
 }

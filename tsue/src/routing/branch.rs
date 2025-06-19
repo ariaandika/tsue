@@ -1,14 +1,14 @@
-use futures_util::{
-    FutureExt,
-    future::{Either, Map},
-};
+use futures_util::future::Either;
 use http::{Method, StatusCode};
-use std::future::{Ready, ready};
+use std::{
+    convert::Infallible,
+    future::{Ready, ready},
+};
 
 use super::{handler::HandlerService, matcher::Path, zip::Zip};
 use crate::{
     common::log,
-    helper::{Either as Either2, MatchedRoute},
+    helper::MatchedRoute,
     request::{FromRequestParts, Request},
     response::Response,
     service::{HttpService, Service, StatusService},
@@ -51,17 +51,8 @@ fn_router!(delete DELETE "Setup DELETE service.");
 
 impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
     type Response = Response;
-    type Error = Either2<S::Error, F::Error>;
-    type Future = Either<
-        Map<
-            S::Future,
-            fn(Result<S::Response, S::Error>) -> Result<S::Response, Either2<S::Error, F::Error>>,
-        >,
-        Map<
-            F::Future,
-            fn(Result<F::Response, F::Error>) -> Result<F::Response, Either2<S::Error, F::Error>>,
-        >,
-    >;
+    type Error = Infallible;
+    type Future = Either<S::Future, F::Future>;
 
     fn call(&self, mut req: Request) -> Self::Future {
         if match &self.filter {
@@ -71,9 +62,9 @@ impl<S: HttpService, F: HttpService> Service<Request> for Branch<S, F> {
             if let Filter::Path(path) = &self.filter {
                 req.extensions_mut().insert(MatchedRoute(path.value()));
             }
-            Either::Left(self.inner.call(req).map(|e| e.map_err(Either2::Left)))
+            Either::Left(self.inner.call(req))
         } else {
-            Either::Right(self.fallback.call(req).map(|e| e.map_err(Either2::Right)))
+            Either::Right(self.fallback.call(req))
         }
     }
 }
