@@ -1,4 +1,5 @@
-use quote::quote;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote, ToTokens};
 use syn::*;
 
 // the main idea is the last field must implement FromRequest and other fields must implement
@@ -31,82 +32,113 @@ use syn::*;
 pub(crate) fn into_response(input: DeriveInput) -> Result<proc_macro::TokenStream> {
     let DeriveInput { ident, generics, data, .. } = input;
 
-    let assertions = match &data {
-        Data::Struct(DataStruct { fields, .. }) => match fields {
-            Fields::Named(fields) => {
-                let len = fields.named.len();
-                let asserts = fields
-                    .named
-                    .iter()
-                    .take(len.saturating_sub(1))
-                    .map(|e|&e.ty)
-                    .map(|ty| quote! {::tsue::response::assert_rp::<#ty>();});
-                let last = fields
-                    .named
-                    .last()
-                    .map(|e|&e.ty)
-                    .map(|ty| quote! {::tsue::response::assert_rs::<#ty>();});
-                quote! { #(#asserts)* #last }
-            }
-            Fields::Unnamed(fields) => {
-                let len = fields.unnamed.len();
-                let asserts = fields
-                    .unnamed
-                    .iter()
-                    .take(len.saturating_sub(1))
-                    .map(|e|&e.ty)
-                    .map(|ty| quote! {::tsue::response::assert_rp::<#ty>();});
-                let last = fields
-                    .unnamed
-                    .last()
-                    .map(|e|&e.ty)
-                    .map(|ty| quote! {::tsue::response::assert_rs::<#ty>();});
-                quote! { #(#asserts)* #last }
-            }
-            Fields::Unit => quote! {},
-        },
-        Data::Enum(_) => todo!(),
-        _ => return Err(Error::new(ident.span(), "only struct are supported")),
-    };
-
-    let destruct = match &data {
-        Data::Struct(DataStruct { fields, .. }) => match fields {
-            Fields::Named(fields) => {
-                let fields = fields
-                    .named
-                    .iter()
-                    .map(|e|e.ident.as_ref().cloned().expect("named"))
-                    .map(|id| quote! {self.#id});
-                quote! { #(#fields),* }
-            }
-            Fields::Unnamed(fields) => {
-                let fields = fields
-                    .unnamed
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| Index::from(i))
-                    .map(|i| quote! {e.#i});
-                quote! { #(#fields),* }
-            }
-            Fields::Unit => quote! {},
-        },
-        Data::Enum(_) => todo!(),
-        _ => return Err(Error::new(ident.span(), "only struct are supported")),
-    };
+    if matches!(data,Data::Union(_)) {
+        return Err(Error::new(ident.span(), "union are not supported"));
+    }
 
     let (g1, g2, g3) = generics.split_for_impl();
 
-    Ok(quote! {
-        const _: () = {
-            use ::tsue::response::IntoResponse;
-            #assertions
-            #[automatically_derived]
-            impl #g1 IntoResponse for #ident #g2 #g3 {
-                fn into_response(self) -> ::tsue::response::Response {
-                    (#destruct).into_response()
+    let mut tokens = quote! {
+        #[automatically_derived]
+        impl #g1 ::tsue::response::IntoResponse for #ident #g2 #g3
+    };
+
+    brace(&mut tokens, |tokens|{
+        tokens.extend(quote! {
+            fn into_response(self) -> ::tsue::response::Response
+        });
+
+        brace(tokens, |tokens|{
+            match &data {
+                Data::Struct(data) => {
+                    tokens.extend(quote! {
+                        ::tsue::response::IntoResponse::into_response
+                    });
+
+                    paren(tokens, |tokens| match &data.fields {
+                        Fields::Named(f) => paren(tokens, |t|self_named(f, t)),
+                        Fields::Unnamed(f) => paren(tokens, |t|self_unamed(f, t)),
+                        Fields::Unit => <Token![self]>::default().to_tokens(tokens),
+                    });
                 }
+                Data::Enum(data) => {
+                    tokens.extend(quote! { match self });
+
+                    paren(tokens, |tokens|{
+                        for Variant { ident, fields, .. } in &data.variants {
+                            ident.to_tokens(tokens);
+
+                            match fields {
+                                Fields::Named(f) => brace(tokens, |t|named(f, t)),
+                                Fields::Unnamed(f) => paren(tokens, |t|unamed(f, t)),
+                                Fields::Unit => {}
+                            }
+
+                            <Token![=>]>::default().to_tokens(tokens);
+
+                            tokens.extend(quote! {
+                                ::tsue::response::IntoResponse::into_response
+                            });
+
+                            paren(tokens, |tokens| match fields {
+                                Fields::Named(f) => paren(tokens, |t|named(f, t)),
+                                Fields::Unnamed(f) => paren(tokens, |t|unamed(f, t)),
+                                Fields::Unit => tokens.extend(quote!{()}),
+                            });
+                        }
+                    });
+                },
+                Data::Union(_) => unreachable!(),
             }
-        };
-    }
-    .into())
+        });
+    });
+
+    Ok(tokens.into())
 }
+
+fn named(fields: &FieldsNamed, tokens: &mut TokenStream) {
+    for field in &fields.named {
+        field.ident.as_ref().expect("named").to_tokens(tokens);
+        <Token![,]>::default().to_tokens(tokens);
+    }
+}
+
+fn unamed(fields: &FieldsUnnamed, tokens: &mut TokenStream) {
+    for (i,_) in fields.unnamed.iter().enumerate() {
+        let idx = format_ident!("_{i}");
+        tokens.extend(quote! { #idx, });
+    }
+}
+
+fn self_named(fields: &FieldsNamed, tokens: &mut TokenStream) {
+    for field in &fields.named {
+        let id = field.ident.as_ref().cloned().expect("named");
+        tokens.extend(quote! {
+            self.#id,
+        });
+    }
+}
+
+fn self_unamed(fields: &FieldsUnnamed, tokens: &mut TokenStream) {
+    for (i,_) in fields.unnamed.iter().enumerate() {
+        let idx = Index::from(i);
+        tokens.extend(quote! { self.#idx, });
+    }
+}
+
+// ===== Utils =====
+
+fn brace<F>(tokens: &mut TokenStream, call: F)
+where
+    F: FnOnce(&mut TokenStream)
+{
+    token::Brace::default().surround(tokens, call);
+}
+
+fn paren<F>(tokens: &mut TokenStream, call: F)
+where
+    F: FnOnce(&mut TokenStream)
+{
+    token::Paren::default().surround(tokens, call);
+}
+

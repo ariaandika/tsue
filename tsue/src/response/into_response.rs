@@ -4,8 +4,6 @@ use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE, response};
 use super::{IntoResponse, IntoResponseParts, Parts, Response};
 use crate::common::log;
 
-use macros::{headers, into_response_tuple, part, res};
-
 // ===== Blanket Implementation =====
 
 /// Anything that implement [`IntoResponseParts`] also implement [`IntoResponse`].
@@ -22,6 +20,15 @@ impl<R: IntoResponseParts> IntoResponse for R {
 part!((), (self,parts) => {});
 part!(std::convert::Infallible, (self) => match self { });
 part!(StatusCode, mut (self,parts) => parts.status = self);
+
+impl<R> IntoResponse for (R,)
+where
+    R: IntoResponse,
+{
+    fn into_response(self) -> Response {
+        self.0.into_response()
+    }
+}
 
 into_response_tuple!(R1, R2, R3, R4, R5, R6, R7, R8,);
 
@@ -97,72 +104,70 @@ res!(String, self => (UTF8,Bytes::from(self)).into_response());
 
 // ===== Macros =====
 
-mod macros {
-    macro_rules! part {
-        ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident) => $body:expr) => {
-            part!(@ $target, $($mut)* $(, $mut2)* ($self,_part) => $body);
-        };
-        ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident,$part:ident) => $body:expr) => {
-            part!(@ $target, $($mut)* $(, $mut2)* ($self,$part) => { $body; $part });
-        };
-        (@ $target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident,$part:ident) => $body:expr) => {
-            impl IntoResponseParts for $target {
-                fn into_response_parts($($mut2)* $self, $($mut)* $part: Parts) -> Parts {
-                    $body
-                }
+macro_rules! part {
+    ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident) => $body:expr) => {
+        part!(@ $target, $($mut)* $(, $mut2)* ($self,_part) => $body);
+    };
+    ($target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident,$part:ident) => $body:expr) => {
+        part!(@ $target, $($mut)* $(, $mut2)* ($self,$part) => { $body; $part });
+    };
+    (@ $target:ty, $($mut:ident)* $(, $mut2:ident)* ($self:ident,$part:ident) => $body:expr) => {
+        impl IntoResponseParts for $target {
+            fn into_response_parts($($mut2)* $self, $($mut)* $part: Parts) -> Parts {
+                $body
             }
-        };
-    }
-
-    macro_rules! res {
-        ($target:ty, $self:ident => $body:expr) => {
-            impl IntoResponse for $target {
-                fn into_response($self) -> Response {
-                    $body
-                }
-            }
-        };
-    }
-
-    macro_rules! headers {
-        (
-            |$h1:ident: $t1:ty|$b1:expr;
-            |$h2:ident: $t2:ty|$b2:expr;
-        ) => {
-            impl<const N: usize> IntoResponseParts for [($t1, $t2); N] {
-                fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
-                    for ($h1, $h2) in self {
-                        parts.headers.append($b1, $b2);
-                    }
-                    parts
-                }
-            }
-        };
-    }
-
-    macro_rules! into_response_tuple {
-        (@$($r:ident,)*) => {
-            impl<$($r,)*R> IntoResponse for ($($r,)*R)
-            where
-                $($r: IntoResponseParts,)*
-                R: IntoResponse,
-            {
-                fn into_response(self) -> Response {
-                    #![allow(non_snake_case)]
-                    let ($($r,)*r) = self;
-                    let (mut parts,body) = r.into_response().into_parts();
-                    $(parts = $r.into_response_parts(parts);)*
-                    Response::from_parts(parts, body)
-                }
-            }
-        };
-        () => { };
-        ($r:ident,$($r2:ident,)*) => {
-            into_response_tuple!($($r2,)*);
-            into_response_tuple!(@ $r, $($r2,)*);
-        };
-    }
-
-    pub(crate) use {part, res, into_response_tuple, headers};
+        }
+    };
 }
+
+macro_rules! res {
+    ($target:ty, $self:ident => $body:expr) => {
+        impl IntoResponse for $target {
+            fn into_response($self) -> Response {
+                $body
+            }
+        }
+    };
+}
+
+macro_rules! headers {
+    (
+        |$h1:ident: $t1:ty|$b1:expr;
+        |$h2:ident: $t2:ty|$b2:expr;
+    ) => {
+        impl<const N: usize> IntoResponseParts for [($t1, $t2); N] {
+            fn into_response_parts(self, mut parts: response::Parts) -> response::Parts {
+                for ($h1, $h2) in self {
+                    parts.headers.append($b1, $b2);
+                }
+                parts
+            }
+        }
+    };
+}
+
+macro_rules! into_response_tuple {
+    (@$($r:ident,)*) => {
+        impl<$($r,)*R> IntoResponse for ($($r,)*R)
+        where
+            $($r: IntoResponseParts,)*
+            R: IntoResponse,
+        {
+            fn into_response(self) -> Response {
+                #![allow(non_snake_case)]
+                let ($($r,)*r) = self;
+                let (mut parts,body) = r.into_response().into_parts();
+                $(parts = $r.into_response_parts(parts);)*
+                Response::from_parts(parts, body)
+            }
+        }
+    };
+    () => { };
+    ($r:ident,$($r2:ident,)*) => {
+        into_response_tuple!($($r2,)*);
+        into_response_tuple!(@ $r, $($r2,)*);
+    };
+}
+
+use {part, res, into_response_tuple, headers};
 
