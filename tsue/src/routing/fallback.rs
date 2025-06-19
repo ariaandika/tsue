@@ -22,7 +22,7 @@ use crate::{
 /// Implement zip that just swap with given service.
 ///
 /// This allow router merging.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Fallback;
 
 // ===== Service =====

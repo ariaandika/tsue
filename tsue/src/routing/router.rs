@@ -1,7 +1,8 @@
-use super::{State, branch::Branch, fallback::Fallback, nest::Nest, zip::Zip};
+use super::{State, branch::Branch, fallback::Fallback, middleware::FromFn, nest::Nest, zip::Zip};
 use crate::{
     request::Request,
     response::Response,
+    routing::middleware::from_fn,
     service::{HttpService, Layer, Service},
 };
 
@@ -16,8 +17,6 @@ impl Router<Fallback> {
     pub fn new() -> Self {
         Router { inner: Fallback }
     }
-
-    // TODO: create separate type for Nested
 
     /// Create new nested `Router`.
     pub fn nested(prefix: &'static str) -> Router<Nest<Fallback, Fallback>> {
@@ -46,6 +45,18 @@ impl<S> Router<S> {
     pub fn route<R>(self, path: &'static str, route: R) -> Router<Branch<R, S>> {
         Router {
             inner: Branch::new(path, route, self.inner),
+        }
+    }
+
+    /// Register new route.
+    pub fn middleware<F, Fut>(self, f: F) -> Router<FromFn<F, S>>
+    where
+        F: Fn(Request, S) -> Fut,
+        Fut: Future,
+        S: 'static,
+    {
+        Router {
+            inner: from_fn(f, self.inner),
         }
     }
 

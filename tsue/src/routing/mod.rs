@@ -243,6 +243,7 @@ mod zip;
 // core routings
 mod router;
 mod fallback;
+mod middleware;
 mod branch;
 mod nest;
 
