@@ -261,6 +261,7 @@ mod adapter;
 pub(crate) use zip::Zip;
 
 pub use router::Router;
+pub use middleware::{Next, NextFuture, from_fn, FromFn, FromFnFuture};
 pub use branch::{get, post, put, patch, delete};
 pub use state::State;
 

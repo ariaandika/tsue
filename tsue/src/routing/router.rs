@@ -1,8 +1,10 @@
-use super::{State, branch::Branch, fallback::Fallback, middleware::FromFn, nest::Nest, zip::Zip};
+use super::{
+    Next, State, branch::Branch, fallback::Fallback, middleware::FromFn, middleware::from_fn,
+    nest::Nest, zip::Zip,
+};
 use crate::{
     request::Request,
-    response::Response,
-    routing::middleware::from_fn,
+    response::{IntoResponse, Response},
     service::{HttpService, Layer, Service},
 };
 
@@ -51,9 +53,8 @@ impl<S> Router<S> {
     /// Register new route.
     pub fn middleware<F, Fut>(self, f: F) -> Router<FromFn<F, S>>
     where
-        F: Fn(Request, S) -> Fut,
-        Fut: Future,
-        S: 'static,
+        F: Fn(Request, Next) -> Fut,
+        Fut: Future<Output: IntoResponse>,
     {
         Router {
             inner: from_fn(f, self.inner),
