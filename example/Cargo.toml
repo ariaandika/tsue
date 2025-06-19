@@ -20,3 +20,7 @@ path = "main.rs"
 [[example]]
 name = "ws"
 path = "ws.rs"
+
+[[example]]
+name = "param"
+path = "param.rs"
