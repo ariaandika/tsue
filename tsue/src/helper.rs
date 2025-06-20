@@ -68,14 +68,17 @@ pub struct Redirect {
     location: String,
 }
 
-/// WebSocket Service handler.
+/// WebSocket Upgrade.
 #[cfg(all(feature = "tokio", feature = "ws"))]
 #[derive(Debug)]
 pub struct WsUpgrade {
     req: crate::request::Request,
 }
 
-/// Sum type for [`Error`][1], [`Debug`][3], [`Display`][4], and [`IntoResponse`][2].
+#[cfg(all(feature = "tokio", feature = "ws"))]
+pub use ws::WebSocket;
+
+/// Sum type for [`Error`][1], [`Debug`][3], [`Display`][4], [`Future`], and [`IntoResponse`][2].
 ///
 /// [1]: std::error::Error
 /// [2]: crate::response::IntoResponse

@@ -1,5 +1,6 @@
 use base64ct::{Base64, Encoding};
 use bytes::{Buf, BytesMut};
+use futures_core::Stream;
 use http::{
     HeaderMap, HeaderValue, StatusCode,
     header::{CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE},
@@ -111,6 +112,7 @@ pub struct WebSocket {
     closed: bool,
     read_buf: BytesMut,
     write_buf: BytesMut,
+    fragment: Option<Frame>,
 }
 
 impl WebSocket {
@@ -120,6 +122,7 @@ impl WebSocket {
             closed: false,
             read_buf: BytesMut::with_capacity(512),
             write_buf: BytesMut::with_capacity(512),
+            fragment: None,
         }
     }
 }
@@ -176,6 +179,35 @@ impl WebSocket {
             }
 
             return Ok(frame)
+        }
+    }
+
+    fn poll_message(&mut self, cx: &mut std::task::Context) -> Poll<io::Result<Frame>> {
+        loop {
+            let frame = ready!(self.poll_frame(cx)?);
+            let frags = self.fragment.take();
+
+            if frags.is_some() && frame.opcode() != OpCode::Continuation {
+                return Poll::Ready(Err(io_err!("fragment frame did not followed by continuation frame")))
+            }
+
+            match (frags, frame.fin()) {
+                (None, true) => {
+                    return Poll::Ready(Ok(frame))
+                },
+                (None, false) => {
+                    self.fragment = Some(frame);
+                },
+                (Some(mut frags), true) => {
+                    frags.payload_mut().unsplit(frame.into_payload());
+                    return Poll::Ready(Ok(frags))
+                },
+                (Some(mut frags), false) => {
+                    frags.payload_mut().unsplit(frame.into_payload());
+                    self.fragment = Some(frags);
+                },
+            }
+
         }
     }
 
@@ -534,6 +566,13 @@ impl IntoResponse for WsUpgradeError {
     }
 }
 
+impl Stream for WebSocket {
+    type Item = io::Result<Frame>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
+        self.get_mut().poll_message(cx).map(Some)
+    }
+}
 
 // ===== Macros =====
 
