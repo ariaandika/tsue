@@ -1,8 +1,8 @@
 //! functional route
-use futures_util::{FutureExt, future::Map};
 use std::{convert::Infallible, marker::PhantomData};
 
 use crate::{
+    futures::Map,
     request::{FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
     service::Service,
@@ -21,16 +21,16 @@ impl<F, S> HandlerService<F, S> {
     }
 }
 
-impl<F,S> Service<Request> for HandlerService<F,S>
+impl<F, S> Service<Request> for HandlerService<F, S>
 where
     F: Handler<S>,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Map<<F as Handler<S>>::Future, fn(Response) -> Result<Response,Infallible>>;
+    type Future = Map<<F as Handler<S>>::Future, fn(Response) -> Result<Response, Infallible>>;
 
     fn call(&self, req: Request) -> Self::Future {
-        self.inner.handle(req).map(Ok)
+        Map::new(self.inner.handle(req), Ok)
     }
 }
 
@@ -44,7 +44,7 @@ pub trait Handler<S> {
     fn handle(&self, req: Request) -> Self::Future;
 }
 
-impl<F,Fut> Handler<()> for F
+impl<F, Fut> Handler<()> for F
 where
     F: FnOnce() -> Fut + Clone,
     Fut: Future,
@@ -53,7 +53,7 @@ where
     type Future = Map<Fut, fn(Fut::Output) -> Response>;
 
     fn handle(&self, _: Request) -> Self::Future {
-        self.clone()().map(IntoResponse::into_response)
+        Map::new(self.clone()(), <_>::into_response)
     }
 }
 

@@ -1,4 +1,3 @@
-use futures_util::FutureExt;
 use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -8,6 +7,8 @@ use super::{Json, macros::derefm};
 use crate::{
     body::BodyError,
     common::log,
+    futures::Map,
+    helper::Either,
     request::{FromRequest, Request},
     response::{IntoResponse, Response},
 };
@@ -28,8 +29,8 @@ fn validate(req: &Request) -> Option<()> {
 type JsonMap<V = Value> =
     fn(Result<crate::body::Collected, BodyError>) -> Result<V, JsonFutureError>;
 
-type JsonFuture<V = Value> = futures_util::future::Either<
-    futures_util::future::Map<crate::body::Collect, JsonMap<V>>,
+type JsonFuture<V = Value> = Either<
+    Map<crate::body::Collect, JsonMap<V>>,
     std::future::Ready<Result<V, JsonFutureError>>,
 >;
 
@@ -39,12 +40,11 @@ impl FromRequest for Value {
 
     fn from_request(req: Request) -> Self::Future {
         match validate(&req) {
-            Some(()) => req
-                .into_body()
-                .collect_body()
-                .map((|e| serde_json::from_slice(&e?.into_bytes()).map_err(Into::into)) as JsonMap)
-                .left_future(),
-            None => ready(Err(JsonFutureError::ContentType)).right_future(),
+            Some(()) => Either::Left(Map::new(
+                req.into_body().collect_body(),
+                (|e| serde_json::from_slice(&e?.into_bytes()).map_err(Into::into)) as JsonMap,
+            )),
+            None => Either::Right(ready(Err(JsonFutureError::ContentType))),
         }
     }
 }
@@ -55,12 +55,11 @@ impl<T: DeserializeOwned> FromRequest for Json<T> {
 
     fn from_request(req: Request) -> Self::Future {
         match validate(&req) {
-            Some(()) => req
-                .into_body()
-                .collect_body()
-                .map((|e| Ok(Json(serde_json::from_slice(&e?.into_bytes_mut())?))) as JsonMap<Json<T>>)
-                .left_future(),
-            None => ready(Err(JsonFutureError::ContentType)).right_future(),
+            Some(()) => Either::Left(Map::new(
+                req.into_body().collect_body(),
+                (|e| Ok(Json(serde_json::from_slice(&e?.into_bytes_mut())?))) as JsonMap<Json<T>>,
+            )),
+            None => Either::Right(ready(Err(JsonFutureError::ContentType))),
         }
     }
 }

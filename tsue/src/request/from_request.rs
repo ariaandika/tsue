@@ -1,6 +1,5 @@
 //! `Futures` and `Error` types.
 use bytes::{Bytes, BytesMut};
-use futures_util::{FutureExt, future::Map};
 use http::{Extensions, HeaderMap, Method, StatusCode, Uri, Version};
 use std::{
     convert::Infallible,
@@ -12,10 +11,9 @@ use std::{
 use super::{FromRequest, FromRequestParts, Parts, Request};
 use crate::{
     body::{Body, BodyError, Collect, Collected},
+    futures::Map,
     response::{IntoResponse, Response},
 };
-
-use macros::{from, parts, req};
 
 // ===== Blanket Implementation =====
 
@@ -55,42 +53,42 @@ req! {
     Bytes,
     Error = BodyError;
     Future = BodyMap<Bytes>;
-    |req|req.into_body().collect_body().map(|e|Ok(e?.into_bytes()))
+    |req|Map::new(req.into_body().collect_body(), |e|Ok(e?.into_bytes()))
 }
 
 req! {
     BytesMut,
     Error = BodyError;
     Future = BodyMap<BytesMut>;
-    |req|req.into_body().collect_body().map(|e|Ok(e?.into_bytes_mut()))
+    |req|Map::new(req.into_body().collect_body(), |e|Ok(e?.into_bytes_mut()))
 }
 
 req! {
     Box<[u8]>,
     Error = BodyError;
     Future = BodyMap<Box<[u8]>>;
-    |req|req.into_body().collect_body().map(|e|Ok(Vec::from(e?.into_bytes_mut()).into_boxed_slice()))
+    |req|Map::new(req.into_body().collect_body(), |e|Ok(Vec::from(e?.into_bytes_mut()).into_boxed_slice()))
 }
 
 req! {
     Vec<u8>,
     Error = BodyError;
     Future = BodyMap<Vec<u8>>;
-    |req|req.into_body().collect_body().map(|e|Ok(e?.into_bytes_mut().into()))
+    |req|Map::new(req.into_body().collect_body(), |e|Ok(e?.into_bytes_mut().into()))
 }
 
 req! {
     Box<str>,
     Error = StringFutureError;
     Future = BodyMap<Box<str>, StringFutureError>;
-    |req|req.into_body().collect_body().map(|e|Ok(String::from_utf8(e?.into_bytes_mut().into())?.into_boxed_str()))
+    |req|Map::new(req.into_body().collect_body(), |e|Ok(String::from_utf8(e?.into_bytes_mut().into())?.into_boxed_str()))
 }
 
 req! {
     String,
     Error = StringFutureError;
     Future = BodyMap<String, StringFutureError>;
-    |req|req.into_body().collect_body().map(|e|Ok(String::from_utf8(e?.into_bytes_mut().into())?))
+    |req|Map::new(req.into_body().collect_body(), |e|Ok(String::from_utf8(e?.into_bytes_mut().into())?))
 }
 
 // ===== Errors =====
@@ -124,49 +122,47 @@ impl fmt::Display for StringFutureError {
 
 // ===== Macros =====
 
-mod macros {
-    macro_rules! parts {
-        ($self:ty, |$parts:pat_param|$body:expr) => {
-            impl FromRequestParts for $self {
-                type Error = Infallible;
-                type Future = Ready<Result<Self,Self::Error>>;
-                fn from_request_parts($parts: &mut Parts) -> Self::Future { ready(Ok($body)) }
-            }
-        };
-        ($self:ty, $($id:ident = $t:ty;)* |$parts:pat_param|$body:expr) => {
-            impl FromRequestParts for $self {
-                $(type $id = $t;)*
-                fn from_request_parts($parts: &mut Parts) -> Self::Future { $body }
-            }
-        };
-    }
-
-    macro_rules! req {
-        ($self:ty, |$req:pat_param|$body:expr) => {
-            impl FromRequest for $self {
-                type Error = Infallible;
-                type Future = Ready<Result<Self,Self::Error>>;
-                fn from_request($req: Request) -> Self::Future { ready(Ok($body)) }
-            }
-        };
-        ($self:ty, $($id:ident = $t:ty;)* |$req:pat_param|$body:expr) => {
-            impl FromRequest for $self {
-                $(type $id = $t;)*
-                fn from_request($req: Request) -> Self::Future { $body }
-            }
-        };
-    }
-
-    macro_rules! from {
-        ($id:ident, $fr:ty: $pat:pat => $body:expr) => {
-            impl From<$fr> for $id {
-                fn from($pat: $fr) -> Self {
-                    $body
-                }
-            }
-        };
-    }
-
-    pub(crate) use {parts, req, from};
+macro_rules! parts {
+    ($self:ty, |$parts:pat_param|$body:expr) => {
+        impl FromRequestParts for $self {
+            type Error = Infallible;
+            type Future = Ready<Result<Self,Self::Error>>;
+            fn from_request_parts($parts: &mut Parts) -> Self::Future { ready(Ok($body)) }
+        }
+    };
+    ($self:ty, $($id:ident = $t:ty;)* |$parts:pat_param|$body:expr) => {
+        impl FromRequestParts for $self {
+            $(type $id = $t;)*
+            fn from_request_parts($parts: &mut Parts) -> Self::Future { $body }
+        }
+    };
 }
+
+macro_rules! req {
+    ($self:ty, |$req:pat_param|$body:expr) => {
+        impl FromRequest for $self {
+            type Error = Infallible;
+            type Future = Ready<Result<Self,Self::Error>>;
+            fn from_request($req: Request) -> Self::Future { ready(Ok($body)) }
+        }
+    };
+    ($self:ty, $($id:ident = $t:ty;)* |$req:pat_param|$body:expr) => {
+        impl FromRequest for $self {
+            $(type $id = $t;)*
+            fn from_request($req: Request) -> Self::Future { $body }
+        }
+    };
+}
+
+macro_rules! from {
+    ($id:ident, $fr:ty: $pat:pat => $body:expr) => {
+        impl From<$fr> for $id {
+            fn from($pat: $fr) -> Self {
+                $body
+            }
+        }
+    };
+}
+
+use {parts, req, from};
 

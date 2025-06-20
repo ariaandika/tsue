@@ -1,4 +1,3 @@
-use futures_util::future::Either;
 use http::{Method, StatusCode};
 use std::{
     convert::Infallible,
@@ -8,7 +7,7 @@ use std::{
 use super::{handler::HandlerService, matcher::Path, zip::Zip};
 use crate::{
     common::log,
-    helper::MatchedRoute,
+    helper::{Either, MatchedRoute},
     request::{FromRequestParts, Request},
     response::Response,
     service::{HttpService, Service, StatusService},

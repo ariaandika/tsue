@@ -1,11 +1,11 @@
-use futures_util::FutureExt;
 use http::{StatusCode, header::CONTENT_TYPE};
 use serde::de::DeserializeOwned;
 use std::future::ready;
 
-use super::{Form, macros::derefm};
+use super::{Either, Form, macros::derefm};
 use crate::{
     body::BodyError,
+    futures::Map,
     request::{FromRequest, Request},
     response::IntoResponse,
 };
@@ -25,8 +25,8 @@ fn validate(req: &Request) -> Option<()> {
 
 type FormMap<V> = fn(Result<crate::body::Collected, BodyError>) -> Result<Form<V>, FormFutureError>;
 
-type FormFuture<V> = futures_util::future::Either<
-    futures_util::future::Map<crate::body::Collect, FormMap<V>>,
+type FormFuture<V> = Either<
+    Map<crate::body::Collect, FormMap<V>>,
     std::future::Ready<Result<Form<V>, FormFutureError>>,
 >;
 
@@ -36,12 +36,11 @@ impl<T: DeserializeOwned> FromRequest for Form<T> {
 
     fn from_request(req: Request) -> Self::Future {
         match validate(&req) {
-            Some(()) => req
-                .into_body()
-                .collect_body()
-                .map((|e| Ok(Form(serde_urlencoded::from_bytes(&e?.into_bytes_mut())?))) as FormMap<T>)
-                .left_future(),
-            None => ready(Err(FormFutureError::ContentType)).right_future(),
+            Some(()) => Either::Left(Map::new(
+                req.into_body().collect_body(),
+                (|e| Ok(Form(serde_urlencoded::from_bytes(&e?.into_bytes_mut())?))) as FormMap<T>,
+            )),
+            None => Either::Right(ready(Err(FormFutureError::ContentType))),
         }
     }
 }

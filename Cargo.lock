@@ -767,7 +767,6 @@ version = "0.1.0"
 dependencies = [
  "base64ct",
  "bytes",
- "futures-util",
  "http",
  "http-body",
  "hyper",

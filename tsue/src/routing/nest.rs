@@ -1,8 +1,8 @@
-use futures_util::future::Either;
 use std::convert::Infallible;
 
 use super::{matcher::RequestInternal, zip::Zip};
 use crate::{
+    helper::Either,
     request::Request,
     response::Response,
     service::{HttpService, Service},
