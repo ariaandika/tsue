@@ -327,9 +327,6 @@ mod handler;
 // utilities
 mod state;
 
-#[cfg(feature = "tokio")]
-mod adapter;
-
 // ===== reexports =====
 
 pub(crate) use zip::Zip;
@@ -338,9 +335,6 @@ pub use router::Router;
 pub use middleware::{Next, NextFuture};
 pub use branch::{get, post, put, patch, delete};
 pub use state::State;
-
-#[cfg(feature = "tokio")]
-pub(crate) use adapter::Hyper;
 
 #[doc(inline)]
 pub use crate::service::RouterService;
