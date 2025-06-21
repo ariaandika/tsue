@@ -1,3 +1,8 @@
+//! Utility types.
+mod bytestr;
+
+pub use bytestr::ByteStr;
+
 macro_rules! log {
     ($($tt:tt)*) => {
         {

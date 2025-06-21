@@ -22,7 +22,7 @@
 //!     println!("Client sends: {body}");
 //! }
 //! ```
-mod common;
+pub mod common;
 pub mod http;
 pub mod body;
 pub mod request;
