@@ -23,6 +23,7 @@
 //! }
 //! ```
 mod common;
+pub mod http;
 pub mod body;
 pub mod request;
 pub mod response;
