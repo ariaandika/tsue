@@ -44,6 +44,8 @@ impl Method {
     }
 }
 
+// ===== Error =====
+
 #[derive(Debug)]
 pub struct UnknownMethod;
 
