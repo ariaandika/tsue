@@ -59,6 +59,7 @@ impl HeaderMap {
         self.entries.len() + self.extra_len as usize
     }
 
+    /// Returns `true` if headers has no element.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -327,8 +328,8 @@ mod test {
         assert!(map.contains_key(&HeaderName::new("rim")));
 
         let mut all = map.get_all(HeaderName::new("content-length"));
-        assert!(matches!(all.next(), Some(v) if matches!(v.as_str(),Ok("LEN"))));
-        assert!(matches!(all.next(), Some(v) if matches!(v.as_str(),Ok("BAR"))));
+        assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("LEN"))));
+        assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("BAR"))));
         assert!(all.next().is_none());
 
         assert!(map.remove(HeaderName::new("accept")).is_some());

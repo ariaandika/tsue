@@ -109,14 +109,14 @@ pub struct GetAll<'a> {
 }
 
 impl<'a> GetAll<'a> {
-    pub fn new(entry: &'a Entry) -> Self {
+    pub(crate) fn new(entry: &'a Entry) -> Self {
         Self {
             next: entry.next,
             entry: Some(entry),
         }
     }
 
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             entry: None,
             next: std::ptr::null(),

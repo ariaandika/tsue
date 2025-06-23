@@ -138,6 +138,12 @@ impl PartialEq<&str> for ByteStr {
     }
 }
 
+impl From<ByteStr> for Bytes {
+    fn from(value: ByteStr) -> Self {
+        value.into_bytes()
+    }
+}
+
 impl From<&'static str> for ByteStr {
     fn from(value: &'static str) -> Self {
         Self::from_static(value)

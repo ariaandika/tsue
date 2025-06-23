@@ -5,8 +5,8 @@ mod entry;
 mod map;
 mod iter;
 
-pub use name::{HeaderName, AsHeaderName};
-pub use value::{HeaderValue, Sequence};
+pub use name::{HeaderName, AsHeaderName, IntoHeaderName};
+pub use value::{HeaderValue, InvalidHeaderValue};
 pub use map::HeaderMap;
 pub use entry::{Entry, GetAll};
 pub use iter::Iter;

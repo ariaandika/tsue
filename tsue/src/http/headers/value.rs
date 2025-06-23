@@ -3,6 +3,8 @@ use std::{mem::take, str::{from_utf8, FromStr}};
 
 use crate::common::ByteStr;
 
+// ===== HeaderValue =====
+
 /// HTTP Header Value.
 pub struct HeaderValue {
     repr: Repr,
@@ -13,21 +15,13 @@ enum Repr {
     Str(ByteStr),
 }
 
-macro_rules! valid {
-    ($b:tt) => {
-        if $b >= 32 && $b != 127 || $b == b'\t' {
-        } else {
-            return Err(ERROR);
-        }
-    };
-}
-
 impl HeaderValue {
+    /// used in iterator.
     pub(crate) const PLACEHOLDER: Self = Self {
         repr: Repr::Bytes(Bytes::new()),
     };
 
-    /// Parse [`HeaderValue`] from [`Bytes`].
+    /// Parse [`HeaderValue`] from slice.
     pub fn try_from_slice(value: impl Into<Bytes>) -> Result<Self, InvalidHeaderValue> {
         let bytes: Bytes = value.into();
         for &b in &bytes {
@@ -38,7 +32,12 @@ impl HeaderValue {
         })
     }
 
-    /// Parse [`HeaderValue`] from [`ByteStr`].
+    /// Parse [`HeaderValue`] from string.
+    ///
+    /// This will cache the result and make [`to_str`] and [`as_str`] infallible.
+    ///
+    /// [`to_str`]: HeaderValue::to_str
+    /// [`as_str`]: HeaderValue::as_str
     pub fn try_from_string(value: impl Into<ByteStr>) -> Result<HeaderValue, InvalidHeaderValue> {
         let value = value.into();
         for &b in value.as_bytes() {
@@ -55,15 +54,25 @@ impl HeaderValue {
     }
 
     /// Parse [`HeaderValue`] by copying from str.
+    ///
+    /// This will cache the result and make [`to_str`] and [`as_str`] infallible.
+    ///
+    /// [`to_str`]: HeaderValue::to_str
+    /// [`as_str`]: HeaderValue::as_str
     pub fn try_copy_from_string(value: &str) -> Result<HeaderValue, InvalidHeaderValue> {
         Self::try_from_string(ByteStr::copy_from_str(value))
     }
 
     /// Parse [`HeaderValue`] from [`ByteStr`].
     ///
+    /// This will cache the result and make [`to_str`] and [`as_str`] infallible.
+    ///
     /// # Panics
     ///
     /// This function will panic if header contains invalid character.
+    ///
+    /// [`to_str`]: HeaderValue::to_str
+    /// [`as_str`]: HeaderValue::as_str
     pub fn from_string(value: impl Into<ByteStr>) -> HeaderValue {
         Self::try_from_string(value).expect("failed to parse header")
     }
@@ -76,30 +85,41 @@ impl HeaderValue {
         }
     }
 
+    /// Parse value as [`str`].
+    ///
+    /// # Panics
+    ///
+    /// Panic if header value is not a valid utf8.
+    pub fn as_str(&self) -> &str {
+        self.try_as_str().expect("cannot convert header value as utf8 string")
+    }
+
     /// Try to parse value as [`str`].
-    pub fn as_str(&self) -> Result<&str, std::str::Utf8Error> {
+    pub fn try_as_str(&self) -> Result<&str, std::str::Utf8Error> {
         match &self.repr {
             Repr::Bytes(b) => from_utf8(b),
             Repr::Str(s) => Ok(s),
         }
     }
 
+    /// Parse value as [`str`] and cache the result.
+    ///
+    /// # Panics
+    ///
+    /// Panic if header value is not a valid utf8.
+    pub fn to_str(&mut self) -> &str {
+        self.try_to_str().expect("cannot convert header value as utf8 string")
+    }
+
     /// Try to parse value as [`str`] and cache the result.
-    pub fn to_str(&mut self) -> Result<&str, std::str::Utf8Error> {
+    pub fn try_to_str(&mut self) -> Result<&str, std::str::Utf8Error> {
         match self.repr {
             Repr::Bytes(ref mut b) => {
                 let s = ByteStr::from_utf8(take(b))?;
                 self.repr = Repr::Str(s);
-                self.as_str()
+                self.try_as_str()
             }
             Repr::Str(ref s) => Ok(s.as_str()),
-        }
-    }
-
-    /// Parse `"; "` separated value as [`Iterator`].
-    pub fn as_sequence(&self) -> Sequence {
-        Sequence {
-            value: self.as_str().ok().map(|e| e.split("; ")),
         }
     }
 }
@@ -122,13 +142,11 @@ impl std::fmt::Debug for HeaderValue {
 
 // ===== Error =====
 
+/// An error that can occur when inseting header value.
+#[non_exhaustive]
 pub struct InvalidHeaderValue {
-    _p: ()
-}
 
-const ERROR: InvalidHeaderValue = InvalidHeaderValue {
-    _p: ()
-};
+}
 
 impl std::error::Error for InvalidHeaderValue { }
 
@@ -144,21 +162,16 @@ impl std::fmt::Debug for InvalidHeaderValue {
     }
 }
 
-// ===== Sequence =====
+// ===== Macros =====
 
-/// Parse `"; "` separated value as [`Iterator`].
-///
-/// This struct is returned from [`as_sequence`][HeaderValue::as_sequence].
-#[derive(Debug)]
-pub struct Sequence<'a> {
-    value: Option<std::str::Split<'a,&'static str>>,
+macro_rules! valid {
+    ($b:tt) => {
+        if $b >= 32 && $b != 127 || $b == b'\t' {
+        } else {
+            return Err(InvalidHeaderValue { });
+        }
+    };
 }
 
-impl<'a> Iterator for Sequence<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.value.as_mut()?.next()
-    }
-}
+use valid;
 

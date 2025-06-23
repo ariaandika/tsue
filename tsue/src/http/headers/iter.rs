@@ -26,7 +26,7 @@ impl<'a> Iter<'a> {
         Self {
             map,
             n: 0,
-            name: &super::name::PLACEHOLDER,
+            name: &HeaderName::PLACEHOLDER,
             iter: GetAll::empty(),
         }
     }
