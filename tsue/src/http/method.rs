@@ -1,5 +1,6 @@
 use std::{fmt, str::FromStr};
 
+/// HTTP Method.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Method(Inner);
 

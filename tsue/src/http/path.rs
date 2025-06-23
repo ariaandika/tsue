@@ -2,7 +2,7 @@ use crate::common::ByteStr;
 
 const NONE: u16 = u16::MAX;
 
-/// Represents the path component of a URI
+/// HTTP path and possible query.
 #[derive(Debug, Clone)]
 pub struct PathAndQuery {
     value: ByteStr,
