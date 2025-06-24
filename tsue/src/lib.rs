@@ -26,6 +26,9 @@ pub use tcio::ByteStr;
 
 mod common;
 pub mod http;
+
+pub mod body_v2;
+
 pub mod body;
 pub mod request;
 pub mod response;

@@ -23,12 +23,12 @@ tokio = { version = "1.43.0", features = ["net"], optional = true }
 tsue-macros = { version = "0.1.0", path = "../tsue-macros", optional = true }
 futures-core = { version = "0.3.31", optional = true }
 fnv = "1.0.7"
-tcio = { version = "0.1.0", features = ["tokio"] }
+tcio = { version = "0.1.0" }
 
 [features]
 default = ["tokio","serde","json"]
 
-tokio = ["dep:tokio","hyper-util/tokio"]
+tokio = ["dep:tokio","hyper-util/tokio","tcio/tokio"]
 
 http2 = ["hyper-util/http2"]
 ws = ["dep:sha1","dep:base64ct","dep:futures-core","tokio"]
