@@ -18,6 +18,7 @@ pub use tcio::ByteStr;
 
 mod method;
 mod path;
+mod version;
 mod status;
 mod extensions;
 
@@ -28,8 +29,9 @@ pub mod body;
 
 // ===== Reexports =====
 
-pub use method::Method;
+pub use method::{Method, UnknownMethod};
 pub use path::Path;
+pub use version::Version;
 pub use status::StatusCode;
 pub use extensions::Extensions;
 pub use headers::{HeaderMap, HeaderName, HeaderValue};
