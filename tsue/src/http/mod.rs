@@ -6,17 +6,17 @@ mod extensions;
 
 pub mod headers;
 
-pub use headers::{HeaderMap, HeaderName, HeaderValue};
 pub use method::Method;
-pub use path::PathAndQuery;
+pub use path::Path;
 pub use status::StatusCode;
 pub use extensions::Extensions;
+pub use headers::{HeaderMap, HeaderName, HeaderValue};
 
-/// The "head" part of HTTP Request or Response.
+/// HTTP Request parts.
 #[derive(Debug)]
 pub struct Parts {
     pub method: Method,
-    pub path: PathAndQuery,
+    pub path: Path,
     pub headers: HeaderMap,
     pub extensions: Extensions,
 }

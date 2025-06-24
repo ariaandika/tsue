@@ -2,15 +2,15 @@ use tcio::ByteStr;
 
 const NONE: u16 = u16::MAX;
 
-/// HTTP path and possible query.
+/// HTTP path and query.
 #[derive(Debug, Clone)]
-pub struct PathAndQuery {
+pub struct Path {
     value: ByteStr,
     query: u16,
 }
 
-impl PathAndQuery {
-    /// Create new [`PathAndQuery`].
+impl Path {
+    /// Create new [`Path`].
     pub(crate) fn new(bytes: ByteStr) -> Self {
         let query = bytes
             .find('?')
@@ -22,6 +22,7 @@ impl PathAndQuery {
         }
     }
 
+    /// Returns the uri path.
     pub fn path(&self) -> &str {
         let path = if self.query == NONE {
             &self.value[..]
@@ -36,6 +37,7 @@ impl PathAndQuery {
         }
     }
 
+    /// Returns the uri query.
     pub fn query(&self) -> Option<&str> {
         if self.query == NONE {
             None
@@ -44,6 +46,7 @@ impl PathAndQuery {
         }
     }
 
+    /// Returns uri as string.
     pub fn as_str(&self) -> &str {
         let value = self.value.as_str();
         if value.is_empty() {

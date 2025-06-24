@@ -1,86 +1,167 @@
-use bytes::Bytes;
-use http_body::Frame;
+//! HTTP Body.
+use bytes::{Buf, Bytes};
 use std::{
-    fmt, pin::Pin, task::{ready, Context, Poll}
+    io,
+    sync::Arc,
+    task::{Poll, ready},
 };
+use tcio::{io::AsyncIo, tokio::IoStream};
 
-mod repr;
-mod limited;
 mod collect;
-mod error;
 
-use repr::Repr;
-
-pub use limited::LengthLimitError;
-pub use collect::{Collect, Collected};
-pub use error::{BodyError, Kind};
-
-// ===== Body =====
+pub use collect::Collect;
 
 /// HTTP Body.
+#[derive(Debug)]
 pub struct Body {
-    repr: Repr,
-    remaining: u64,
-}
+    io: Option<Arc<IoStream>>,
 
-impl<B: Into<Repr>> From<B> for Body {
-    fn from(value: B) -> Self {
-        Self::new(value)
-    }
+    /// Body size limit
+    ///
+    /// always equal to or more than `self.bytes.len()`
+    remaining: u64,
+
+    /// Buffer
+    bytes: Bytes,
 }
 
 impl Body {
-    pub(crate) fn new(repr: impl Into<Repr>) -> Self {
-        Self { repr: repr.into(), remaining: 2_000_000 }
+    /// Create an empty [`Body`].
+    pub fn empty() -> Self {
+        Self { io: None, remaining: 0, bytes: Bytes::new()  }
     }
 
-    /// Buffer the entire body into memory.
-    pub fn collect_body(self) -> Collect {
+    /// Create exact size buffered [`Body`].
+    pub fn exact(bytes: impl Into<Bytes>) -> Self {
+        let bytes = bytes.into();
+        Self { io: None, remaining: bytes.len().try_into().unwrap_or(u64::MAX), bytes }
+    }
+
+    #[allow(unused, reason = "used later")]
+    pub(crate) fn from_io(io: Arc<IoStream>, remaining: u64, bytes: Bytes) -> Self {
+        Self { io: Some(io), remaining, bytes  }
+    }
+
+    /// Returns the remaining body length.
+    pub fn remaining(&self) -> usize {
+        self.remaining as _
+    }
+
+    /// Returns `true` if there is more body to read.
+    pub fn has_remaining(&self) -> bool {
+        self.remaining != 0
+    }
+
+    /// Try to read body from underlying io into the buffer.
+    pub fn poll_read(&mut self, buf: &mut [u8], cx: &mut std::task::Context) -> Poll<io::Result<usize>> {
+        debug_assert!(self.remaining as usize >= self.bytes.len());
+
+        if self.remaining == 0 {
+            return Poll::Ready(Err(io_err!(QuotaExceeded)));
+        }
+
+        if buf.is_empty() {
+            return Poll::Ready(Ok(0))
+        }
+
+        if self.bytes.has_remaining() {
+            let read = buf.len().min(self.bytes.remaining()).min(self.remaining as usize);
+
+            buf[..read].copy_from_slice(&self.bytes[..read]);
+
+            self.bytes.advance(read);
+            self.remaining -= read as u64;
+
+            // destination buf is already full,
+            // or body limit exhausted
+            if buf.len() == read || self.remaining == 0 {
+                return Poll::Ready(Ok(read))
+            }
+
+            // or the destination is larger than partially read bytes
+            debug_assert!(self.bytes.is_empty());
+        }
+
+        // io call, if it exists
+        let Some(io) = self.io.as_mut() else {
+            return Poll::Ready(Err(io_err!(QuotaExceeded)));
+        };
+
+        let result = ready!(io.poll_read(buf, cx))
+            .inspect(|&read|self.remaining -= read.try_into().unwrap_or(u64::MAX));
+
+        Poll::Ready(result)
+    }
+
+    /// Try to read body from underlying io into the buffer, advancing the buffer cursor.
+    pub fn poll_read_buf<B>(
+        &mut self,
+        buf: &mut B,
+        cx: &mut std::task::Context,
+    ) -> Poll<io::Result<usize>>
+    where
+        B: bytes::BufMut + ?Sized,
+    {
+        if !buf.has_remaining_mut() {
+            return Poll::Ready(Ok(0));
+        }
+
+        let read = {
+            // SAFETY: we will only write initialized value and `MaybeUninit<T>` is guaranteed to
+            // have the same size as `T`:
+            let dst = unsafe {
+                &mut *(buf.chunk_mut().as_uninit_slice_mut() as *mut [std::mem::MaybeUninit<u8>]
+                    as *mut [u8])
+            };
+
+            tri!(ready!(self.poll_read(dst, cx)))
+        };
+
+        // SAFETY: This is guaranteed to be the number of initialized by `try_read`
+        unsafe {
+            buf.advance_mut(read);
+        }
+
+        Poll::Ready(Ok(read))
+    }
+
+    /// Collect the entire body into [`BytesMut`][bytes::BytesMut].
+    pub fn collect(self) -> Collect {
         Collect::new(self)
     }
+
+}
+
+impl Default for Body {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+// ===== Macros =====
+
+/// `io_err!(ConnectionAborted)`
+/// `io_err!(ConnectionAborted, "already closed")`
+/// `io_err!("already closed")`
+macro_rules! io_err {
+    ($kind:ident) => {
+        io::Error::from(io::ErrorKind::$kind)
+    };
+    ($kind:ident,$e:expr) => {
+        io::Error::new(io::ErrorKind::$kind, $e)
+    };
+    ($e:literal) => {
+        io::Error::new(io::ErrorKind::InvalidData, $e)
+    };
 }
 
 macro_rules! tri {
     ($e:expr) => {
         match $e {
-            Some(ok) => ok,
-            None => return Poll::Ready(None),
+            Ok(ok) => ok,
+            Err(err) => return Poll::Ready(Err(err)),
         }
     };
 }
 
-impl http_body::Body for Body {
-    type Data = Bytes;
-
-    type Error = BodyError;
-
-    fn poll_frame(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let frame = tri!(ready!(Pin::new(&mut self.repr).poll_frame(cx)?));
-        let frame_result = tri!(limited::limit_frame(frame, &mut self.remaining));
-        Poll::Ready(Some(frame_result.map_err(Into::into)))
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.repr.is_end_stream()
-    }
-
-    fn size_hint(&self) -> http_body::SizeHint {
-        limited::limit_size_hint(self.repr.size_hint(), self.remaining)
-    }
-}
-
-impl Default for Body {
-    fn default() -> Self {
-        Self::new(Repr::Empty)
-    }
-}
-
-impl fmt::Debug for Body {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Body").finish()
-    }
-}
-
+use {io_err, tri};

@@ -1,81 +1,41 @@
-use bytes::{BufMut, Bytes, BytesMut};
-use http::HeaderMap;
-use http_body::Body as _;
+use bytes::BytesMut;
 use std::{
+    io,
     pin::Pin,
     task::{Context, Poll, ready},
 };
 
-use super::{Body, BodyError};
+use super::Body;
 
+/// A future returned from [`Body::collect`], resolved to the entire body.
 #[derive(Debug)]
 pub struct Collect {
     body: Body,
-    collected: Option<Collected>,
+    buffer: Option<BytesMut>,
 }
 
 impl Collect {
-    pub fn new(body: Body) -> Self {
-        let size_hint = body.size_hint();
-        let buffer = BytesMut::with_capacity(size_hint.upper().unwrap_or(size_hint.lower()) as _);
+    pub(crate) fn new(body: Body) -> Self {
+        let buffer = BytesMut::with_capacity(body.remaining());
         Self {
             body,
-            collected: Some(Collected {
-                buffer,
-                trailers: None,
-            }),
+            buffer: Some(buffer),
         }
     }
 }
 
 impl Future for Collect {
-    type Output = Result<Collected, BodyError>;
+    type Output = io::Result<BytesMut>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let me = self.get_mut();
+        let buffer = me.buffer.as_mut().expect("poll after complete");
 
-        loop {
-            let collected = me.collected.as_mut().expect("poll after complete");
-
-            let Some(frame) = ready!(Pin::new(&mut me.body).poll_frame(cx)) else {
-                return Poll::Ready(Ok(me.collected.take().expect("poll after complete")));
-            };
-
-            match frame?.into_data() {
-                Ok(data) => collected.buffer.put(data),
-                Err(frame) => if let Ok(trailer) = frame.into_trailers() {
-                    match collected.trailers.as_mut() {
-                        Some(map) => map.extend(trailer),
-                        None => collected.trailers = Some(trailer),
-                    }
-                },
-            }
+        while me.body.has_remaining() {
+            ready!(me.body.poll_read_buf(buffer, cx)?);
         }
+
+        Poll::Ready(Ok(me.buffer.take().expect("poll after complete")))
     }
 }
-
-#[derive(Debug)]
-pub struct Collected {
-    buffer: BytesMut,
-    trailers: Option<HeaderMap>,
-}
-
-impl Collected {
-    pub fn into_bytes_mut(self) -> BytesMut {
-        self.buffer
-    }
-
-    pub fn into_bytes(self) -> Bytes {
-        self.buffer.freeze()
-    }
-
-    pub fn trailers(&self) -> Option<&HeaderMap> {
-        self.trailers.as_ref()
-    }
-
-    pub fn trailers_mut(&mut self) -> &mut Option<HeaderMap> {
-        &mut self.trailers
-    }
-}
-
 
