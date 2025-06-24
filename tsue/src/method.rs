@@ -68,6 +68,8 @@ impl FromStr for Method {
     }
 }
 
+impl std::error::Error for UnknownMethod { }
+
 impl fmt::Display for UnknownMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("unknown method")

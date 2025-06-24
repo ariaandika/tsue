@@ -32,16 +32,19 @@ impl Extensions {
     /// Create new [`Extensions`].
     ///
     /// This function does not allocate.
+    #[inline]
     pub fn new() -> Self {
         Self { map: None }
     }
 
     /// Returns the number of elements in the map.
+    #[inline]
     pub fn len(&self) -> usize {
         self.map.as_ref().map(HashMap::len).unwrap_or_default()
     }
 
     /// Returns `true` if the map contains no elements.
+    #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -88,6 +91,7 @@ impl Extensions {
 }
 
 impl Default for Extensions {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
@@ -117,18 +121,22 @@ trait AnyClone {
 }
 
 impl<T: Clone + Send + Sync + 'static> AnyClone for T {
+    #[inline]
     fn clone_box(&self) -> Box<dyn AnyClone + Send + Sync> {
         Box::new(self.clone())
     }
 
+    #[inline]
     fn as_any(&self) -> &dyn Any {
         self
     }
 
+    #[inline]
     fn as_mut_any(&mut self) -> &mut dyn Any {
         self
     }
 
+    #[inline]
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
     }

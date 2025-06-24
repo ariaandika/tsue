@@ -26,6 +26,7 @@ impl HeaderMap {
     /// Create new empty [`HeaderMap`].
     ///
     /// This function does not allocate.
+    #[inline]
     pub fn new() -> Self {
         Self {
             // zero sized type does not allocate
@@ -55,11 +56,13 @@ impl HeaderMap {
     }
 
     /// Returns headers length.
+    #[inline]
     pub fn len(&self) -> usize {
         self.entries.len() + self.extra_len as usize
     }
 
     /// Returns `true` if headers has no element.
+    #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -84,6 +87,7 @@ impl HeaderMap {
     }
 
     /// Returns a reference to the first header value corresponding to the header name.
+    #[inline]
     pub fn get<K: AsHeaderName>(&self, name: K) -> Option<&HeaderValue> {
         self.try_get(name.to_header_ref())
     }
@@ -111,6 +115,7 @@ impl HeaderMap {
     }
 
     /// Returns a reference to all header values corresponding to the header name.
+    #[inline]
     pub fn get_all<K: AsHeaderName>(&self, name: K) -> GetAll {
         self.try_get_all(name.to_header_ref())
     }
@@ -141,6 +146,7 @@ impl HeaderMap {
 
     /// Removes a header from the map, returning the first header value at the key if the key was
     /// previously in the map.
+    #[inline]
     pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
         self.try_remove(name.to_header_ref())
     }
@@ -194,6 +200,7 @@ impl HeaderMap {
     /// value is returned.
     ///
     /// If the map did not have this header key present, [`None`] is returned.
+    #[inline]
     pub fn insert<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) -> Option<HeaderValue> {
         self.try_insert(name.into_header_name(), value, false)
     }
@@ -202,6 +209,7 @@ impl HeaderMap {
     ///
     /// Unlike [`insert`][HeaderMap::insert], if header key is present, header value is still
     /// appended as extra value.
+    #[inline]
     pub fn append<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) {
         let _result = self.try_insert(name.into_header_name(), value, true);
         debug_assert!(_result.is_none());

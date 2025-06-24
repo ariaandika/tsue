@@ -43,11 +43,13 @@ impl Body {
     }
 
     /// Returns the remaining body length.
+    #[inline]
     pub fn remaining(&self) -> usize {
         self.remaining as _
     }
 
     /// Returns `true` if there is more body to read.
+    #[inline]
     pub fn has_remaining(&self) -> bool {
         self.remaining != 0
     }
@@ -126,6 +128,7 @@ impl Body {
     }
 
     /// Collect the entire body into [`BytesMut`][bytes::BytesMut].
+    #[inline]
     pub fn collect(self) -> Collect {
         Collect::new(self)
     }
@@ -133,6 +136,7 @@ impl Body {
 }
 
 impl Default for Body {
+    #[inline]
     fn default() -> Self {
         Self::empty()
     }

@@ -41,6 +41,7 @@ impl HeaderName {
     }
 
     /// Extracts a string slice of the header name.
+    #[inline]
     pub fn as_str(&self) -> &str {
         match &self.repr {
             Repr::Standard(s) => s.name,
@@ -56,7 +57,6 @@ impl HeaderName {
 /// [`HeaderMap`]: super::HeaderMap
 #[allow(private_bounds)]
 pub trait AsHeaderName: SealedRef { }
-
 pub(crate) trait SealedRef: Sized {
     fn hash(&self) -> u16;
 
@@ -135,7 +135,6 @@ impl<'a> HeaderNameRef<'a> {
 /// [`HeaderMap`]: super::HeaderMap
 #[allow(private_bounds)]
 pub trait IntoHeaderName: Sealed {}
-
 pub(crate) trait Sealed: Sized {
     fn into_header_name(self) -> HeaderName;
 }

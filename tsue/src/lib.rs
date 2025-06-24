@@ -18,8 +18,8 @@ pub use tcio::ByteStr;
 
 mod method;
 mod path;
-mod version;
 mod status;
+mod version;
 mod extensions;
 
 pub mod headers;

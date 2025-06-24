@@ -49,11 +49,10 @@ impl Path {
 
     /// Returns uri as string.
     pub fn as_str(&self) -> &str {
-        let value = self.value.as_str();
-        if value.is_empty() {
+        if self.value.is_empty() {
             "/"
         } else {
-            value
+            self.value.as_str()
         }
     }
 }

@@ -51,6 +51,7 @@ impl HeaderValue {
     }
 
     /// Parse [`HeaderValue`] by copying from slice.
+    #[inline]
     pub fn try_copy_from_slice(value: &[u8]) -> Result<HeaderValue, InvalidHeaderValue> {
         Self::try_from_slice(Bytes::copy_from_slice(value))
     }
@@ -61,6 +62,7 @@ impl HeaderValue {
     ///
     /// [`to_str`]: HeaderValue::to_str
     /// [`as_str`]: HeaderValue::as_str
+    #[inline]
     pub fn try_copy_from_string(value: &str) -> Result<HeaderValue, InvalidHeaderValue> {
         Self::try_from_string(ByteStr::copy_from_str(value))
     }
@@ -75,11 +77,13 @@ impl HeaderValue {
     ///
     /// [`to_str`]: HeaderValue::to_str
     /// [`as_str`]: HeaderValue::as_str
+    #[inline]
     pub fn from_string(value: impl Into<ByteStr>) -> HeaderValue {
         Self::try_from_string(value).expect("failed to parse header")
     }
 
     /// Returns value as slice.
+    #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         match &self.repr {
             Repr::Bytes(b) => b,
@@ -92,11 +96,13 @@ impl HeaderValue {
     /// # Panics
     ///
     /// Panic if header value is not a valid utf8.
+    #[inline]
     pub fn as_str(&self) -> &str {
         self.try_as_str().expect("cannot convert header value as utf8 string")
     }
 
     /// Try to parse value as [`str`].
+    #[inline]
     pub fn try_as_str(&self) -> Result<&str, std::str::Utf8Error> {
         match &self.repr {
             Repr::Bytes(b) => from_utf8(b),
@@ -109,11 +115,13 @@ impl HeaderValue {
     /// # Panics
     ///
     /// Panic if header value is not a valid utf8.
+    #[inline]
     pub fn to_str(&mut self) -> &str {
         self.try_to_str().expect("cannot convert header value as utf8 string")
     }
 
     /// Try to parse value as [`str`] and cache the result.
+    #[inline]
     pub fn try_to_str(&mut self) -> Result<&str, std::str::Utf8Error> {
         match self.repr {
             Repr::Bytes(ref mut b) => {
@@ -129,6 +137,7 @@ impl HeaderValue {
 impl FromStr for HeaderValue {
     type Err = InvalidHeaderValue;
 
+    #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::try_copy_from_string(s)
     }
