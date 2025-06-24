@@ -1,5 +1,7 @@
-#![warn(missing_debug_implementations)]
 //! HTTP protocol.
+
+#![warn(missing_debug_implementations)]
+
 pub use tcio::ByteStr;
 
 // NOTE:
@@ -14,7 +16,6 @@ pub use tcio::ByteStr;
 // - from request, into response, routing
 // - service ?
 
-mod common;
 pub mod http;
 mod ws;
 

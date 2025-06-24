@@ -11,7 +11,8 @@ pub struct Path {
 
 impl Path {
     /// Create new [`Path`].
-    pub(crate) fn new(bytes: ByteStr) -> Self {
+    pub fn new(bytes: impl Into<ByteStr>) -> Self {
+        let bytes = bytes.into();
         let query = bytes
             .find('?')
             .and_then(|e| e.try_into().ok())
