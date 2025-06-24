@@ -22,7 +22,9 @@
 //!     println!("Client sends: {body}");
 //! }
 //! ```
-pub mod common;
+pub use tcio::ByteStr;
+
+mod common;
 pub mod http;
 pub mod body;
 pub mod request;

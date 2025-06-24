@@ -1,7 +1,9 @@
 use bytes::Bytes;
-use std::{mem::take, str::{from_utf8, FromStr}};
-
-use crate::common::ByteStr;
+use std::{
+    mem::take,
+    str::{FromStr, from_utf8},
+};
+use tcio::ByteStr;
 
 // ===== HeaderValue =====
 

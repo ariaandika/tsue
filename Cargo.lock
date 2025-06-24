@@ -473,6 +473,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tcio"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1801a32d0e214970b6ea754d6b2a4efaccc181bd330019db0cff07cc250a33ec"
+dependencies = [
+ "bytes",
+ "tokio",
+]
+
+[[package]]
 name = "tokio"
 version = "1.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -537,6 +547,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sha1",
+ "tcio",
  "tokio",
  "tsue-macros",
 ]

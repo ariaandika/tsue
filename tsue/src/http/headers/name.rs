@@ -1,6 +1,5 @@
 use std::hash::Hasher;
-
-use crate::common::ByteStr;
+use tcio::ByteStr;
 
 // ===== HeaderName =====
 

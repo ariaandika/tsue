@@ -1,4 +1,4 @@
-use crate::common::ByteStr;
+use tcio::ByteStr;
 
 const NONE: u16 = u16::MAX;
 
