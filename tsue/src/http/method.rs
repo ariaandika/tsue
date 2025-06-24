@@ -4,7 +4,7 @@ use std::{fmt, str::FromStr};
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Method(Inner);
 
-// https://tools.ietf.org/html/rfc7231#section-4.1W
+// https://tools.ietf.org/html/rfc7231#section-4
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 enum Inner {
     Options,

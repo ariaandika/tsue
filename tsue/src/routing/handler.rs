@@ -1,8 +1,8 @@
 //! functional route
 use std::{convert::Infallible, marker::PhantomData};
+use tcio::futures::{Map, map};
 
 use crate::{
-    futures::Map,
     request::{FromRequest, FromRequestParts, Request},
     response::{IntoResponse, Response},
     service::Service,
@@ -30,7 +30,7 @@ where
     type Future = Map<<F as Handler<S>>::Future, fn(Response) -> Result<Response, Infallible>>;
 
     fn call(&self, req: Request) -> Self::Future {
-        Map::new(self.inner.handle(req), Ok)
+        map(self.inner.handle(req), Ok)
     }
 }
 
@@ -53,7 +53,7 @@ where
     type Future = Map<Fut, fn(Fut::Output) -> Response>;
 
     fn handle(&self, _: Request) -> Self::Future {
-        Map::new(self.clone()(), <_>::into_response)
+        map(self.clone()(), <_>::into_response)
     }
 }
 

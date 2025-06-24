@@ -2,12 +2,12 @@ use http::{HeaderName, HeaderValue, StatusCode, header::CONTENT_TYPE};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{fmt, future::ready};
+use tcio::futures::{Map, map};
 
 use super::{Json, macros::derefm};
 use crate::{
     body::BodyError,
     common::log,
-    futures::Map,
     helper::Either,
     request::{FromRequest, Request},
     response::{IntoResponse, Response},
@@ -40,7 +40,7 @@ impl FromRequest for Value {
 
     fn from_request(req: Request) -> Self::Future {
         match validate(&req) {
-            Some(()) => Either::Left(Map::new(
+            Some(()) => Either::Left(map(
                 req.into_body().collect_body(),
                 (|e| serde_json::from_slice(&e?.into_bytes()).map_err(Into::into)) as JsonMap,
             )),
@@ -55,7 +55,7 @@ impl<T: DeserializeOwned> FromRequest for Json<T> {
 
     fn from_request(req: Request) -> Self::Future {
         match validate(&req) {
-            Some(()) => Either::Left(Map::new(
+            Some(()) => Either::Left(map(
                 req.into_body().collect_body(),
                 (|e| Ok(Json(serde_json::from_slice(&e?.into_bytes_mut())?))) as JsonMap<Json<T>>,
             )),

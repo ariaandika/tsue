@@ -1,11 +1,11 @@
 use http::{StatusCode, header::CONTENT_TYPE};
 use serde::de::DeserializeOwned;
 use std::future::ready;
+use tcio::futures::{Map, map};
 
 use super::{Either, Form, macros::derefm};
 use crate::{
     body::BodyError,
-    futures::Map,
     request::{FromRequest, Request},
     response::IntoResponse,
 };
@@ -36,7 +36,7 @@ impl<T: DeserializeOwned> FromRequest for Form<T> {
 
     fn from_request(req: Request) -> Self::Future {
         match validate(&req) {
-            Some(()) => Either::Left(Map::new(
+            Some(()) => Either::Left(map(
                 req.into_body().collect_body(),
                 (|e| Ok(Form(serde_urlencoded::from_bytes(&e?.into_bytes_mut())?))) as FormMap<T>,
             )),

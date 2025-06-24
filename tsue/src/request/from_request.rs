@@ -7,11 +7,11 @@ use std::{
     future::{Ready, ready},
     string::FromUtf8Error,
 };
+use tcio::futures::{Map, map};
 
 use super::{FromRequest, FromRequestParts, Parts, Request};
 use crate::{
     body::{Body, BodyError, Collect, Collected},
-    futures::Map,
     response::{IntoResponse, Response},
 };
 
@@ -53,42 +53,42 @@ req! {
     Bytes,
     Error = BodyError;
     Future = BodyMap<Bytes>;
-    |req|Map::new(req.into_body().collect_body(), |e|Ok(e?.into_bytes()))
+    |req|map(req.into_body().collect_body(), |e|Ok(e?.into_bytes()))
 }
 
 req! {
     BytesMut,
     Error = BodyError;
     Future = BodyMap<BytesMut>;
-    |req|Map::new(req.into_body().collect_body(), |e|Ok(e?.into_bytes_mut()))
+    |req|map(req.into_body().collect_body(), |e|Ok(e?.into_bytes_mut()))
 }
 
 req! {
     Box<[u8]>,
     Error = BodyError;
     Future = BodyMap<Box<[u8]>>;
-    |req|Map::new(req.into_body().collect_body(), |e|Ok(Vec::from(e?.into_bytes_mut()).into_boxed_slice()))
+    |req|map(req.into_body().collect_body(), |e|Ok(Vec::from(e?.into_bytes_mut()).into_boxed_slice()))
 }
 
 req! {
     Vec<u8>,
     Error = BodyError;
     Future = BodyMap<Vec<u8>>;
-    |req|Map::new(req.into_body().collect_body(), |e|Ok(e?.into_bytes_mut().into()))
+    |req|map(req.into_body().collect_body(), |e|Ok(e?.into_bytes_mut().into()))
 }
 
 req! {
     Box<str>,
     Error = StringFutureError;
     Future = BodyMap<Box<str>, StringFutureError>;
-    |req|Map::new(req.into_body().collect_body(), |e|Ok(String::from_utf8(e?.into_bytes_mut().into())?.into_boxed_str()))
+    |req|map(req.into_body().collect_body(), |e|Ok(String::from_utf8(e?.into_bytes_mut().into())?.into_boxed_str()))
 }
 
 req! {
     String,
     Error = StringFutureError;
     Future = BodyMap<String, StringFutureError>;
-    |req|Map::new(req.into_body().collect_body(), |e|Ok(String::from_utf8(e?.into_bytes_mut().into())?))
+    |req|map(req.into_body().collect_body(), |e|Ok(String::from_utf8(e?.into_bytes_mut().into())?))
 }
 
 // ===== Errors =====
