@@ -32,6 +32,7 @@ impl HeaderName {
         Self { repr: Repr::Bytes(name.into()) }
     }
 
+    /// Potentially calculate hash
     pub(crate) fn hash(&self) -> u16 {
         match &self.repr {
             Repr::Standard(s) => s.hash,
@@ -70,6 +71,12 @@ const fn fnv_hash(bytes: &[u8]) -> u16 {
 
 // ===== Ref Traits =====
 
+/// The contrete type used in header map lookup operation.
+pub(crate) struct HeaderNameRef<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) hash: u16,
+}
+
 /// A type that can be used for [`HeaderMap`] operation.
 ///
 /// [`HeaderMap`]: super::HeaderMap
@@ -80,6 +87,7 @@ pub(crate) trait SealedRef: Sized {
 
     fn as_str(&self) -> &str;
 
+    /// Potentially calculate hash
     fn to_header_ref(&self) -> HeaderNameRef {
         HeaderNameRef {
             name: self.as_str(),
@@ -121,22 +129,6 @@ impl SealedRef for HeaderName {
 
     fn as_str(&self) -> &str {
         HeaderName::as_str(self)
-    }
-}
-
-/// The contrete type used in header map operation.
-pub(crate) struct HeaderNameRef<'a> {
-    name: &'a str,
-    hash: u16,
-}
-
-impl<'a> HeaderNameRef<'a> {
-    pub(crate) fn as_str(&self) -> &'a str {
-        self.name
-    }
-
-    pub(crate) fn hash(&self) -> u16 {
-        self.hash
     }
 }
 

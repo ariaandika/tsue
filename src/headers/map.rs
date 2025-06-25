@@ -15,18 +15,33 @@ type Size = u16;
 /// HTTP Headers Multimap.
 #[derive(Default)]
 pub struct HeaderMap {
-    indices: Box<[Option<Size>]>,
+    indices: Box<[Slot]>,
     entries: Vec<Entry>,
     extra_len: Size,
     delim: Size,
     is_full: bool,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+enum Slot {
+    Some(Size),
+    /// there is collision previously, but index removed,
+    /// keed searching forward instead of giveup searching
+    Tombstone,
+    #[default]
+    None,
+}
+
+impl Slot {
+    fn take_as_tombstone(&mut self) -> Self {
+        std::mem::replace(self, Self::Tombstone)
+    }
+}
+
 impl HeaderMap {
     /// Create new empty [`HeaderMap`].
     ///
     /// This function does not allocate.
-    #[inline]
     pub fn new() -> Self {
         Self {
             // zero sized type does not allocate
@@ -67,46 +82,50 @@ impl HeaderMap {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
 
-    /// Returns an iterator over the headers.
-    pub fn iter(&self) -> Iter {
-        Iter::new(self)
-    }
+// ===== Lookup =====
 
-    pub(crate) fn entries(&self) -> &[Entry] {
-        &self.entries
-    }
-
-    // pub(crate) fn entries_mut(&mut self) -> &mut Vec<Entry> {
-    //     &mut self.entries
-    // }
-
+impl HeaderMap {
     /// Returns `true` if the map contains a header value for the header key.
-    pub fn contains_key(&self, name: &HeaderName) -> bool {
-        self.get(name).is_some()
+    #[inline]
+    pub fn contains_key<K: AsHeaderName>(&self, name: K) -> bool {
+        if self.is_empty() {
+            return false
+        }
+
+        // `to_header_ref` potentially calculate hash
+        self.try_get(name.to_header_ref()).is_some()
     }
 
     /// Returns a reference to the first header value corresponding to the header name.
     #[inline]
     pub fn get<K: AsHeaderName>(&self, name: K) -> Option<&HeaderValue> {
+        if self.is_empty() {
+            return None;
+        }
+
+        // `to_header_ref` potentially calculate hash
         self.try_get(name.to_header_ref())
     }
 
     fn try_get(&self, name: HeaderNameRef) -> Option<&HeaderValue> {
-        if self.entries.is_empty() {
-            return None;
-        }
-
         let mask = self.indices.len() as Size;
-        let hash = name.hash();
+        let hash = name.hash;
         let mut index = hash & (mask - 1);
 
         loop {
-            let entry_index = self.indices[index as usize]?;
-            let entry = &self.entries[entry_index as usize];
+            match self.indices[index as usize] {
+                Slot::Some(entry_index) => {
+                    let entry = &self.entries[entry_index as usize];
 
-            if entry.hash() == &hash && entry.name().as_str() == name.as_str() {
-                return Some(entry.value());
+                    // TODO: case sensitivity
+                    if entry.hash() == &hash && entry.name().as_str() == name.name {
+                        return Some(entry.value());
+                    }
+                },
+                Slot::Tombstone => { },
+                Slot::None => return None,
             }
 
             // Get Collision
@@ -117,26 +136,32 @@ impl HeaderMap {
     /// Returns a reference to all header values corresponding to the header name.
     #[inline]
     pub fn get_all<K: AsHeaderName>(&self, name: K) -> GetAll {
+        if self.is_empty() {
+            return GetAll::empty();
+        }
+
+        // `to_header_ref` potentially calculate hash
         self.try_get_all(name.to_header_ref())
     }
 
     fn try_get_all(&self, name: HeaderNameRef) -> GetAll {
-        if self.entries.is_empty() {
-            return GetAll::empty();
-        }
-
         let mask = self.indices.len() as Size;
-        let hash = name.hash();
+        let hash = name.hash;
         let mut index = hash & (mask - 1);
 
         loop {
-            let Some(entry_index) = self.indices[index as usize] else {
-                return GetAll::empty();
-            };
-            let entry = &self.entries[entry_index as usize];
+            match self.indices[index as usize] {
+                Slot::Some(entry_index) => {
+                    let entry = &self.entries[entry_index as usize];
 
-            if entry.hash() == &hash && entry.name().as_str() == name.as_str() {
-                return GetAll::new(entry);
+                    if entry.hash() == &hash && entry.name().as_str() == name.name {
+                        return GetAll::new(entry);
+                    }
+                },
+                Slot::Tombstone => { },
+                Slot::None => {
+                    return GetAll::empty();
+                },
             }
 
             // Get Collision
@@ -144,52 +169,92 @@ impl HeaderMap {
         }
     }
 
-    /// Removes a header from the map, returning the first header value at the key if the key was
-    /// previously in the map.
+    /// Returns an iterator over the headers.
     #[inline]
-    pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
-        self.try_remove(name.to_header_ref())
+    pub fn iter(&self) -> Iter {
+        Iter::new(self)
     }
 
-    fn try_remove(&mut self, name: HeaderNameRef) -> Option<HeaderValue> {
-        if self.entries.is_empty() {
+    #[inline]
+    pub(crate) fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
+    // pub(crate) fn entries_mut(&mut self) -> &mut Vec<Entry> {
+    //     &mut self.entries
+    // }
+}
+
+// ===== Mutation =====
+
+impl HeaderMap {
+    /// Removes a header from the map, returning the first header value at the key if the key was
+    /// previously in the map.
+    pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
+        if self.is_empty() {
             return None;
         }
 
+        // `to_header_ref` potentially calculate hash
+        let entry = self.try_remove_entry(name.to_header_ref())?;
+
+        // the rest ot duplicate header values are dropped
+        let (_, val) = entry.into_parts();
+        Some(val)
+    }
+
+    fn try_remove_entry(&mut self, name: HeaderNameRef) -> Option<Entry> {
         let mask = self.indices.len() as Size;
-        let hash = name.hash();
+        let hash = name.hash;
         let mut index = hash & (mask - 1);
 
         loop {
-            let entry_index = self.indices[index as usize]? as usize;
-            let entry = &self.entries[entry_index];
+            match &mut self.indices[index as usize] {
+                Slot::Some(entry_index) => {
+                    let entry_index = *entry_index as usize;
+                    let entry = &self.entries[entry_index];
 
-            if entry.hash() == &hash && entry.name().as_str() == name.as_str() {
-                if let Some(last_entry) = self.entries.last() {
-                    if last_entry.hash() != entry.hash() {
-                        let mut index = last_entry.hash() & (mask - 1);
+                    if entry.hash() == &hash && entry.name().as_str() == name.name {
 
-                        loop {
-                            let inner_entry_index = self.indices[index as usize].as_mut().unwrap();
-                            let inner_entry = &self.entries[*inner_entry_index as usize];
-                            if inner_entry.hash() == last_entry.hash()
-                                && inner_entry.name().as_str() == last_entry.name().as_str()
-                            {
-                                *inner_entry_index = entry_index as Size;
-                                break;
+                        // prepare for `swap_remove` below, change indices of to be swaped entry
+                        if let Some(last_entry) = self.entries.last().filter(|last|last.hash() != entry.hash()) {
+                            // this still possibly collisioned index
+                            let mut index = last_entry.hash() & (mask - 1);
+
+                            loop {
+                                let Slot::Some(inner_entry_index) = &mut self.indices[index as usize] else {
+                                    unreachable!("[BUG] entry does not have slot index")
+                                };
+
+                                let inner_entry = &self.entries[*inner_entry_index as usize];
+
+                                if inner_entry.hash() == last_entry.hash()
+                                    && inner_entry.name().as_str() == last_entry.name().as_str()
+                                {
+                                    *inner_entry_index = entry_index as Size;
+                                    break;
+                                }
+
+                                // Index swapping lookup collision
+                                index = (index + 1) & (mask - 1);
                             }
-                            index = (index + 1) & (mask - 1);
                         }
+
+                        // make it tombstone
+                        let Slot::Some(entry_index) = self.indices[index as usize].take_as_tombstone() else {
+                            unreachable!("matched in the first loop")
+                        };
+
+                        let entry = self.entries.swap_remove(entry_index as usize);
+                        self.extra_len -= entry.extra_len();
+                        return Some(entry);
                     }
                 }
-                let entry_index = self.indices[index as usize].take().unwrap();
-                let entry = self.entries.swap_remove(entry_index as usize);
-                self.extra_len -= entry.extra_len();
-                let (_,value) = entry.into_parts();
-                return Some(value);
+                Slot::Tombstone => { },
+                Slot::None => return None,
             }
 
-            // Remove Collision
+            // Remove lookup collision
             index = (index + 1) & (mask - 1);
         }
     }
@@ -211,8 +276,7 @@ impl HeaderMap {
     /// appended as extra value.
     #[inline]
     pub fn append<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) {
-        let _result = self.try_insert(name.into_header_name(), value, true);
-        debug_assert!(_result.is_none());
+        self.try_insert(name.into_header_name(), value, true);
     }
 
     fn try_insert(&mut self, name: HeaderName, value: HeaderValue, append: bool) -> Option<HeaderValue> {
@@ -226,15 +290,14 @@ impl HeaderMap {
 
         let result = loop {
             match &mut self.indices[index as usize] {
-                // No collision
-                index @ None => {
+                index @ Slot::None | index @ Slot::Tombstone => {
                     let entry_index = self.entries.len();
-                    *index = Some(entry_index as _);
+                    *index = Slot::Some(entry_index as _);
                     self.entries.push(Entry::new(hash, name, value));
                     break None
                 },
 
-                Some(entry_index) => {
+                Slot::Some(entry_index) => {
                     let entry = &mut self.entries[*entry_index as usize];
 
                     if entry.hash() == &hash && entry.name().as_str() == name.as_str() {
@@ -249,11 +312,11 @@ impl HeaderMap {
                             Some(entry.into_parts().1)
                         };
                     }
-
-                    // Insert Collision
-                    index = (index + 1) & (mask - 1);
                 }
             }
+
+            // Insert lookup Collision
+            index = (index + 1) & (mask - 1);
         };
 
         self.is_full = self.entries.len() as Size > self.delim;
@@ -262,7 +325,7 @@ impl HeaderMap {
     }
 
     fn increase_capacity(&mut self) {
-        assert!(self.is_full, "[BUG] increasing capacity should only `is_full`");
+        debug_assert!(self.is_full, "[BUG] increasing capacity should only `is_full`");
         let new_cap = (self.indices.len() + 1).next_power_of_two().max(8);
 
         let mut me = HeaderMap::with_capacity(new_cap);
@@ -272,19 +335,15 @@ impl HeaderMap {
             me.try_insert(name, value, true);
         }
 
-        println!("Resize({new_cap})");
         *self = me;
     }
+
+    // TODO: HeaderMap::clear
 }
 
 impl std::fmt::Debug for HeaderMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("HeaderMap ")?;
-        let mut f = f.debug_map();
-        for (k,v) in self.iter() {
-            f.key(&k.as_str()).value(v);
-        }
-        f.finish()
+        f.debug_map().entries(self.iter()).finish()
     }
 }
 
@@ -296,70 +355,74 @@ mod test {
     fn header_map() {
         let mut map = HeaderMap::new();
 
-        assert!(map.get(HeaderName::new("content-type")).is_none());
+        assert!(map.get("content-type").is_none());
 
-        map.insert(HeaderName::new("content-type"), HeaderValue::from_string("FOO"));
-        assert!(map.contains_key(&HeaderName::new("content-type")));
+        map.insert("content-type", HeaderValue::from_string("FOO"));
+        assert!(map.contains_key("content-type"));
 
-        map.insert(HeaderName::new("accept"), HeaderValue::from_string("BAR"));
-        map.insert(HeaderName::new("content-length"), HeaderValue::from_string("LEN"));
-        map.insert(HeaderName::new("host"), HeaderValue::from_string("BAR"));
-        map.insert(HeaderName::new("date"), HeaderValue::from_string("BAR"));
-        map.insert(HeaderName::new("referer"), HeaderValue::from_string("BAR"));
-        map.insert(HeaderName::new("rim"), HeaderValue::from_string("BAR"));
+        map.insert("accept", HeaderValue::from_string("BAR"));
+        map.insert("content-length", HeaderValue::from_string("LEN"));
+        map.insert("host", HeaderValue::from_string("BAR"));
+        map.insert("date", HeaderValue::from_string("BAR"));
+        map.insert("referer", HeaderValue::from_string("BAR"));
+        map.insert("rim", HeaderValue::from_string("BAR"));
 
-        assert!(map.contains_key(&HeaderName::new("content-type")));
-        assert!(map.contains_key(&HeaderName::new("accept")));
-        assert!(map.contains_key(&HeaderName::new("content-length")));
-        assert!(map.contains_key(&HeaderName::new("host")));
-        assert!(map.contains_key(&HeaderName::new("date")));
-        assert!(map.contains_key(&HeaderName::new("referer")));
-        assert!(map.contains_key(&HeaderName::new("rim")));
+        assert!(map.contains_key("content-type"));
+        assert!(map.contains_key("accept"));
+        assert!(map.contains_key("content-length"));
+        assert!(map.contains_key("host"));
+        assert!(map.contains_key("date"));
+        assert!(map.contains_key("referer"));
+        assert!(map.contains_key("rim"));
 
         println!("Insert Allocate");
 
-        map.insert(HeaderName::new("lea"), HeaderValue::from_string("BAR"));
+        map.insert("lea", HeaderValue::from_string("BAR"));
 
-        assert!(map.contains_key(&HeaderName::new("content-type")));
-        assert!(map.contains_key(&HeaderName::new("accept")));
-        assert!(map.contains_key(&HeaderName::new("content-length")));
-        assert!(map.contains_key(&HeaderName::new("host")));
-        assert!(map.contains_key(&HeaderName::new("date")));
-        assert!(map.contains_key(&HeaderName::new("referer")));
-        assert!(map.contains_key(&HeaderName::new("rim")));
-        assert!(map.contains_key(&HeaderName::new("lea")));
+        assert!(map.contains_key("content-type"));
+        assert!(map.contains_key("accept"));
+        assert!(map.contains_key("content-length"));
+        assert!(map.contains_key("host"));
+        assert!(map.contains_key("date"));
+        assert!(map.contains_key("referer"));
+        assert!(map.contains_key("rim"));
+        assert!(map.contains_key("lea"));
 
         println!("Insert Multi");
 
-        map.append(HeaderName::new("content-length"), HeaderValue::from_string("BAR"));
+        map.append("content-length", HeaderValue::from_string("BAR"));
 
-        assert!(map.contains_key(&HeaderName::new("content-length")));
-        assert!(map.contains_key(&HeaderName::new("host")));
-        assert!(map.contains_key(&HeaderName::new("date")));
-        assert!(map.contains_key(&HeaderName::new("referer")));
-        assert!(map.contains_key(&HeaderName::new("rim")));
+        assert!(map.contains_key("content-length"));
+        assert!(map.contains_key("host"));
+        assert!(map.contains_key("date"));
+        assert!(map.contains_key("referer"));
+        assert!(map.contains_key("rim"));
 
-        let mut all = map.get_all(HeaderName::new("content-length"));
+        let mut all = map.get_all("content-length");
         assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("LEN"))));
         assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("BAR"))));
         assert!(all.next().is_none());
 
-        assert!(map.remove(HeaderName::new("accept")).is_some());
-        assert!(map.contains_key(&HeaderName::new("content-type")));
-        assert!(map.contains_key(&HeaderName::new("content-length")));
-        assert!(map.contains_key(&HeaderName::new("host")));
-        assert!(map.contains_key(&HeaderName::new("date")));
-        assert!(map.contains_key(&HeaderName::new("referer")));
-        assert!(map.contains_key(&HeaderName::new("rim")));
-        assert!(map.contains_key(&HeaderName::new("lea")));
+        println!("Remove accept");
 
-        assert!(map.remove(HeaderName::new("lea")).is_some());
-        assert!(map.contains_key(&HeaderName::new("content-type")));
-        assert!(map.contains_key(&HeaderName::new("content-length")));
-        assert!(map.contains_key(&HeaderName::new("host")));
-        assert!(map.contains_key(&HeaderName::new("date")));
-        assert!(map.contains_key(&HeaderName::new("referer")));
-        assert!(map.contains_key(&HeaderName::new("rim")));
+        assert!(map.remove("accept").is_some());
+        assert!(map.contains_key("content-type"));
+        assert!(map.contains_key("content-length"));
+        assert!(map.contains_key("host"));
+        assert!(map.contains_key("date"));
+        assert!(map.contains_key("referer"));
+        assert!(map.contains_key("rim"));
+        assert!(map.contains_key("lea"));
+
+        println!("Remove lea");
+
+        assert!(map.remove("lea").is_some());
+        assert!(map.contains_key("content-type"));
+        assert!(map.contains_key("content-length"));
+        assert!(map.contains_key("host"));
+        assert!(map.contains_key("date"));
+        assert!(map.contains_key("referer"));
+        assert!(map.contains_key("rim"));
 
         assert!(map.remove("content-length").is_some());
 
