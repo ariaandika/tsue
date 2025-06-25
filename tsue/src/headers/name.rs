@@ -1,4 +1,3 @@
-use std::hash::Hasher;
 use tcio::ByteStr;
 
 // ===== HeaderName =====
@@ -36,7 +35,7 @@ impl HeaderName {
     pub(crate) fn hash(&self) -> u16 {
         match &self.repr {
             Repr::Standard(s) => s.hash,
-            Repr::Bytes(b) => hash_str(b),
+            Repr::Bytes(b) => fnv_hash(b.as_bytes()),
         }
     }
 
@@ -48,6 +47,25 @@ impl HeaderName {
             Repr::Bytes(s) => s.as_str(),
         }
     }
+}
+
+// ===== Hash =====
+
+#[inline]
+const fn fnv_hash(bytes: &[u8]) -> u16 {
+    const INITIAL_STATE: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0100_0000_01b3;
+
+    let mut hash = INITIAL_STATE;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        hash ^= bytes[i] as u64;
+        hash = hash.wrapping_mul(PRIME);
+        i += 1;
+    }
+
+    hash as _
 }
 
 // ===== Ref Traits =====
@@ -84,7 +102,7 @@ impl<S: SealedRef> SealedRef for &S {
 impl AsHeaderName for &str { }
 impl SealedRef for &str {
     fn hash(&self) -> u16 {
-        hash_str(self)
+        fnv_hash(self.as_bytes())
     }
 
     fn as_str(&self) -> &str {
@@ -97,19 +115,13 @@ impl SealedRef for HeaderName {
     fn hash(&self) -> u16 {
         match &self.repr {
             Repr::Standard(s) => s.hash,
-            Repr::Bytes(s) => hash_str(s),
+            Repr::Bytes(s) => fnv_hash(s.as_bytes()),
         }
     }
 
     fn as_str(&self) -> &str {
         HeaderName::as_str(self)
     }
-}
-
-fn hash_str(s: &str) -> u16 {
-    let mut hasher = fnv::FnvHasher::with_key(199);
-    hasher.write(s.as_bytes());
-    hasher.finish() as _
 }
 
 /// The contrete type used in header map operation.
