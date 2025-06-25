@@ -279,8 +279,12 @@ impl HeaderMap {
 
 impl std::fmt::Debug for HeaderMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Headers")
-            .finish()
+        f.write_str("HeaderMap ")?;
+        let mut f = f.debug_map();
+        for (k,v) in self.iter() {
+            f.key(&k.as_str()).value(v);
+        }
+        f.finish()
     }
 }
 

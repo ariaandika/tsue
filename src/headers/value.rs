@@ -147,7 +147,16 @@ impl FromStr for HeaderValue {
 
 impl std::fmt::Debug for HeaderValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HeaderValue").finish()
+        f.write_str("\"")?;
+        for &b in self.as_bytes() {
+            if b.is_ascii_graphic() || b.is_ascii_whitespace() {
+                write!(f, "{}", b as char)?;
+            } else {
+                write!(f, "\\x{b:x}")?;
+            }
+        }
+        f.write_str("\"")?;
+        Ok(())
     }
 }
 
