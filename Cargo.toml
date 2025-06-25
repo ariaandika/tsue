@@ -1,5 +1,17 @@
-[workspace]
-members = ["tsue","example"]
-default-members = ["tsue"]
-resolver = "2"
+[package]
+name = "tsue"
+version = "0.1.0"
+edition = "2024"
 
+[dependencies]
+bytes = "1.10.1"
+futures-core = { version = "0.3.31" }
+tcio = { version = "0.1.0", features = ["tokio"] }
+tokio = { version = "1.43.0", features = ["net"] }
+
+# Optionals
+
+log = { version = "0.4.26", optional = true }
+
+[features]
+log = ["dep:log"]
