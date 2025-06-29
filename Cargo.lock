@@ -127,9 +127,9 @@ dependencies = [
 
 [[package]]
 name = "tcio"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1801a32d0e214970b6ea754d6b2a4efaccc181bd330019db0cff07cc250a33ec"
+checksum = "596e84f2d4bdc671018d9eb5c5b22dbcb1f87e63a964ef15b8d10806b2c9d76c"
 dependencies = [
  "bytes",
  "tokio",

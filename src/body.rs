@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
     task::{Poll, ready},
 };
-use tcio::{io::AsyncIo, tokio::IoStream};
+use tcio::{io::AsyncIoRead, tokio::IoStream};
 
 mod collect;
 
