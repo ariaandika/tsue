@@ -24,6 +24,7 @@ mod extensions;
 
 pub mod headers;
 
+pub mod request;
 mod ws;
 pub mod body;
 
