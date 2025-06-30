@@ -89,9 +89,13 @@ pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLine<'a>>>
         ok
     };
 
-    if bytes.first_chunk::<2>() != Some(b"\r\n") {
-        return Err(io_data_err("expected cariage returns"));
-    } else {
+    {
+        match bytes.first_chunk::<2>() {
+            Some(crlf) => if crlf != b"\r\n" {
+                return Err(io_data_err("expected cariage returns"));
+            },
+            None => return Ok(None),
+        }
         // SAFETY: checked by `.first_chunk()`
         bytes = unsafe { bytes.get_unchecked(2..) };
     }
