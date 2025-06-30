@@ -119,6 +119,14 @@ pub struct Header<'a> {
 /// Parse HTTP Header.
 ///
 /// Note that this does not check for empty line which indicate the end of headers in HTTP.
+#[inline]
+pub fn parse_header_ref(mut buf: &[u8]) -> io::Result<Option<Header<'_>>> {
+    parse_header(&mut buf)
+}
+
+/// Parse HTTP Header.
+///
+/// Note that this does not check for empty line which indicate the end of headers in HTTP.
 pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
     let mut bytes = *buf;
 
