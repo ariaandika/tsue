@@ -12,6 +12,12 @@ pub struct RequestLine<'a> {
 }
 
 /// Parse HTTP Request line.
+#[inline]
+pub fn parse_line_ref(mut buf: &[u8]) -> io::Result<Option<RequestLine<'_>>> {
+    parse_line(&mut buf)
+}
+
+/// Parse HTTP Request line.
 pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLine<'a>>> {
     let mut bytes = *buf;
 
@@ -33,7 +39,8 @@ pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLine<'a>>>
                 _ => return Ok(None),
             },
         };
-        // SAFETY: checked against static str
+        // SAFETY: `len` is acquired from `lead`, `lead` is guaranteed in `bytes` by
+        // `.split_first_chunk::<4>()`
         bytes = unsafe { bytes.get_unchecked(len..) };
         ok
     };
@@ -168,14 +175,14 @@ mod test {
 
     #[test]
     fn test_parse_line() {
-        assert!(parse_line(&mut &b""[..]).unwrap().is_none());
-        assert!(parse_line(&mut &b"GE"[..]).unwrap().is_none());
-        assert!(parse_line(&mut &b"GET"[..]).unwrap().is_none());
-        assert!(parse_line(&mut &b"GET "[..]).unwrap().is_none());
-        assert!(parse_line(&mut &b"GET /users/g"[..]).unwrap().is_none());
-        assert!(parse_line(&mut &b"GET /users/get"[..]).unwrap().is_none());
-        assert!(parse_line(&mut &b"GET /users/get "[..]).unwrap().is_none());
-        assert!(parse_line(&mut &b"GET /users/get HTTP/1"[..]).unwrap().is_none());
+        assert!(parse_line_ref(b"").unwrap().is_none());
+        assert!(parse_line_ref(b"GE").unwrap().is_none());
+        assert!(parse_line_ref(b"GET").unwrap().is_none());
+        assert!(parse_line_ref(b"GET ").unwrap().is_none());
+        assert!(parse_line_ref(b"GET /users/g").unwrap().is_none());
+        assert!(parse_line_ref(b"GET /users/get").unwrap().is_none());
+        assert!(parse_line_ref(b"GET /users/get ").unwrap().is_none());
+        assert!(parse_line_ref(b"GET /users/get HTTP/1").unwrap().is_none());
 
 
         let mut buf = &b"GET /users/get HTTP/1.1\r\nHost: "[..];
