@@ -1,6 +1,7 @@
+//! HTTP Request
 use crate::{body::Body, headers::HeaderMap, method::Method, Version};
 
-mod parser;
+pub mod parser;
 
 /// HTTP Request Parts.
 #[derive(Debug)]

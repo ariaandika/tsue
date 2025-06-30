@@ -1,17 +1,18 @@
+//! HTTP Request Parser
 use std::io;
 
 use crate::{method::Method, version::Version};
 
-
-/// Parse result of [`parse_headline`].
+/// Parse result of [`parse_line`].
 #[derive(Debug)]
-pub struct Headline<'a> {
+pub struct RequestLine<'a> {
     pub method: Method,
     pub uri: &'a str,
     pub version: Version,
 }
 
-pub fn parse_headline<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Headline<'a>>> {
+/// Parse HTTP Request line.
+pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLine<'a>>> {
     let mut bytes = *buf;
 
     let method = {
@@ -90,7 +91,7 @@ pub fn parse_headline<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Headline<'a>>
 
     *buf = bytes;
 
-    Ok(Some(Headline {
+    Ok(Some(RequestLine {
         method,
         uri,
         version,
@@ -100,11 +101,14 @@ pub fn parse_headline<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Headline<'a>>
 /// Parse result of [`parse_header`].
 #[derive(Debug)]
 pub struct Header<'a> {
-    name: &'a str,
-    value: &'a [u8],
+    pub name: &'a str,
+    pub value: &'a [u8],
 }
 
-fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
+/// Parse HTTP Header.
+///
+/// Note that this does not check for empty line which indicate the end of headers in HTTP.
+pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
     let mut bytes = *buf;
 
     let name = {
@@ -163,19 +167,19 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_parse_headline() {
-        assert!(parse_headline(&mut &b""[..]).unwrap().is_none());
-        assert!(parse_headline(&mut &b"GE"[..]).unwrap().is_none());
-        assert!(parse_headline(&mut &b"GET"[..]).unwrap().is_none());
-        assert!(parse_headline(&mut &b"GET "[..]).unwrap().is_none());
-        assert!(parse_headline(&mut &b"GET /users/g"[..]).unwrap().is_none());
-        assert!(parse_headline(&mut &b"GET /users/get"[..]).unwrap().is_none());
-        assert!(parse_headline(&mut &b"GET /users/get "[..]).unwrap().is_none());
-        assert!(parse_headline(&mut &b"GET /users/get HTTP/1"[..]).unwrap().is_none());
+    fn test_parse_line() {
+        assert!(parse_line(&mut &b""[..]).unwrap().is_none());
+        assert!(parse_line(&mut &b"GE"[..]).unwrap().is_none());
+        assert!(parse_line(&mut &b"GET"[..]).unwrap().is_none());
+        assert!(parse_line(&mut &b"GET "[..]).unwrap().is_none());
+        assert!(parse_line(&mut &b"GET /users/g"[..]).unwrap().is_none());
+        assert!(parse_line(&mut &b"GET /users/get"[..]).unwrap().is_none());
+        assert!(parse_line(&mut &b"GET /users/get "[..]).unwrap().is_none());
+        assert!(parse_line(&mut &b"GET /users/get HTTP/1"[..]).unwrap().is_none());
 
 
         let mut buf = &b"GET /users/get HTTP/1.1\r\nHost: "[..];
-        let ok = parse_headline(&mut buf).unwrap().unwrap();
+        let ok = parse_line(&mut buf).unwrap().unwrap();
         assert_eq!(ok.method, Method::GET);
         assert_eq!(ok.uri, "/users/get");
         assert_eq!(ok.version, Version::HTTP_11);

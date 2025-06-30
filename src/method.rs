@@ -33,23 +33,29 @@ impl fmt::Display for Method {
 
 impl Method {
     forward! {
-        /// OPTIONS
+        /// The `OPTIONS` method describes the communication options for the target resource.
         pub const OPTIONS: Options = b"OPTIONS";
-        /// GET
+        /// The `GET` method requests a representation of the specified resource. Requests using GET
+        /// should only retrieve data and should not contain a request content.
         pub const GET: Get = b"GET";
-        /// HEAD
+        /// The `HEAD` method asks for a response identical to a GET request, but without a response
+        /// body.
         pub const HEAD: Head = b"HEAD";
-        /// TRACE
+        /// The `TRACE` method performs a message loop-back test along the path to the target
+        /// resource.
         pub const TRACE: Trace = b"TRACE";
-        /// CONNECT
+        /// The `CONNECT` method establishes a tunnel to the server identified by the target
+        /// resource.
         pub const CONNECT: Connect = b"CONNECT";
-        /// POST
+        /// The `POST` method submits an entity to the specified resource, often causing a change in
+        /// state or side effects on the server.
         pub const POST: Post = b"POST";
-        /// PUT
+        /// The `PUT` method replaces all current representations of the target resource with the
+        /// request content.
         pub const PUT: Put = b"PUT";
-        /// DELETE
+        /// The `DELETE` method deletes the specified resource.
         pub const DELETE: Delete = b"DELETE";
-        /// PATCH
+        /// The `PATCH` method applies partial modifications to a resource.
         pub const PATCH: Patch = b"PATCH";
     }
 }
