@@ -10,3 +10,4 @@ pub use value::{HeaderValue, InvalidHeaderValue};
 pub use map::HeaderMap;
 pub use entry::{Entry, GetAll};
 pub use iter::Iter;
+pub use name::standards::*;

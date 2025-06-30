@@ -94,7 +94,7 @@ impl HeaderMap {
             return false
         }
 
-        // `to_header_ref` potentially calculate hash
+        // `to_header_ref` may calculate hash
         self.try_get(name.to_header_ref()).is_some()
     }
 
@@ -105,7 +105,7 @@ impl HeaderMap {
             return None;
         }
 
-        // `to_header_ref` potentially calculate hash
+        // `to_header_ref` may calculate hash
         self.try_get(name.to_header_ref())
     }
 
@@ -140,7 +140,7 @@ impl HeaderMap {
             return GetAll::empty();
         }
 
-        // `to_header_ref` potentially calculate hash
+        // `to_header_ref` may calculate hash
         self.try_get_all(name.to_header_ref())
     }
 
@@ -195,7 +195,7 @@ impl HeaderMap {
             return None;
         }
 
-        // `to_header_ref` potentially calculate hash
+        // `to_header_ref` may calculate hash
         let entry = self.try_remove_entry(name.to_header_ref())?;
 
         // the rest ot duplicate header values are dropped
