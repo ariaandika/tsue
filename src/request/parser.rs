@@ -11,6 +11,8 @@ pub struct RequestLine<'a> {
     pub version: Version,
 }
 
+// ===== Request Parsing =====
+
 /// Parse HTTP Request line.
 #[inline]
 pub fn parse_line_ref(mut buf: &[u8]) -> io::Result<Option<RequestLine<'_>>> {
@@ -195,6 +197,8 @@ mod test {
         assert!(parse_line_ref(b"GET /users/get").unwrap().is_none());
         assert!(parse_line_ref(b"GET /users/get ").unwrap().is_none());
         assert!(parse_line_ref(b"GET /users/get HTTP/1").unwrap().is_none());
+        assert!(parse_line_ref(b"GET /users/get HTTP/1.1").unwrap().is_none());
+        assert!(parse_line_ref(b"GET /users/get HTTP/1.1\r").unwrap().is_none());
 
 
         let mut buf = &b"GET /users/get HTTP/1.1\r\nHost: "[..];
@@ -206,14 +210,43 @@ mod test {
     }
 
     #[test]
+    fn test_parse_line_method() {
+        assert_eq!(parse_line_ref(b"GET / HTTP/1.1\r\n").unwrap().unwrap().method, Method::GET);
+        assert_eq!(parse_line_ref(b"PUT / HTTP/1.1\r\n").unwrap().unwrap().method, Method::PUT);
+        assert_eq!(parse_line_ref(b"POST / HTTP/1.1\r\n").unwrap().unwrap().method, Method::POST);
+        assert_eq!(parse_line_ref(b"HEAD / HTTP/1.1\r\n").unwrap().unwrap().method, Method::HEAD);
+        assert_eq!(parse_line_ref(b"PATCH / HTTP/1.1\r\n").unwrap().unwrap().method, Method::PATCH);
+        assert_eq!(parse_line_ref(b"TRACE / HTTP/1.1\r\n").unwrap().unwrap().method, Method::TRACE);
+        assert_eq!(parse_line_ref(b"DELETE / HTTP/1.1\r\n").unwrap().unwrap().method, Method::DELETE);
+        assert_eq!(parse_line_ref(b"CONNECT / HTTP/1.1\r\n").unwrap().unwrap().method, Method::CONNECT);
+        assert_eq!(parse_line_ref(b"OPTIONS / HTTP/1.1\r\n").unwrap().unwrap().method, Method::OPTIONS);
+    }
+
+    // #[test]
+    // fn test_parse_line_buf() {
+    //     use bytes::BytesMut;
+    //     let mut bytesm = BytesMut::from(&b"GET /users/get HTTP/1.1\r\nHost: "[..]);
+    //     let mut bufm = bytesm.as_ref();
+    //
+    //     let ok = parse_line(&mut bufm).unwrap().unwrap();
+    //     let uri_range = range_of(ok.uri.as_bytes());
+    //
+    //     let bytes = bytesm.split_to(bufm.as_ptr() as usize - bytesm.as_ptr() as usize).freeze();
+    //     let uri_shared: Bytes = slice_of_bytes(uri_range, &bytes).unwrap();
+    //
+    //     assert_eq!(uri_shared, &b"/users/get"[..]);
+    // }
+
+    #[test]
     fn test_parse_header() {
-        assert!(parse_header(&mut &b""[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Hos"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host:"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host: "[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host: loca"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host: localhost"[..]).unwrap().is_none());
+        assert!(parse_header_ref(b"").unwrap().is_none());
+        assert!(parse_header_ref(b"Hos").unwrap().is_none());
+        assert!(parse_header_ref(b"Host").unwrap().is_none());
+        assert!(parse_header_ref(b"Host:").unwrap().is_none());
+        assert!(parse_header_ref(b"Host: ").unwrap().is_none());
+        assert!(parse_header_ref(b"Host: loca").unwrap().is_none());
+        assert!(parse_header_ref(b"Host: localhost").unwrap().is_none());
+        assert!(parse_header_ref(b"Host: localhost\r").unwrap().is_none());
 
 
         let mut buf = &b"Host: localhost\r\nConte"[..];
