@@ -97,6 +97,63 @@ pub fn parse_headline<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Headline<'a>>
     }))
 }
 
+/// Parse result of [`parse_header`].
+#[derive(Debug)]
+pub struct Header<'a> {
+    name: &'a str,
+    value: &'a [u8],
+}
+
+fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
+    let mut bytes = *buf;
+
+    let name = {
+        let Some(n) = bytes.iter().position(|e| e == &b':') else {
+            return Ok(None);
+        };
+        match str::from_utf8(&bytes[..n]) {
+            Ok(ok) => {
+                bytes = &bytes[n..];
+                ok
+            }
+            Err(e) => return Err(io_data_err(e)),
+        }
+    };
+
+    {
+        let Some(sepr) = bytes.first_chunk::<2>() else {
+            return Ok(None)
+        };
+        if sepr != b": " {
+            return Err(io_data_err("expected space after colon"));
+        } else {
+            // SAFETY: checked by `.first_chunk::<2>()`
+            bytes = unsafe { bytes.get_unchecked(2..) };
+        }
+    }
+
+    let value = {
+        let Some(n) = bytes.iter().position(|e| e == &b'\r') else {
+            return Ok(None);
+        };
+        match bytes.get(n + 1) {
+            Some(lf) => {
+                if lf != &b'\n' {
+                    return Err(io_data_err("unexpected cariage in header value"));
+                }
+            }
+            None => return Ok(None),
+        }
+        let ok = unsafe { bytes.get_unchecked(..n) };
+        bytes = unsafe { bytes.get_unchecked(n + 2..) };
+        ok
+    };
+
+    *buf = bytes;
+
+    Ok(Some(Header { name, value }))
+}
+
 fn io_data_err<E: Into<Box<dyn std::error::Error + Send + Sync>>,>(e: E) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
@@ -107,6 +164,7 @@ mod test {
 
     #[test]
     fn test_parse_headline() {
+        assert!(parse_headline(&mut &b""[..]).unwrap().is_none());
         assert!(parse_headline(&mut &b"GE"[..]).unwrap().is_none());
         assert!(parse_headline(&mut &b"GET"[..]).unwrap().is_none());
         assert!(parse_headline(&mut &b"GET "[..]).unwrap().is_none());
@@ -122,6 +180,24 @@ mod test {
         assert_eq!(ok.uri, "/users/get");
         assert_eq!(ok.version, Version::HTTP_11);
         assert_eq!(&buf, b"Host: ");
+    }
+
+    #[test]
+    fn test_parse_header() {
+        assert!(parse_header(&mut &b""[..]).unwrap().is_none());
+        assert!(parse_header(&mut &b"Hos"[..]).unwrap().is_none());
+        assert!(parse_header(&mut &b"Host"[..]).unwrap().is_none());
+        assert!(parse_header(&mut &b"Host:"[..]).unwrap().is_none());
+        assert!(parse_header(&mut &b"Host: "[..]).unwrap().is_none());
+        assert!(parse_header(&mut &b"Host: loca"[..]).unwrap().is_none());
+        assert!(parse_header(&mut &b"Host: localhost"[..]).unwrap().is_none());
+
+
+        let mut buf = &b"Host: localhost\r\nConte"[..];
+        let ok = parse_header(&mut buf).unwrap().unwrap();
+        assert_eq!(ok.name, "Host");
+        assert_eq!(ok.value, b"localhost");
+        assert_eq!(&buf, b"Conte");
     }
 }
 
