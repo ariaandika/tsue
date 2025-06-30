@@ -110,6 +110,7 @@ mod test {
         assert_eq!(ok.method, Method::GET);
         assert_eq!(ok.uri, "/users/get");
         assert_eq!(ok.version, Version::HTTP_11);
+        assert_eq!(&BUF[ok.buf_len..], b"Host: ");
     }
 }
 
