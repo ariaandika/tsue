@@ -28,6 +28,7 @@ pub mod request;
 mod ws;
 pub mod body;
 
+pub mod service;
 // ===== Reexports =====
 
 pub use method::{Method, UnknownMethod};
