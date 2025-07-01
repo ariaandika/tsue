@@ -1,26 +1,23 @@
-//! HTTP Request
-use crate::{Extensions, Path, Version, body::Body, headers::HeaderMap, method::Method};
+//! HTTP Response
+use crate::{Extensions, StatusCode, Version, body::Body, headers::HeaderMap};
 
-pub mod parser;
-
-/// HTTP Request Parts.
+/// HTTP Response Parts.
 #[derive(Debug)]
 pub struct Parts {
-    pub method: Method,
-    pub uri: Path,
     pub version: Version,
+    pub status: StatusCode,
     pub headers: HeaderMap,
     pub extensions: Extensions,
 }
 
 /// HTTP Request.
 #[derive(Debug)]
-pub struct Request {
+pub struct Response {
     parts: Parts,
     body: Body,
 }
 
-impl Request {
+impl Response {
     #[inline]
     pub fn parts(&self) -> &Parts {
         &self.parts
