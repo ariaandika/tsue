@@ -226,13 +226,23 @@ pub fn parse_headers_uninit<'a, 'h>(
     *buf = bytes;
     let headers = &mut headers[..n];
     // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
-    let headers = unsafe { &mut *(headers as *mut [MaybeUninit<Header>] as *mut [Header]) };
+    let headers = unsafe { &mut *assume_init_slice!(headers as Header) };
     Ok(Some(headers))
 }
 
 fn io_data_err<E: Into<Box<dyn std::error::Error + Send + Sync>>,>(e: E) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
+
+// ===== Macros =====
+
+macro_rules! assume_init_slice {
+    ($e:ident as $ty:ty) => {
+        ($e as *mut [MaybeUninit<$ty>] as *mut [$ty])
+    };
+}
+
+use assume_init_slice;
 
 #[cfg(test)]
 mod test {
