@@ -1,6 +1,8 @@
 //! HTTP Response
 use crate::{Extensions, StatusCode, Version, body::Body, headers::HeaderMap};
 
+pub mod write;
+
 /// HTTP Response Parts.
 #[derive(Debug)]
 pub struct Parts {

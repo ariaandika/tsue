@@ -19,6 +19,17 @@ impl Version {
 
     /// [`HTTP/3.0`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Evolution_of_HTTP#http3_-_http_over_quic)
     pub const HTTP_3: Version = Version(Inner::H3);
+
+    /// Returns string representation of HTTP version.
+    pub const fn as_str(&self) -> &'static str {
+        match self.0 {
+            Inner::Http09 => "HTTP/0.9",
+            Inner::Http10 => "HTTP/1.0",
+            Inner::Http11 => "HTTP/1.1",
+            Inner::H2 => "HTTP/2.0",
+            Inner::H3 => "HTTP/3.0",
+        }
+    }
 }
 
 #[derive(PartialEq, PartialOrd, Copy, Clone, Eq, Ord, Hash)]
