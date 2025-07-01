@@ -58,9 +58,9 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "libc"
-version = "0.2.173"
+version = "0.2.174"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8cfeafaffdbc32176b64fb251369d52ea9f0a8fbc6f8759edffef7b525d64bb"
+checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "log"
@@ -127,9 +127,9 @@ dependencies = [
 
 [[package]]
 name = "tcio"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "596e84f2d4bdc671018d9eb5c5b22dbcb1f87e63a964ef15b8d10806b2c9d76c"
+checksum = "00cdcf3f38c982e674f6cea2e24c3b96c4c27cf8114a64a1fe8c52df8fe2c503"
 dependencies = [
  "bytes",
  "tokio",
