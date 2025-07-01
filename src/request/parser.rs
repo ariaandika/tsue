@@ -120,6 +120,10 @@ pub struct Header<'a> {
     pub value: &'a [u8],
 }
 
+impl<'a> Header<'a> {
+    pub const EMPTY: Self = Self { name: "", value: b"" };
+}
+
 /// Parse HTTP Header.
 ///
 /// Note that this does not check for empty line which indicate the end of headers in HTTP.
@@ -179,6 +183,15 @@ pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
     *buf = bytes;
 
     Ok(Some(Header { name, value }))
+}
+
+pub fn parse_headers<'a, 'h>(
+    buf: &mut &'a [u8],
+    headers: &'h mut [Header<'a>],
+) -> io::Result<Option<&'h mut [Header<'a>]>> {
+    // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
+    let headers = unsafe { &mut *(headers as *mut [Header] as *mut [MaybeUninit<Header>]) };
+    parse_headers_uninit(buf, headers)
 }
 
 pub fn parse_headers_uninit<'a, 'h>(
