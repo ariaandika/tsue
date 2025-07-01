@@ -1,5 +1,6 @@
 //! HTTP Request Parser
 use std::{io, mem::MaybeUninit};
+use tcio::range_of;
 
 use crate::http::{Method, Version};
 
@@ -230,6 +231,106 @@ pub fn parse_headers_uninit<'a, 'h>(
     Ok(Some(headers))
 }
 
+// ===== HeaderRange =====
+
+/// Parse result of [`parse_header`].
+///
+#[derive(Debug)]
+pub struct HeaderRange {
+    // INVARIANT: range buffer is valid UTF-8
+    name: std::ops::Range<usize>,
+    value: std::ops::Range<usize>,
+}
+
+impl HeaderRange {
+    fn new(header: &Header) -> Self {
+        HeaderRange {
+            // INVARIANT: range buffer is valid UTF-8
+            name: range_of(header.name.as_bytes()),
+            value: range_of(header.value),
+        }
+    }
+
+    /// Resolve the range with given `buf` to [`Header`].
+    pub fn resolve_ref<'b>(&self, buf: &'b [u8]) -> Header<'b> {
+        // TODO: change to use tcio on v0.1.3
+        fn slice_of(range: std::ops::Range<usize>, buf: &[u8]) -> &[u8] {
+            let buf_p = buf.as_ptr() as usize;
+            let buf_len = buf.as_ptr() as usize;
+            let sub_p = range.start;
+            let sub_len = range.end.saturating_sub(range.start);
+
+            if sub_len == 0 {
+                return &[]
+            }
+
+            assert!(
+                sub_p >= buf_p,
+                "range pointer ({:p}) is smaller than `buf` pointer ({:p})",
+                sub_p as *const u8,
+                buf.as_ptr(),
+            );
+            assert!(
+                sub_p + sub_len <= buf_p + buf_len,
+                "subset is out of bounds: self = ({:p}, {}), subset = ({:p}, {})",
+                buf.as_ptr(),
+                buf_len,
+                sub_p as *const u8,
+                sub_len,
+            );
+
+            let offset = sub_p.saturating_sub(buf_p);
+
+            // SAFETY:
+            // - sub_p >= buf_p
+            // - sub_p + sub_len <= buf_p + buf_len
+            unsafe { buf.get_unchecked(offset..offset + sub_len) }
+        }
+
+        Header {
+            // SAFETY: invariant of `self.name` is a valid UTF-8
+            name: unsafe { str::from_utf8_unchecked(slice_of(self.name.clone(), buf)) },
+            value: slice_of(self.value.clone(), buf),
+        }
+    }
+}
+
+pub fn parse_headers_range_uninit<'h>(
+    buf: &mut &[u8],
+    headers: &'h mut [MaybeUninit<HeaderRange>],
+) -> io::Result<Option<&'h mut [HeaderRange]>> {
+    let mut bytes = *buf;
+    let mut n = 0;
+
+    loop {
+        if n >= headers.len() {
+            break;
+        }
+
+        match bytes.first_chunk::<2>() {
+            Some(b"\r\n") => {
+                // SAFETY: checked by `first_chunk::<2>`
+                bytes = unsafe { bytes.get_unchecked(2..) };
+                break;
+            }
+            Some(_) => {
+                let Some(header) = parse_header(&mut bytes)? else {
+                    return Ok(None);
+                };
+                headers[n].write(HeaderRange::new(&header));
+                n += 1;
+            }
+            None => return Ok(None),
+        }
+    }
+
+    *buf = bytes;
+    let headers = &mut headers[..n];
+    // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
+    let headers = unsafe { &mut *assume_init_slice!(headers as HeaderRange) };
+    Ok(Some(headers))
+}
+
 fn io_data_err<E: Into<Box<dyn std::error::Error + Send + Sync>>,>(e: E) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
@@ -344,6 +445,18 @@ mod test {
         assert_eq!(headers[1].name, "Content-Type");
         assert_eq!(headers[1].value, b"text/html");
         assert_eq!(buf, b"Hello World!");
+    }
+
+    #[test]
+    fn test_parse_headers_range() {
+        let mut buf = HEADERS.as_bytes();
+        let mut headers = [const { MaybeUninit::uninit() };4];
+
+        let sliced = parse_headers_range_uninit(&mut buf, &mut headers).unwrap().unwrap();
+
+        let host = sliced[0].resolve_ref(HEADERS.as_bytes());
+        assert_eq!(host.name, "Host");
+        assert_eq!(host.value, b"localhost");
     }
 }
 
