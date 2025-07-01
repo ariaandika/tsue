@@ -1,5 +1,5 @@
 //! HTTP Request Parser
-use std::io;
+use std::{io, mem::MaybeUninit};
 
 use crate::{method::Method, version::Version};
 
@@ -111,6 +111,8 @@ pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLine<'a>>>
     }))
 }
 
+// ===== Header =====
+
 /// Parse result of [`parse_header`].
 #[derive(Debug)]
 pub struct Header<'a> {
@@ -177,6 +179,42 @@ pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
     *buf = bytes;
 
     Ok(Some(Header { name, value }))
+}
+
+pub fn parse_headers_uninit<'a, 'h>(
+    buf: &mut &'a [u8],
+    headers: &'h mut [MaybeUninit<Header<'a>>],
+) -> io::Result<Option<&'h mut [Header<'a>]>> {
+    let mut bytes = *buf;
+    let mut n = 0;
+
+    loop {
+        if n >= headers.len() {
+            break;
+        }
+
+        match bytes.first_chunk::<2>() {
+            Some(b"\r\n") => {
+                // SAFETY: checked by `first_chunk::<2>`
+                bytes = unsafe { bytes.get_unchecked(2..) };
+                break
+            },
+            Some(_) => {
+                let Some(header) = parse_header(&mut bytes)? else {
+                    return Ok(None);
+                };
+                headers[n].write(header);
+                n += 1;
+            }
+            None => return Ok(None),
+        }
+    }
+
+    *buf = bytes;
+    let headers = &mut headers[..n];
+    // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
+    let headers = unsafe { &mut *(headers as *mut [MaybeUninit<Header>] as *mut [Header]) };
+    Ok(Some(headers))
 }
 
 fn io_data_err<E: Into<Box<dyn std::error::Error + Send + Sync>>,>(e: E) -> io::Error {
