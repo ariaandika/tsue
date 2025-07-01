@@ -306,5 +306,34 @@ mod test {
         assert_eq!(ok.value, b"localhost");
         assert_eq!(&buf, b"Conte");
     }
+
+    const HEADERS: &str = "\
+        Host: localhost\r\n\
+        Content-Type: text/html\r\n\
+        \r\n\
+        Hello World!\
+    ";
+
+    #[test]
+    fn test_parse_headers() {
+        let mut buf = &HEADERS.as_bytes()[..16];
+        let mut headers = [Header::EMPTY;4];
+
+        assert!(parse_headers(&mut buf, &mut headers).unwrap().is_none());
+
+        let mut buf = HEADERS.as_bytes();
+
+        let sliced = parse_headers(&mut buf, &mut headers).unwrap().unwrap();
+
+        assert_eq!(sliced[0].name, "Host");
+        assert_eq!(sliced[0].value, b"localhost");
+        assert_eq!(sliced[1].name, "Content-Type");
+        assert_eq!(sliced[1].value, b"text/html");
+        assert_eq!(headers[0].name, "Host");
+        assert_eq!(headers[0].value, b"localhost");
+        assert_eq!(headers[1].name, "Content-Type");
+        assert_eq!(headers[1].value, b"text/html");
+        assert_eq!(buf, b"Hello World!");
+    }
 }
 
