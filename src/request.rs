@@ -1,5 +1,9 @@
 //! HTTP Request
-use crate::{Extensions, Path, Version, body::Body, headers::HeaderMap, method::Method};
+use crate::{
+    body::Body,
+    headers::HeaderMap,
+    http::{Extensions, Method, Path, Version},
+};
 
 pub mod parser;
 

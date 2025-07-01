@@ -1,7 +1,7 @@
 //! HTTP Request Parser
 use std::{io, mem::MaybeUninit};
 
-use crate::{method::Method, version::Version};
+use crate::http::{Method, Version};
 
 /// Parse result of [`parse_line`].
 #[derive(Debug)]

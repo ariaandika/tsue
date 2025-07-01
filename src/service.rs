@@ -1,3 +1,4 @@
+//! Service trait.
 use std::convert::Infallible;
 use tcio::futures::{Map, map};
 

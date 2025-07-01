@@ -1,4 +1,4 @@
-//! HTTP Body.
+//! Request and Response Body.
 use bytes::{Buf, Bytes};
 use std::{
     io,

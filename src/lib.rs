@@ -1,4 +1,4 @@
-//! HTTP protocol.
+//! Web Server and Client Toolkit
 #![warn(missing_debug_implementations)]
 
 // NOTE:
@@ -10,28 +10,13 @@
 
 pub use tcio::ByteStr;
 
-mod method;
-mod path;
-mod status;
-mod version;
-mod extensions;
-
+pub mod http;
 pub mod headers;
-
+pub mod body;
 pub mod request;
 pub mod response;
 mod ws;
-pub mod body;
 
 pub mod service;
 pub mod rt;
-
-// ===== Reexports =====
-
-pub use method::{Method, UnknownMethod};
-pub use path::Path;
-pub use version::Version;
-pub use status::StatusCode;
-pub use extensions::Extensions;
-pub use headers::{HeaderMap, HeaderName, HeaderValue};
 

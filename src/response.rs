@@ -1,5 +1,9 @@
 //! HTTP Response
-use crate::{Extensions, StatusCode, Version, body::Body, headers::HeaderMap};
+use crate::{
+    body::Body,
+    headers::HeaderMap,
+    http::{Extensions, StatusCode, Version},
+};
 
 pub mod write;
 
