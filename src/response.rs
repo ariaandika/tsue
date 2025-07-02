@@ -8,7 +8,7 @@ use crate::{
 pub mod write;
 
 /// HTTP Response Parts.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Parts {
     pub version: Version,
     pub status: StatusCode,
@@ -17,7 +17,7 @@ pub struct Parts {
 }
 
 /// HTTP Request.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Response {
     parts: Parts,
     body: Body,

@@ -24,6 +24,15 @@ pub struct Request {
     body: Body,
 }
 
+/// Constructor
+impl Request {
+    /// Create [`Request`] from [`Parts`] and [`Body`].
+    #[inline]
+    pub fn from_parts(parts: Parts, body: Body) -> Self {
+        Self { parts, body  }
+    }
+}
+
 impl Request {
     #[inline]
     pub fn parts(&self) -> &Parts {
@@ -43,6 +52,14 @@ impl Request {
     #[inline]
     pub fn body_mut(&mut self) -> &mut Body {
         &mut self.body
+    }
+}
+
+/// Destructor
+impl Request {
+    #[inline]
+    pub fn into_parts(self) -> (Parts, Body) {
+        (self.parts, self.body)
     }
 
     #[inline]
