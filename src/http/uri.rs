@@ -1,6 +1,6 @@
 //! Uniform Resource Identifier.
 use std::num::NonZeroU16;
-use tcio::ByteStr;
+use tcio::{slice::Cursor, ByteStr};
 
 /// Uniform Resource Identifier.
 ///
@@ -11,7 +11,7 @@ use tcio::ByteStr;
 /// authority, path, and query.
 ///
 /// ```not_rust
-/// URI         = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+/// URI         = scheme ":" hier-part [ "?" query ]
 ///
 /// hier-part   = "//" authority path-abempty
 ///             / path-absolute
@@ -19,10 +19,9 @@ use tcio::ByteStr;
 ///             / path-empty
 /// ```
 ///
-/// The [`Uri`] is slightly differs from the standards, where scheme is optional and there is no
-/// fragment. Path is required, though it may be empty (no characters).  When authority is present, the
-/// path must either be empty or begin with a slash (`/`) character.  When authority is not present,
-/// the path cannot begin with two slash characters (`//`).
+/// The scheme and path components are required, though the path may be empty (no characters).
+/// When authority is present, the path must either be empty or begin with a slash (`/`) character.
+/// When authority is not present, the path cannot begin with two slash characters (`//`).
 ///
 /// The following are two example URIs and their component parts:
 ///
@@ -35,16 +34,27 @@ use tcio::ByteStr;
 ///   / \ /                        \
 ///   urn:example:animal:ferret:nose
 /// ```
+//
+//
+// Internally:
+//
+// ```
+//   foo://example.com:8042/over/there?name=ferret
+//     _/          ________/    _____/\_____
+//    /           /            /            \
+// scheme     authority       path        query
+//
+//   foo:/over/there
+//     _/\___       \_____
+//    /      \            \
+// scheme   path        query
+// ```
 #[derive(Debug)]
 pub struct Uri {
     value: ByteStr,
-    // scheme end, point to `:`
     scheme: u16,
-    // auth end
     authority: Option<NonZeroU16>,
-    // path start
     path: u16,
-    // query start, point to either `?` or end of bytes
     query: u16,
 }
 
@@ -102,13 +112,13 @@ impl Uri {
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3)
 fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
-    use InvalidUri::*;
+    let mut bufm = value.as_bytes();
 
-    let mut buf = value.as_bytes();
+    let scheme = parse_scheme(&mut bufm)?;
 
-    let scheme = parse_scheme(buf)?;
+    debug_assert!(!bufm.is_empty(), "`parse_scheme` success with no `:` found");
 
-    if buf.len() == (scheme + 1) as usize {
+    if bufm.len() == 1 {
         let path = value.len() as _;
         return Ok(Uri {
             value,
@@ -119,50 +129,44 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
         })
     }
 
-    buf = &buf[(scheme + 1) as usize..];
+    // SAFETY: `bufm` is not empty, thus `bufm.len >= 1`
+    bufm = unsafe { bufm.get_unchecked(1..) };
 
-    let Some(delim) = buf.first_chunk::<2>() else {
-        return Err(Incomplete)
+    // authority can be empty, but may have the leading '//'
+    let auth_offset;
+
+    let authority = if let Some(b"//") = bufm.first_chunk::<2>() {
+        // SAFETY: checked by `.first_chunk::<2>`
+        bufm = unsafe { bufm.get_unchecked(2..) };
+        auth_offset = 2;
+
+        let auth_len = parse_authority(&mut bufm)?;
+        if auth_len == 0 {
+            None
+        } else {
+            let auth_end = scheme + 3 + auth_len;
+            // SAFETY: addition with constant non zero value
+            Some(unsafe { NonZeroU16::new_unchecked(auth_end) })
+        }
+    } else {
+        auth_offset = 0;
+        None
     };
 
-    const COL_DELIM: u16 = "://".len() as _;
+    let path_len = parse_path(&mut bufm)?;
+    let path = match authority {
+        Some(ok) => ok.get(),
+        None => scheme + auth_offset + 1,
+    };
+    let query = path + path_len;
 
-    match delim {
-        b"//" => {
-            let auth_len = parse_authority(&buf[2..])?;
-            let auth_end = if auth_len == 0 {
-                None
-            } else {
-                Some(scheme + COL_DELIM + auth_len)
-            };
-
-            let path_len = parse_path(&buf[(2 + auth_len) as usize..])?;
-            let path = scheme + COL_DELIM + auth_len;
-            let query = path + path_len;
-
-            Ok(Uri {
-                value,
-                scheme,
-                // SAFETY: COL_DELIM is non zero which parts of addition
-                authority: auth_end.map(|ok|unsafe { NonZeroU16::new_unchecked(ok) }),
-                path,
-                query,
-            })
-        }
-        _ => {
-            let path_len = parse_path(buf)?;
-            let path = scheme + 1;
-            let query = path + path_len;
-
-            Ok(Uri {
-                value,
-                scheme,
-                authority: None,
-                path,
-                query,
-            })
-        },
-    }
+    Ok(Uri {
+        value,
+        scheme,
+        authority,
+        path,
+        query,
+    })
 }
 
 /// ```not_rust
@@ -172,23 +176,27 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
 /// terminated by `:`
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3.1)
-fn parse_scheme(buf: &[u8]) -> Result<u16, InvalidUri> {
+fn parse_scheme(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     use InvalidUri::*;
 
-    let Some(lead) = buf.first() else {
+    let len = buf.len();
+    let mut cursor = Cursor::new(buf);
+
+    let Some(lead) = cursor.first() else {
         return Err(Incomplete);
     };
+
+    // SAFETY: checked by `.first()`
+    unsafe { cursor.advance(1) };
 
     match lead {
         b'+' | b'-' | b'.' => {}
         e if e.is_ascii_alphanumeric() => {}
-        ch => return Err(Char(*ch as char)),
+        ch => return Err(Char(ch as char)),
     };
 
-    let mut n = 1;
-
     loop {
-        let Some(byte) = buf.get(n) else {
+        let Some(byte) = cursor.first() else {
             return Err(Incomplete);
         };
 
@@ -196,13 +204,17 @@ fn parse_scheme(buf: &[u8]) -> Result<u16, InvalidUri> {
             b'+' | b'-' | b'.' => {}
             b':' => break,
             e if e.is_ascii_alphanumeric() => {}
-            ch => return Err(Char(*ch as char)),
+            ch => return Err(Char(ch as char)),
         }
 
-        n += 1;
+        // SAFETY: checked by `.first()`
+        unsafe { cursor.advance(1) };
     }
 
-    n.try_into().map_err(|_| TooLong)
+    *buf = cursor.as_bytes();
+    (len - cursor.remaining())
+        .try_into()
+        .map_err(|_| TooLong)
 }
 
 /// ```not_rust
@@ -212,21 +224,25 @@ fn parse_scheme(buf: &[u8]) -> Result<u16, InvalidUri> {
 /// terminated by `/`, `?`, `#`, or by the end
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3.2)
-fn parse_authority(buf: &[u8]) -> Result<u16, InvalidUri> {
-    use InvalidUri::*;
-
-    let mut n = 0;
+fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
+    let len = buf.len();
+    let mut cursor = Cursor::new(buf);
 
     loop {
-        match buf.get(n) {
-            Some(b'/' | b'?') => break,
-            Some(b'#') => return Err(Fragment),
-            Some(_) => n += 1,
+        match cursor.first() {
+            Some(b'/' | b'?' | b'#') => break,
+            Some(_) => {
+                // SAFETY: checked by `.first()`
+                unsafe { cursor.advance(1) };
+            },
             None => break,
         }
     }
 
-    n.try_into().map_err(|_| TooLong)
+    *buf = cursor.as_bytes();
+    (len - cursor.remaining())
+        .try_into()
+        .map_err(|_| InvalidUri::TooLong)
 }
 
 /// NOTE: does not check for leading slashes
@@ -258,22 +274,25 @@ fn parse_authority(buf: &[u8]) -> Result<u16, InvalidUri> {
 /// characters (`//`).
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3.3)
-fn parse_path(buf: &[u8]) -> Result<u16, InvalidUri> {
-    let mut n = 0;
+fn parse_path(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
+    let len = buf.len();
+    let mut cursor = Cursor::new(buf);
 
     loop {
-        match buf.get(n) {
-            Some(b'?') => break,
-            Some(b'#') => return Err(InvalidUri::Fragment),
-            Some(_) => n += 1,
+        match cursor.first() {
+            Some(b'?' | b'#') => break,
+            Some(_) => {
+                // SAFETY: checked by `.first()`
+                unsafe { cursor.advance(1) };
+            }
             None => break,
         }
     }
 
-    match n.try_into() {
-        Ok(ok) => Ok(ok),
-        Err(_) => Err(InvalidUri::TooLong),
-    }
+    *buf = cursor.as_bytes();
+    (len - cursor.remaining())
+        .try_into()
+        .map_err(|_| InvalidUri::TooLong)
 }
 
 // ===== Error =====
@@ -286,8 +305,6 @@ pub enum InvalidUri {
     TooLong,
     /// Invalid character found.
     Char(char),
-    /// Fragment are not allowed.
-    Fragment,
 }
 
 impl std::error::Error for InvalidUri { }
@@ -297,10 +314,9 @@ impl std::fmt::Display for InvalidUri {
         use InvalidUri::*;
         f.write_str("invalid uri: ")?;
         match self {
-            TooLong => todo!(),
-            Incomplete => todo!(),
+            TooLong => f.write_str("data length is too large"),
+            Incomplete => f.write_str("data is incomplete"),
             Char(ch) => write!(f, "unexpected character `{ch}`"),
-            Fragment => todo!(),
         }
     }
 }
