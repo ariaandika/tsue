@@ -114,6 +114,8 @@ impl Uri {
 fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
     let mut bufm = value.as_bytes();
 
+    // ===== Scheme =====
+
     let scheme = parse_scheme(&mut bufm)?;
 
     debug_assert!(!bufm.is_empty(), "`parse_scheme` success with no `:` found");
@@ -132,31 +134,23 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
     // SAFETY: `bufm` is not empty, thus `bufm.len >= 1`
     bufm = unsafe { bufm.get_unchecked(1..) };
 
-    // authority can be empty, but may have the leading '//'
-    let auth_offset;
+    // ===== Authority =====
 
-    let authority = if let Some(b"//") = bufm.first_chunk::<2>() {
-        // SAFETY: checked by `.first_chunk::<2>`
-        bufm = unsafe { bufm.get_unchecked(2..) };
-        auth_offset = 2;
-
-        let auth_len = parse_authority(&mut bufm)?;
-        if auth_len == 0 {
-            None
-        } else {
-            let auth_end = scheme + 3 + auth_len;
-            // SAFETY: addition with constant non zero value
-            Some(unsafe { NonZeroU16::new_unchecked(auth_end) })
-        }
-    } else {
-        auth_offset = 0;
+    let auth_len = parse_authority(&mut bufm)?;
+    let authority = if auth_len <= 2 {
         None
+    } else {
+        let auth_end = scheme + 1 + auth_len;
+        // SAFETY: addition with constant non zero value
+        Some(unsafe { NonZeroU16::new_unchecked(auth_end) })
     };
+
+    // ===== Path =====
 
     let path_len = parse_path(&mut bufm)?;
     let path = match authority {
         Some(ok) => ok.get(),
-        None => scheme + auth_offset + 1,
+        None => scheme + auth_len + 1,
     };
     let query = path + path_len;
 
@@ -182,34 +176,29 @@ fn parse_scheme(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     let len = buf.len();
     let mut cursor = Cursor::new(buf);
 
-    let Some(lead) = cursor.first() else {
-        return Err(Incomplete);
-    };
-
-    // SAFETY: checked by `.first()`
-    unsafe { cursor.advance(1) };
-
-    match lead {
-        b'+' | b'-' | b'.' => {}
-        e if e.is_ascii_alphanumeric() => {}
-        ch => return Err(Char(ch as char)),
-    };
-
-    loop {
-        let Some(byte) = cursor.first() else {
-            return Err(Incomplete);
-        };
-
-        match byte {
+    match cursor.pop_front() {
+        Some(lead) => match lead {
             b'+' | b'-' | b'.' => {}
-            b':' => break,
             e if e.is_ascii_alphanumeric() => {}
             ch => return Err(Char(ch as char)),
-        }
-
-        // SAFETY: checked by `.first()`
-        unsafe { cursor.advance(1) };
+        },
+        None => return Err(Incomplete),
     }
+
+    loop {
+        match cursor.pop_front() {
+            Some(lead) => match lead {
+                b':' => break,
+                b'+' | b'-' | b'.' => {}
+                e if e.is_ascii_alphanumeric() => {}
+                ch => return Err(Char(ch as char)),
+            },
+            None => return Err(Incomplete),
+        }
+    }
+
+    // SAFETY: loop run at least once, which call `.pop_front()`
+    unsafe { cursor.step_back(1) };
 
     *buf = cursor.as_bytes();
     (len - cursor.remaining())
@@ -227,6 +216,14 @@ fn parse_scheme(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
 fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     let len = buf.len();
     let mut cursor = Cursor::new(buf);
+
+    match cursor.first_chunk::<2>() {
+        Some(b"//") => {
+            // SAFETY: checked by `.first_chunk::<2>()`
+            unsafe { cursor.advance(2) }
+        },
+        _ => return Ok(0),
+    };
 
     loop {
         match cursor.first() {
@@ -387,7 +384,7 @@ mod test {
     }
 
     #[test]
-    fn test_parse_failures() {
+    fn test_parse_uri_err() {
         assert!(Uri::try_copy_from("://example.com").is_err());
         assert!(Uri::try_copy_from("ht%tp://example.com").is_err());
         assert!(Uri::try_copy_from("").is_err());
