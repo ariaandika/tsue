@@ -14,6 +14,12 @@ pub struct Entry {
     extra_len: Size,
 }
 
+// SAFETY: EntryExtra pointer is exclusively owned by Entry
+unsafe impl Send for Entry { }
+
+// SAFETY: EntryExtra pointer is exclusively owned by Entry
+unsafe impl Sync for Entry { }
+
 struct EntryExtra {
     value: HeaderValue,
     next: *mut EntryExtra,
