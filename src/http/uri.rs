@@ -4,24 +4,11 @@ use tcio::{slice::Cursor, ByteStr};
 
 /// Uniform Resource Identifier.
 ///
-/// A Uniform Resource Identifier ([URI](https://datatracker.ietf.org/doc/html/rfc3986)) provides a
-/// simple and extensible means for identifying a resource.
+/// A Uniform Resource Identifier ([URI]) provides a simple and extensible means for identifying a
+/// resource.
 ///
-/// The generic URI syntax consists of a hierarchical sequence of components referred to as the scheme,
-/// authority, path, and query.
-///
-/// ```not_rust
-/// URI         = scheme ":" hier-part [ "?" query ]
-///
-/// hier-part   = "//" authority path-abempty
-///             / path-absolute
-///             / path-rootless
-///             / path-empty
-/// ```
-///
-/// The scheme and path components are required, though the path may be empty (no characters).
-/// When authority is present, the path must either be empty or begin with a slash (`/`) character.
-/// When authority is not present, the path cannot begin with two slash characters (`//`).
+/// The generic URI syntax consists of a hierarchical sequence of components referred to as the
+/// scheme, authority, path, and query.
 ///
 /// The following are two example URIs and their component parts:
 ///
@@ -34,6 +21,8 @@ use tcio::{slice::Cursor, ByteStr};
 ///   / \ /                        \
 ///   urn:example:animal:ferret:nose
 /// ```
+///
+/// [URI]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
 //
 //
 // Internally:
