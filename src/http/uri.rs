@@ -118,7 +118,7 @@ impl Uri {
 
 // ===== Parser =====
 
-/// TODO: no uri fragment, will be striped by `parse_path`
+/// NOTE: no uri fragment, will be striped by `trim_fragment`
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3)
 fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
@@ -135,7 +135,6 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
             b'/' | b'*' => (AUTH_NONE, 0, 1),
             _ => (1, 1, 1),
         };
-
         return Ok(Uri {
             value,
             scheme: SCHEME_NONE,
@@ -148,7 +147,7 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
     if bufm[0] == b'/' {
         let path_len = parse_path(&mut bufm)?;
         return Ok(Uri {
-            value,
+            value: trim_fragment(value, path_len),
             scheme: SCHEME_NONE,
             authority: AUTH_NONE,
             path: 0,
@@ -185,7 +184,7 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
     let query = path + path_len;
 
     Ok(Uri {
-        value,
+        value: trim_fragment(value, query),
         scheme,
         authority,
         path,
@@ -348,6 +347,23 @@ fn parse_path(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     cursor.step().u16()
 }
 
+fn trim_fragment(value: ByteStr, query: u16) -> ByteStr {
+    debug_assert!(matches!(
+        value.as_bytes().get(query as usize),
+        Some(b'?') | None
+    ));
+
+    let Some(qr) = value.as_bytes().get(query as usize..) else {
+        return value;
+    };
+
+    let Some(hash) = qr.iter().position(|&e|e==b'#') else {
+        return value;
+    };
+
+    value.slice_ref(&value[..query as usize + hash])
+}
+
 // ===== Helper =====
 
 trait TryU16 {
@@ -477,7 +493,7 @@ mod test {
         }
 
         assert_uri! {
-            "/over/there?name=ferret";
+            "/over/there?name=ferret#head";
             None, None, "/over/there", Some("name=ferret");
         }
 
@@ -492,12 +508,12 @@ mod test {
         }
 
         assert_uri! {
-            "example.com/over/there?name=ferret";
+            "example.com/over/there?name=ferret#head";
             None, Some("example.com"), "/over/there", Some("name=ferret");
         }
 
         assert_uri! {
-            "example.com:80/over/there?name=ferret";
+            "example.com:80/over/there?name=ferret#head";
             None, Some("example.com:80"), "/over/there", Some("name=ferret");
         }
 
@@ -507,12 +523,12 @@ mod test {
         }
 
         assert_uri! {
-            "foo:/over/there?name=ferret";
+            "foo:/over/there?name=ferret#head";
             Some("foo"), None, "/over/there", Some("name=ferret");
         }
 
         assert_uri! {
-            "foo://example.com:80/over/there?name=ferret";
+            "foo://example.com:80/over/there?name=ferret#head";
             Some("foo"), Some("example.com:80"), "/over/there", Some("name=ferret");
         }
     }
