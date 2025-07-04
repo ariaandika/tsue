@@ -1,5 +1,4 @@
 //! Uniform Resource Identifier.
-use std::num::NonZeroU16;
 use tcio::{slice::Cursor, ByteStr};
 
 /// Uniform Resource Identifier.
@@ -24,28 +23,45 @@ use tcio::{slice::Cursor, ByteStr};
 ///
 /// [URI]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
 //
-//
 // Internally:
 //
 // ```
 //   foo://example.com:8042/over/there?name=ferret
-//     _/          ________/    _____/\_____
-//    /           /            /            \
+//     _/          ________|___       \_____
+//    /           /            \            \
 // scheme     authority       path        query
 //
 //   foo:/over/there
 //     _/\___       \_____
 //    /      \            \
 // scheme   path        query
+//
+//   /over/there
+//   \___       \_____
+//       \            \
+//      path        query
+//
+//   example.com
+//      ________|______
+//     /          \    \
+// authority    path  query
 // ```
 #[derive(Debug)]
 pub struct Uri {
     value: ByteStr,
     scheme: u16,
-    authority: Option<NonZeroU16>,
+    authority: u16,
     path: u16,
     query: u16,
 }
+
+const MAX_SCHEME: u16   = 0b0111_1111_1111_1111;
+const SCHEME_NONE: u16  = 0b1000_0000_0000_0000;
+const SCHEME_HTTP: u16  = 0b1000_0000_0000_0001;
+const SCHEME_HTTPS: u16 = 0b1000_0000_0000_0010;
+
+const MAX_AUTH: u16   = 0b0111_1111_1111_1111;
+const AUTH_NONE: u16  = 0b1000_0000_0000_0000;
 
 impl Uri {
     #[inline]
@@ -54,15 +70,29 @@ impl Uri {
     }
 
     #[inline]
-    pub fn scheme_str(&self) -> &str {
-        &self.value[..self.scheme as usize]
+    pub fn scheme_str(&self) -> Option<&str> {
+        match self.scheme {
+            self::SCHEME_NONE => None,
+            self::SCHEME_HTTP => Some("http"),
+            self::SCHEME_HTTPS => Some("https"),
+            _ => Some(&self.value[..self.scheme as usize]),
+        }
     }
 
     #[inline]
     pub fn authority_str(&self) -> Option<&str> {
         match self.authority {
-            Some(ok) => Some(&self.value[(self.scheme + 3) as usize..ok.get() as usize]),
-            None => None,
+            AUTH_NONE => None,
+            auth => {
+                // `3` here is '://' if there is scheme
+                let sc = match self.scheme {
+                    self::SCHEME_NONE => 0,
+                    self::SCHEME_HTTP => 4 + 3,
+                    self::SCHEME_HTTPS => 5 + 3,
+                    len => len as usize + 3,
+                };
+                Some(&self.value[sc..auth as usize])
+            },
         }
     }
 
@@ -88,58 +118,69 @@ impl Uri {
 
 // ===== Parser =====
 
-/// ```not_rust
-/// URI         = scheme ":" hier-part [ "?" query ]
-///
-/// hier-part   = "//" authority path-abempty
-///             / path-absolute
-///             / path-rootless
-///             / path-empty
-/// ```
-///
-/// NOTE: no uri fragment, will be striped by `parse_path`
+/// TODO: no uri fragment, will be striped by `parse_path`
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3)
 fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
     let mut bufm = value.as_bytes();
 
-    // ===== Scheme =====
+    // ===== Common cases =====
 
-    let scheme = parse_scheme(&mut bufm)?;
-
-    debug_assert!(!bufm.is_empty(), "`parse_scheme` success with no `:` found");
-
-    if bufm.len() == 1 {
-        let path = value.len() as _;
-        return Ok(Uri {
-            value,
-            scheme,
-            authority: None,
-            path,
-            query: path,
-        })
+    if bufm.is_empty() {
+        return Err(InvalidUri::Incomplete);
     }
 
-    // SAFETY: `bufm` is not empty, thus `bufm.len >= 1`
-    bufm = unsafe { bufm.get_unchecked(1..) };
+    if bufm.len() == 1 {
+        let (a, p, q) = match bufm[0] {
+            b'/' | b'*' => (AUTH_NONE, 0, 1),
+            _ => (1, 1, 1),
+        };
 
-    // ===== Authority =====
+        return Ok(Uri {
+            value,
+            scheme: SCHEME_NONE,
+            authority: a,
+            path: p,
+            query: q,
+        });
+    }
 
-    let auth_len = parse_authority(&mut bufm)?;
-    let authority = if auth_len <= 2 {
-        None
+    if bufm[0] == b'/' {
+        let path_len = parse_path(&mut bufm)?;
+        return Ok(Uri {
+            value,
+            scheme: SCHEME_NONE,
+            authority: AUTH_NONE,
+            path: 0,
+            query: path_len,
+        });
+    }
+
+    // ===== Leader =====
+
+    let (is_scheme, leader) = parse_leader(&mut bufm)?;
+
+    // could be early check here in case of authority only
+    // if the buffer is already empty
+
+    let (scheme, authority, auth_len) = if is_scheme {
+        let auth_len = parse_authority(&mut bufm)?;
+        let auth = if auth_len <= 2 {
+            AUTH_NONE
+        } else {
+            leader + 1 + auth_len
+        };
+        (leader, auth, auth_len)
     } else {
-        let auth_end = scheme + 1 + auth_len;
-        // SAFETY: addition with constant non zero value
-        Some(unsafe { NonZeroU16::new_unchecked(auth_end) })
+        (SCHEME_NONE, leader, 0)
     };
 
     // ===== Path =====
 
     let path_len = parse_path(&mut bufm)?;
     let path = match authority {
-        Some(ok) => ok.get(),
-        None => scheme + auth_len + 1,
+        AUTH_NONE => scheme + auth_len + 1,
+        _ => authority,
     };
     let query = path + path_len;
 
@@ -152,47 +193,99 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
     })
 }
 
-/// ```not_rust
-/// scheme      = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
-/// ```
+/// find delimiter
 ///
-/// terminated by `:`
+/// if ':' parse as scheme
 ///
-/// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3.1)
-fn parse_scheme(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
+/// otherwise as authority
+///
+/// edge cases if authority contains ':', if the next char is a digit, which presumably a port,
+/// will be parsed as authority, otherwise, as scheme
+///
+/// returns (is_scheme, len)
+fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
     use InvalidUri::*;
 
-    let len = buf.len();
+    const IS_SCHEME: bool = true;
+    const IS_AUTHORITY: bool = false;
+
+    let mut valid_scheme = Ok(());
     let mut cursor = Cursor::new(buf);
 
     match cursor.pop_front() {
-        Some(lead) => match lead {
-            b'+' | b'-' | b'.' => {}
-            e if e.is_ascii_alphanumeric() => {}
-            ch => return Err(Char(ch as char)),
-        },
+        Some(lead) if lead.is_ascii_alphanumeric() => {},
+        Some(lead) => valid_scheme = Err(Char(lead as char)),
         None => return Err(Incomplete),
     }
 
     loop {
         match cursor.pop_front() {
             Some(lead) => match lead {
-                b':' => break,
+                // authority, no trailing colon
+                b'/' | b'?' | b'#' => {
+                    // SAFETY: called `.pop_front()`
+                    unsafe { cursor.step_back(1) };
+                    *buf = cursor.as_bytes();
+                    return match cursor.step().u16_max(MAX_AUTH) {
+                        Ok(ok) => Ok((IS_AUTHORITY, ok)),
+                        Err(_) => Err(TooLong)
+                    };
+                },
+                b':' => {
+                    // maybe a port
+                    let Some(b'0'..=b'9') = cursor.first() else {
+                        break;
+                    };
+
+                    let mut remain = cursor.as_bytes();
+                    let len = cursor.step();
+                    let remain_len = parse_authority_partial(&mut remain)?;
+                    *buf = remain;
+                    return Ok((IS_AUTHORITY, (len + remain_len).u16_max(MAX_AUTH)?));
+                },
+
                 b'+' | b'-' | b'.' => {}
                 e if e.is_ascii_alphanumeric() => {}
-                ch => return Err(Char(ch as char)),
+                ch => if valid_scheme.is_ok() {
+                    valid_scheme = Err(Char(ch as char));
+                },
             },
-            None => return Err(Incomplete),
+            // no colon, authority only
+            None => {
+                *buf = cursor.as_bytes();
+                return match cursor.step().u16_max(MAX_AUTH) {
+                    Ok(ok) => Ok((IS_AUTHORITY, ok)),
+                    Err(_) => Err(TooLong)
+                };
+            },
         }
     }
 
-    // SAFETY: loop run at least once, which call `.pop_front()`
-    unsafe { cursor.step_back(1) };
+    valid_scheme?;
+
+    // note that ':' got eaten here
+    *buf = cursor.as_bytes();
+
+    // but the scheme length does not include ':'
+    Ok((IS_SCHEME, cursor.step().u16_max(MAX_SCHEME)? - 1))
+}
+
+fn parse_authority_partial(buf: &mut &[u8]) -> Result<usize, InvalidUri> {
+    let mut cursor = Cursor::new(buf);
+
+    loop {
+        match cursor.first() {
+            Some(b'/' | b'?' | b'#') => break,
+            Some(_) => {
+                // SAFETY: checked by `.first()`
+                unsafe { cursor.advance(1) };
+            },
+            None => break,
+        }
+    }
 
     *buf = cursor.as_bytes();
-    (len - cursor.remaining())
-        .try_into()
-        .map_err(|_| TooLong)
+    Ok(cursor.step())
 }
 
 /// ```not_rust
@@ -203,7 +296,6 @@ fn parse_scheme(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3.2)
 fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
-    let len = buf.len();
     let mut cursor = Cursor::new(buf);
 
     match cursor.first_chunk::<2>() {
@@ -226,32 +318,10 @@ fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     }
 
     *buf = cursor.as_bytes();
-    (len - cursor.remaining())
-        .try_into()
-        .map_err(|_| InvalidUri::TooLong)
+    cursor.step().u16()
 }
 
 /// NOTE: does not check for leading slashes
-///
-/// ```not_rust
-/// path          = path-abempty    ; begins with "/" or is empty
-///               / path-absolute   ; begins with "/" but not "//"
-///               / path-noscheme   ; begins with a non-colon segment
-///               / path-rootless   ; begins with a segment
-///               / path-empty      ; zero characters
-///
-/// path-abempty  = *( "/" segment )
-/// path-absolute = "/" [ segment-nz *( "/" segment ) ]
-/// path-noscheme = segment-nz-nc *( "/" segment )
-/// path-rootless = segment-nz *( "/" segment )
-/// path-empty    = 0<pchar>
-/// segment       = *pchar
-/// segment-nz    = 1*pchar
-/// segment-nz-nc = 1*( unreserved / pct-encoded / sub-delims / "@" )
-///                 ; non-zero-length segment without any colon ":"
-///
-/// pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
-/// ```
 ///
 /// If a URI contains an authority component, then the path component must either be empty or begin
 /// with a slash (`/`) character.
@@ -261,7 +331,6 @@ fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3.3)
 fn parse_path(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
-    let len = buf.len();
     let mut cursor = Cursor::new(buf);
 
     loop {
@@ -276,9 +345,28 @@ fn parse_path(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     }
 
     *buf = cursor.as_bytes();
-    (len - cursor.remaining())
-        .try_into()
-        .map_err(|_| InvalidUri::TooLong)
+    cursor.step().u16()
+}
+
+// ===== Helper =====
+
+trait TryU16 {
+    fn u16(self) -> Result<u16, InvalidUri>;
+
+    fn u16_max(self, max: u16) -> Result<u16, InvalidUri>;
+}
+
+impl TryU16 for usize {
+    fn u16(self) -> Result<u16, InvalidUri> {
+        self.try_into().map_err(|_|InvalidUri::TooLong)
+    }
+
+    fn u16_max(self, max: u16) -> Result<u16, InvalidUri> {
+        match self.try_into() {
+            Ok(ok) if ok <= max => Ok(ok),
+            _ => Err(InvalidUri::TooLong),
+        }
+    }
 }
 
 // ===== Error =====
@@ -311,6 +399,13 @@ impl std::fmt::Display for InvalidUri {
 mod test {
     use super::*;
 
+    #[allow(unused, reason = "debugging in test")]
+    macro_rules! panic_uri {
+        ($e:expr) => {
+            panic!("{:?}",Uri::try_copy_from($e))
+        };
+    }
+
     macro_rules! assert_uri {
         (
             $rw:expr;
@@ -328,55 +423,98 @@ mod test {
     fn test_parse_uri() {
         assert_uri! {
             "http://localhost:3000/users";
-            "http", Some("localhost:3000"), "/users", None;
+            Some("http"), Some("localhost:3000"), "/users", None;
         }
 
         assert_uri! {
             "https://example.com/search?q=rust&lang=en";
-            "https", Some("example.com"), "/search", Some("q=rust&lang=en");
+            Some("https"), Some("example.com"), "/search", Some("q=rust&lang=en");
         }
 
         assert_uri! {
             "postgresql://user@localhost";
-            "postgresql", Some("user@localhost"), "", None;
+            Some("postgresql"), Some("user@localhost"), "", None;
         }
 
         assert_uri! {
             "mailto:";
-            "mailto", None, "", None;
+            Some("mailto"), None, "", None;
         }
 
         assert_uri! {
             "http://[2001:db8::1]:8080/path";
-            "http", Some("[2001:db8::1]:8080"), "/path", None;
+            Some("http"), Some("[2001:db8::1]:8080"), "/path", None;
         }
 
         assert_uri! {
             "file:///etc/hosts";
-            "file", None, "/etc/hosts", None;
+            Some("file"), None, "/etc/hosts", None;
         }
 
         assert_uri! {
             "https://example.com/foo%20bar?name=John%20Doe";
-            "https", Some("example.com"), "/foo%20bar", Some("name=John%20Doe");
-        }
-
-        assert_uri! {
-            "foo:/bar";
-            "foo", None, "/bar", None;
+            Some("https"), Some("example.com"), "/foo%20bar", Some("name=John%20Doe");
         }
 
         assert_uri! {
             "https://example.com?";
-            "https", Some("example.com"), "", Some("");
+            Some("https"), Some("example.com"), "", Some("");
         }
     }
 
     #[test]
-    fn test_parse_uri_err() {
-        assert!(Uri::try_copy_from("://example.com").is_err());
-        assert!(Uri::try_copy_from("ht%tp://example.com").is_err());
+    fn test_parse_uri_edge_cases() {
         assert!(Uri::try_copy_from("").is_err());
+
+        assert_uri! {
+            "*";
+            None, None, "*", None;
+        }
+
+        assert_uri! {
+            "/";
+            None, None, "/", None;
+        }
+
+        assert_uri! {
+            "/over/there?name=ferret";
+            None, None, "/over/there", Some("name=ferret");
+        }
+
+        assert_uri! {
+            "d";
+            None, Some("d"), "", None;
+        }
+
+        assert_uri! {
+            "example.com";
+            None, Some("example.com"), "", None;
+        }
+
+        assert_uri! {
+            "example.com/over/there?name=ferret";
+            None, Some("example.com"), "/over/there", Some("name=ferret");
+        }
+
+        assert_uri! {
+            "example.com:80/over/there?name=ferret";
+            None, Some("example.com:80"), "/over/there", Some("name=ferret");
+        }
+
+        assert_uri! {
+            "foo:";
+            Some("foo"), None, "", None;
+        }
+
+        assert_uri! {
+            "foo:/over/there?name=ferret";
+            Some("foo"), None, "/over/there", Some("name=ferret");
+        }
+
+        assert_uri! {
+            "foo://example.com:80/over/there?name=ferret";
+            Some("foo"), Some("example.com:80"), "/over/there", Some("name=ferret");
+        }
     }
 }
 
