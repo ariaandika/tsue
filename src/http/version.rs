@@ -1,8 +1,15 @@
-use std::fmt;
-
 /// HTTP Version.
 #[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct Version(Inner);
+
+#[derive(PartialEq, PartialOrd, Copy, Clone, Eq, Ord, Hash)]
+enum Inner {
+    Http09,
+    Http10,
+    Http11,
+    H2,
+    H3,
+}
 
 impl Version {
     /// [`HTTP/0.9`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Evolution_of_HTTP#http0.9_%E2%80%93_the_one-line_protocol)
@@ -21,6 +28,7 @@ impl Version {
     pub const HTTP_3: Version = Version(Inner::H3);
 
     /// Returns string representation of HTTP version.
+    #[inline]
     pub const fn as_str(&self) -> &'static str {
         match self.0 {
             Inner::Http09 => "HTTP/0.9",
@@ -32,15 +40,6 @@ impl Version {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Copy, Clone, Eq, Ord, Hash)]
-enum Inner {
-    Http09,
-    Http10,
-    Http11,
-    H2,
-    H3,
-}
-
 impl Default for Version {
     #[inline]
     fn default() -> Version {
@@ -48,8 +47,8 @@ impl Default for Version {
     }
 }
 
-impl fmt::Debug for Version {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Debug for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         use self::Inner::*;
 
         f.write_str(match self.0 {

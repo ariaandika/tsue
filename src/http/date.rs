@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Create [httpdate][rfc] for current time.
 ///
-/// [rfc]: <https://datatracker.ietf.org/doc/html/rfc9110#section-5.6.7>
+/// [rfc]: <https://datatracker.ietf.org/doc/html/rfc9110#name-date-time-formats>
 #[inline]
 pub fn httpdate_now() -> [u8; 29] {
     httpdate(SystemTime::now())
@@ -10,7 +10,7 @@ pub fn httpdate_now() -> [u8; 29] {
 
 /// Create [httpdate][rfc] with given time.
 ///
-/// [rfc]: <https://datatracker.ietf.org/doc/html/rfc9110#section-5.6.7>
+/// [rfc]: <https://datatracker.ietf.org/doc/html/rfc9110#name-date-time-formats>
 pub fn httpdate(v: SystemTime) -> [u8; 29] {
     let dur = v.duration_since(UNIX_EPOCH).unwrap();
 

@@ -1,31 +1,10 @@
-/// HTTP Status Code.
-use std::{fmt, num::NonZeroU16};
+use std::num::NonZeroU16;
 
-/// HTTP Status Code.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// HTTP [Status Code][rfc].
+///
+/// [rfc]: <https://datatracker.ietf.org/doc/html/rfc9110#name-status-codes>
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StatusCode(NonZeroU16);
-
-impl StatusCode {
-    /// Returns status code value, e.g: `200`.
-    #[inline]
-    pub fn status(&self) -> u16 {
-        self.0.get()
-    }
-}
-
-impl fmt::Display for StatusCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.status_str())?;
-        f.write_str(" ")?;
-        f.write_str(self.message())
-    }
-}
-
-impl fmt::Debug for StatusCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("StatusCode").field(&self.as_str()).finish()
-    }
-}
 
 impl Default for StatusCode {
     #[inline]
@@ -34,7 +13,65 @@ impl Default for StatusCode {
     }
 }
 
-// <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status>
+macro_rules! status_code_v3 {
+    (
+        $(
+            $(#[$doc:meta])*
+            $int:literal $id:ident $msg:literal;
+        )*
+    ) => {
+        impl StatusCode {
+            /// Returns status code value, e.g: `200`.
+            #[inline]
+            pub const fn status(&self) -> u16 {
+                self.0.get()
+            }
+
+            /// Returns status code and message as string slice, e.g: `"200 OK"`.
+            #[inline]
+            pub const fn as_str(&self) -> &'static str {
+                match self.0.get() {
+                    $(
+                        $int => concat!(stringify!($int)," ",$msg),
+                    )*
+                    // SAFETY: StatusCode value is privately constructed and immutable
+                    _ => unsafe { std::hint::unreachable_unchecked() },
+                }
+            }
+
+            /// Returns status code as str, e.g: `"200"`.
+            #[inline]
+            pub const fn status_str(&self) -> &'static str {
+                match self.0.get() {
+                    $(
+                        $int => stringify!($int),
+                    )*
+                    // SAFETY: StatusCode value is privately constructed and immutable
+                    _ => unsafe { std::hint::unreachable_unchecked() },
+                }
+            }
+
+            /// Returns status message, e.g: `"OK"`.
+            #[inline]
+            pub const fn message(&self) -> &'static str {
+                match self.0.get() {
+                    $(
+                        $int => $msg,
+                    )*
+                    // SAFETY: StatusCode value is privately constructed and immutable
+                    _ => unsafe { std::hint::unreachable_unchecked() },
+                }
+            }
+        }
+
+        impl StatusCode {
+            $(
+                $(#[$doc])*
+                pub const $id: Self = Self(NonZeroU16::new($int).unwrap());
+            )*
+        }
+    };
+}
 
 status_code_v3! {
     /// `101`, This code is sent in response to an `Upgrade` request header from the client and indicates
@@ -130,59 +167,15 @@ status_code_v3! {
     505 HTTP_VERSION_NOT_SUPPORTED "HTTP Version Not Supported";
 }
 
-// ===== Macros =====
-
-macro_rules! status_code_v3 {
-    (
-        $(
-            $(#[$doc:meta])*
-            $int:literal $id:ident $msg:literal;
-        )*
-    ) => {
-        impl StatusCode {
-            $(
-                $(#[$doc])*
-                pub const $id: Self = Self(NonZeroU16::new($int).unwrap());
-            )*
-
-            /// Returns status code and message as string slice, e.g: `"200 OK"`.
-            #[inline]
-            pub const fn as_str(&self) -> &'static str {
-                match self.0.get() {
-                    $(
-                        $int => concat!(stringify!($int)," ",$msg),
-                    )*
-                    // SAFETY: StatusCode value is privately constructed and immutable
-                    _ => unsafe { std::hint::unreachable_unchecked() },
-                }
-            }
-
-            /// Returns status code as str, e.g: `"200"`.
-            #[inline]
-            pub const fn status_str(&self) -> &'static str {
-                match self.0.get() {
-                    $(
-                        $int => stringify!($int),
-                    )*
-                    // SAFETY: StatusCode value is privately constructed and immutable
-                    _ => unsafe { std::hint::unreachable_unchecked() },
-                }
-            }
-
-            /// Returns status message, e.g: `"OK"`.
-            #[inline]
-            pub const fn message(&self) -> &'static str {
-                match self.0.get() {
-                    $(
-                        $int => $msg,
-                    )*
-                    // SAFETY: StatusCode value is privately constructed and immutable
-                    _ => unsafe { std::hint::unreachable_unchecked() },
-                }
-            }
-        }
-    };
+impl std::fmt::Display for StatusCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
-use status_code_v3;
+impl std::fmt::Debug for StatusCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_tuple("StatusCode").field(&self.as_str()).finish()
+    }
+}
 

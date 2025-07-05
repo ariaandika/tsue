@@ -64,11 +64,19 @@ const MAX_AUTH: u16   = 0b0111_1111_1111_1111;
 const AUTH_NONE: u16  = 0b1000_0000_0000_0000;
 
 impl Uri {
+    /// Try parse uri from [`ByteStr`].
+    #[inline]
+    pub fn try_from_shared(value: impl Into<ByteStr>) -> Result<Self, InvalidUri> {
+        parse_uri(value.into())
+    }
+
+    /// Copy and try parse uri from `str`.
     #[inline]
     pub fn try_copy_from(value: &str) -> Result<Self, InvalidUri> {
         parse_uri(ByteStr::copy_from_str(value))
     }
 
+    /// Returns the scheme as `str`, e.g: `http`.
     #[inline]
     pub fn scheme_str(&self) -> Option<&str> {
         match self.scheme {
@@ -79,6 +87,7 @@ impl Uri {
         }
     }
 
+    /// Returns the authority as `str`, e.g: `example.com:80`.
     #[inline]
     pub fn authority_str(&self) -> Option<&str> {
         match self.authority {
@@ -96,11 +105,13 @@ impl Uri {
         }
     }
 
+    /// Returns the path as `str`, e.g: `/over/there`.
     #[inline]
     pub fn path(&self) -> &str {
         &self.value[self.path as usize..self.query as usize]
     }
 
+    /// Returns the query as `str`, e.g: `name=joe&query=4`.
     #[inline]
     pub fn query(&self) -> Option<&str> {
         if self.query as usize == self.value.len() {
@@ -110,6 +121,7 @@ impl Uri {
         }
     }
 
+    /// Returns the path and query as `str`, e.g: `/over/there?name=joe&query=4`.
     #[inline]
     pub fn path_and_query(&self) -> &str {
         &self.value[self.path as usize..]
@@ -387,7 +399,6 @@ impl TryU16 for usize {
 
 // ===== Error =====
 
-#[derive(Debug)]
 pub enum InvalidUri {
     /// Bytes ends before all components parsed.
     Incomplete,
@@ -400,7 +411,7 @@ pub enum InvalidUri {
 impl std::error::Error for InvalidUri { }
 
 impl std::fmt::Display for InvalidUri {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         use InvalidUri::*;
         f.write_str("invalid uri: ")?;
         match self {
@@ -408,6 +419,12 @@ impl std::fmt::Display for InvalidUri {
             Incomplete => f.write_str("data is incomplete"),
             Char(ch) => write!(f, "unexpected character `{ch}`"),
         }
+    }
+}
+
+impl std::fmt::Debug for InvalidUri {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "\"{self}\"")
     }
 }
 

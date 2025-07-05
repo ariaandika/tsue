@@ -1,6 +1,7 @@
 use std::{
     any::{Any, TypeId},
-    collections::HashMap, fmt, hash::{BuildHasherDefault, Hasher},
+    collections::HashMap,
+    hash::{BuildHasherDefault, Hasher},
 };
 
 #[derive(Default)]
@@ -20,12 +21,13 @@ impl Hasher for NoopHasher {
     }
 }
 
+type AnyMap =
+    HashMap<TypeId, Box<dyn AnyClone + Send + Sync + 'static>, BuildHasherDefault<NoopHasher>>;
+
 /// HTTP Extensions.
 #[derive(Clone)]
 pub struct Extensions {
-    map: Option<
-        HashMap<TypeId, Box<dyn AnyClone + Send + Sync + 'static>, BuildHasherDefault<NoopHasher>>,
-    >,
+    map: Option<Box<AnyMap>>,
 }
 
 impl Extensions {
@@ -40,7 +42,7 @@ impl Extensions {
     /// Returns the number of elements in the map.
     #[inline]
     pub fn len(&self) -> usize {
-        self.map.as_ref().map(HashMap::len).unwrap_or_default()
+        self.map.as_deref().map(HashMap::len).unwrap_or_default()
     }
 
     /// Returns `true` if the map contains no elements.
@@ -51,6 +53,7 @@ impl Extensions {
     }
 
     /// Returns a reference to the value corresponding to the type.
+    #[inline]
     pub fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.map
             .as_ref()
@@ -59,6 +62,7 @@ impl Extensions {
     }
 
     /// Returns a mutable reference to the value corresponding to the type.
+    #[inline]
     pub fn get_mut<T: Any>(&mut self) -> Option<&mut T> {
         self.map
             .as_mut()
@@ -67,6 +71,7 @@ impl Extensions {
     }
 
     /// Inserts a value into the map.
+    #[inline]
     pub fn insert<T: Clone + Send + Sync + 'static>(&mut self, value: T) -> Option<T> {
         self.map
             .get_or_insert_default()
@@ -75,6 +80,7 @@ impl Extensions {
     }
 
     /// Removes and returns the value at the type if the type was previously in the map.
+    #[inline]
     pub fn remove<T: Any>(&mut self) -> Option<T> {
         self.map
             .as_mut()
@@ -83,6 +89,7 @@ impl Extensions {
     }
 
     /// Clears the map. Keeps the allocated memory for reuse.
+    #[inline]
     pub fn clear(&mut self) {
         if let Some(map) = self.map.as_mut() {
             map.clear();
@@ -97,12 +104,12 @@ impl Default for Extensions {
     }
 }
 
-impl fmt::Debug for Extensions {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Debug for Extensions {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("Extensions")
             .field(
                 "length",
-                &self.map.as_ref().map(HashMap::len).unwrap_or_default(),
+                &self.map.as_deref().map(HashMap::len).unwrap_or_default(),
             )
             .finish()
     }
@@ -143,6 +150,7 @@ impl<T: Clone + Send + Sync + 'static> AnyClone for T {
 }
 
 impl Clone for Box<dyn AnyClone + Send + Sync> {
+    #[inline]
     fn clone(&self) -> Self {
         (**self).clone_box()
     }
