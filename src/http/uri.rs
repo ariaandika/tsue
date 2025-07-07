@@ -1,9 +1,11 @@
-//! Uniform Resource Identifier.
+//! HTTP [URI][rfc].
+//!
+//! [rfc]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
 use tcio::{slice::Cursor, ByteStr};
 
-/// Uniform Resource Identifier.
+/// HTTP [URI][rfc].
 ///
-/// A Uniform Resource Identifier ([URI]) provides a simple and extensible means for identifying a
+/// A Uniform Resource Identifier ([URI][rfc]) provides a simple and extensible means for identifying a
 /// resource.
 ///
 /// The generic URI syntax consists of a hierarchical sequence of components referred to as the
@@ -21,7 +23,7 @@ use tcio::{slice::Cursor, ByteStr};
 ///   urn:example:animal:ferret:nose
 /// ```
 ///
-/// [URI]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
+/// [rfc]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
 //
 // Internally:
 //
