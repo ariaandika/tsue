@@ -5,7 +5,7 @@ use super::{HeaderName, HeaderValue};
 type Size = u16;
 
 /// Header Entry.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     hash: Size,
     name: HeaderName,

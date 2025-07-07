@@ -48,7 +48,7 @@ use tcio::{slice::Cursor, ByteStr};
 //     /          \    \
 // authority    path  query
 // ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Uri {
     value: ByteStr,
     scheme: u16,
@@ -387,6 +387,18 @@ fn trim_fragment(value: ByteStr, query: u16) -> ByteStr {
     };
 
     value.slice_ref(&value[..query as usize + hash])
+}
+
+impl Default for Uri {
+    fn default() -> Self {
+        Self {
+            value: ByteStr::from_static("/"),
+            scheme: SCHEME_NONE,
+            authority: AUTH_NONE,
+            path: 0,
+            query: 1,
+        }
+    }
 }
 
 // ===== Formatting =====

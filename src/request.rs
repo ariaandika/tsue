@@ -8,7 +8,7 @@ use crate::{
 pub mod parser;
 
 /// HTTP Request Parts.
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct Parts {
     pub method: Method,
     pub uri: Uri,
@@ -18,7 +18,7 @@ pub struct Parts {
 }
 
 /// HTTP Request.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Request {
     parts: Parts,
     body: Body,

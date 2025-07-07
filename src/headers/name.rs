@@ -3,16 +3,19 @@ use tcio::ByteStr;
 // ===== HeaderName =====
 
 /// HTTP Header name.
+#[derive(Clone)]
 pub struct HeaderName {
     repr: Repr,
 }
 
+#[derive(Clone)]
 enum Repr {
     Standard(StandardHeader),
     Bytes(ByteStr),
 }
 
 /// Precomputed known header name.
+#[derive(Clone)]
 struct StandardHeader {
     name: &'static str,
     hash: u16,

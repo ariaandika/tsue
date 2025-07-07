@@ -13,7 +13,7 @@ use super::{
 type Size = u16;
 
 /// HTTP Headers Multimap.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct HeaderMap {
     indices: Box<[Slot]>,
     entries: Vec<Entry>,

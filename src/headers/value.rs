@@ -8,10 +8,12 @@ use tcio::ByteStr;
 // ===== HeaderValue =====
 
 /// HTTP Header Value.
+#[derive(Clone)]
 pub struct HeaderValue {
     repr: Repr,
 }
 
+#[derive(Clone)]
 enum Repr {
     Bytes(Bytes),
     Str(ByteStr),
