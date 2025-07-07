@@ -49,9 +49,9 @@ impl Response {
         /// Returns mutable reference to [`Version`].
         version_mut() -> Version;
 
-        /// Returns shared reference to [`Method`].
+        /// Returns shared reference to [`StatusCode`].
         status(),
-        /// Returns mutable reference to [`Method`].
+        /// Returns mutable reference to [`StatusCode`].
         status_mut() -> StatusCode;
 
         /// Returns shared reference to [`HeaderMap`].

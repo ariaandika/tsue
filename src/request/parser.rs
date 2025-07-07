@@ -4,7 +4,7 @@ use tcio::slice::{range_of, slice_of, slice_of_bytes};
 
 use crate::http::{Method, Version};
 
-/// Parse result of [`parse_line`].
+/// Result of [`parse_line`].
 #[derive(Debug)]
 pub struct RequestLine<'a> {
     pub method: Method,
@@ -114,14 +114,14 @@ pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLine<'a>>>
 
 // ===== Header =====
 
-/// Parse result of [`parse_header`].
+/// Result of [`parse_header`].
 #[derive(Debug)]
-pub struct Header<'a> {
+pub struct HeaderRef<'a> {
     pub name: &'a str,
     pub value: &'a [u8],
 }
 
-impl<'a> Header<'a> {
+impl<'a> HeaderRef<'a> {
     pub const EMPTY: Self = Self { name: "", value: b"" };
 }
 
@@ -129,14 +129,14 @@ impl<'a> Header<'a> {
 ///
 /// Note that this does not check for empty line which indicate the end of headers in HTTP.
 #[inline]
-pub fn parse_header_ref(mut buf: &[u8]) -> io::Result<Option<Header<'_>>> {
+pub fn parse_header_ref(mut buf: &[u8]) -> io::Result<Option<HeaderRef<'_>>> {
     parse_header(&mut buf)
 }
 
 /// Parse HTTP Header.
 ///
 /// Note that this does not check for empty line which indicate the end of headers in HTTP.
-pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
+pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<HeaderRef<'a>>> {
     let mut bytes = *buf;
 
     let name = {
@@ -183,22 +183,22 @@ pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
 
     *buf = bytes;
 
-    Ok(Some(Header { name, value }))
+    Ok(Some(HeaderRef { name, value }))
 }
 
 pub fn parse_headers<'a, 'h>(
     buf: &mut &'a [u8],
-    headers: &'h mut [Header<'a>],
-) -> io::Result<Option<&'h mut [Header<'a>]>> {
+    headers: &'h mut [HeaderRef<'a>],
+) -> io::Result<Option<&'h mut [HeaderRef<'a>]>> {
     // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
-    let headers = unsafe { &mut *(headers as *mut [Header] as *mut [MaybeUninit<Header>]) };
+    let headers = unsafe { &mut *(headers as *mut [HeaderRef] as *mut [MaybeUninit<HeaderRef>]) };
     parse_headers_uninit(buf, headers)
 }
 
 pub fn parse_headers_uninit<'a, 'h>(
     buf: &mut &'a [u8],
-    headers: &'h mut [MaybeUninit<Header<'a>>],
-) -> io::Result<Option<&'h mut [Header<'a>]>> {
+    headers: &'h mut [MaybeUninit<HeaderRef<'a>>],
+) -> io::Result<Option<&'h mut [HeaderRef<'a>]>> {
     let mut bytes = *buf;
     let mut n = 0;
 
@@ -227,14 +227,13 @@ pub fn parse_headers_uninit<'a, 'h>(
     *buf = bytes;
     let headers = &mut headers[..n];
     // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
-    let headers = unsafe { &mut *assume_init_slice!(headers as Header) };
+    let headers = unsafe { &mut *assume_init_slice!(headers as HeaderRef) };
     Ok(Some(headers))
 }
 
 // ===== HeaderRange =====
 
-/// Parse result of [`parse_header`].
-///
+/// Result of [`parse_header`].
 #[derive(Debug)]
 pub struct HeaderRange {
     // INVARIANT: range buffer is valid UTF-8
@@ -243,7 +242,7 @@ pub struct HeaderRange {
 }
 
 impl HeaderRange {
-    fn new(header: &Header) -> Self {
+    fn new(header: &HeaderRef) -> Self {
         HeaderRange {
             // INVARIANT: range buffer is valid UTF-8
             name: range_of(header.name.as_bytes()),
@@ -260,9 +259,9 @@ impl HeaderRange {
         slice_of_bytes(self.value.clone(), bytes)
     }
 
-    /// Resolve the range with given `buf` to [`Header`].
-    pub fn resolve_ref<'b>(&self, buf: &'b [u8]) -> Header<'b> {
-        Header {
+    /// Resolve the range with given `buf` to [`HeaderRef`].
+    pub fn resolve_ref<'b>(&self, buf: &'b [u8]) -> HeaderRef<'b> {
+        HeaderRef {
             // SAFETY: invariant of `self.name` is a valid UTF-8
             name: unsafe { str::from_utf8_unchecked(slice_of(self.name.clone(), buf)) },
             value: slice_of(self.value.clone(), buf),
@@ -403,7 +402,7 @@ mod test {
     #[test]
     fn test_parse_headers() {
         let mut buf = &HEADERS.as_bytes()[..16];
-        let mut headers = [Header::EMPTY;4];
+        let mut headers = [HeaderRef::EMPTY;4];
 
         assert!(parse_headers(&mut buf, &mut headers).unwrap().is_none());
 

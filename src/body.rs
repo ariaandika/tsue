@@ -75,7 +75,7 @@ impl BodyInner {
 
 // TODO: streaming response body ?
 
-/// HTTP Body.
+/// Request and Response Body.
 #[derive(Debug)]
 pub struct Body {
     inner: Option<Arc<BodyInner>>,
