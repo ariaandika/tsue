@@ -7,7 +7,7 @@ mod date;
 
 pub mod uri;
 
-pub use method::{Method, UnknownMethod};
+pub use method::Method;
 #[doc(inline)]
 pub use uri::Uri;
 pub use version::Version;

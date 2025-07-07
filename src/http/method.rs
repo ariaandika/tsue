@@ -58,34 +58,6 @@ impl std::fmt::Display for Method {
     }
 }
 
-// ===== Error =====
-
-/// An error when trying to parse [`Method`] from a string.
-pub struct UnknownMethod;
-
-impl std::str::FromStr for Method {
-    type Err = UnknownMethod;
-
-    #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_bytes(s.as_bytes()).ok_or(UnknownMethod)
-    }
-}
-
-impl std::error::Error for UnknownMethod { }
-
-impl std::fmt::Display for UnknownMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("unknown method")
-    }
-}
-
-impl std::fmt::Debug for UnknownMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("\"unknown method\"")
-    }
-}
-
 // ===== Macros =====
 
 macro_rules! forward {
