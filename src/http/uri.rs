@@ -66,11 +66,6 @@ const MAX_AUTH: u16   = 0b0111_1111_1111_1111;
 const AUTH_NONE: u16  = 0b1000_0000_0000_0000;
 
 impl Uri {
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        &self.value
-    }
-
     /// Try parse uri from [`ByteStr`].
     #[inline]
     pub fn try_from_shared(value: impl Into<ByteStr>) -> Result<Self, InvalidUri> {
@@ -81,6 +76,12 @@ impl Uri {
     #[inline]
     pub fn try_copy_from(value: &str) -> Result<Self, InvalidUri> {
         parse_uri(ByteStr::copy_from_str(value))
+    }
+
+    /// Returns the str representation.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.value
     }
 
     /// Returns the scheme as `str`, e.g: `http`.
@@ -182,13 +183,18 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
     // if the buffer is already empty
 
     let (scheme, authority, auth_len) = if is_scheme {
+        let scheme = match &value[..leader as usize] {
+            "http" => SCHEME_HTTP,
+            "https" => SCHEME_HTTPS,
+            _ => leader,
+        };
         let auth_len = parse_authority(&mut bufm)?;
         let auth = if auth_len <= 2 {
             AUTH_NONE
         } else {
             leader + 1 + auth_len
         };
-        (leader, auth, auth_len)
+        (scheme, auth, auth_len)
     } else {
         (SCHEME_NONE, leader, 0)
     };
