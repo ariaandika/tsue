@@ -5,8 +5,6 @@ use crate::{
     http::{Extensions, StatusCode, Version},
 };
 
-pub mod write;
-
 /// HTTP Response Parts.
 #[derive(Debug, Default)]
 pub struct Parts {
@@ -24,6 +22,11 @@ pub struct Response {
 }
 
 impl Response {
+    #[inline]
+    pub fn from_parts(parts: Parts, body: Body) -> Self {
+        Self { parts, body }
+    }
+
     #[inline]
     pub fn parts(&self) -> &Parts {
         &self.parts

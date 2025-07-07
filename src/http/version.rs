@@ -47,7 +47,7 @@ impl Default for Version {
     }
 }
 
-impl std::fmt::Debug for Version {
+impl std::fmt::Display for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         use self::Inner::*;
 
@@ -61,3 +61,8 @@ impl std::fmt::Debug for Version {
     }
 }
 
+impl std::fmt::Debug for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "\"{self}\"")
+    }
+}

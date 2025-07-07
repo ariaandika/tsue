@@ -1,6 +1,6 @@
 //! HTTP Request Parser
 use std::{io, mem::MaybeUninit};
-use tcio::range_of;
+use tcio::slice::{range_of, slice_of, slice_of_bytes};
 
 use crate::http::{Method, Version};
 
@@ -251,42 +251,17 @@ impl HeaderRange {
         }
     }
 
+    pub fn resolve_name(&self, bytes: &bytes::Bytes) -> tcio::ByteStr {
+        // SAFETY: invariant of `name` range is valid utf-8
+        unsafe { tcio::ByteStr::from_utf8_unchecked(slice_of_bytes(self.name.clone(), bytes)) }
+    }
+
+    pub fn resolve_value(&self, bytes: &bytes::Bytes) -> bytes::Bytes {
+        slice_of_bytes(self.value.clone(), bytes)
+    }
+
     /// Resolve the range with given `buf` to [`Header`].
     pub fn resolve_ref<'b>(&self, buf: &'b [u8]) -> Header<'b> {
-        // TODO: change to use tcio on v0.1.3
-        fn slice_of(range: std::ops::Range<usize>, buf: &[u8]) -> &[u8] {
-            let buf_p = buf.as_ptr() as usize;
-            let buf_len = buf.as_ptr() as usize;
-            let sub_p = range.start;
-            let sub_len = range.end.saturating_sub(range.start);
-
-            if sub_len == 0 {
-                return &[]
-            }
-
-            assert!(
-                sub_p >= buf_p,
-                "range pointer ({:p}) is smaller than `buf` pointer ({:p})",
-                sub_p as *const u8,
-                buf.as_ptr(),
-            );
-            assert!(
-                sub_p + sub_len <= buf_p + buf_len,
-                "subset is out of bounds: self = ({:p}, {}), subset = ({:p}, {})",
-                buf.as_ptr(),
-                buf_len,
-                sub_p as *const u8,
-                sub_len,
-            );
-
-            let offset = sub_p.saturating_sub(buf_p);
-
-            // SAFETY:
-            // - sub_p >= buf_p
-            // - sub_p + sub_len <= buf_p + buf_len
-            unsafe { buf.get_unchecked(offset..offset + sub_len) }
-        }
-
         Header {
             // SAFETY: invariant of `self.name` is a valid UTF-8
             name: unsafe { str::from_utf8_unchecked(slice_of(self.name.clone(), buf)) },

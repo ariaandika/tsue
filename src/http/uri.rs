@@ -64,6 +64,11 @@ const MAX_AUTH: u16   = 0b0111_1111_1111_1111;
 const AUTH_NONE: u16  = 0b1000_0000_0000_0000;
 
 impl Uri {
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+
     /// Try parse uri from [`ByteStr`].
     #[inline]
     pub fn try_from_shared(value: impl Into<ByteStr>) -> Result<Self, InvalidUri> {
@@ -374,6 +379,14 @@ fn trim_fragment(value: ByteStr, query: u16) -> ByteStr {
     };
 
     value.slice_ref(&value[..query as usize + hash])
+}
+
+// ===== Formatting =====
+
+impl std::fmt::Display for Uri {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 // ===== Helper =====

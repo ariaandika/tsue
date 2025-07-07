@@ -2,81 +2,160 @@
 use bytes::{Buf, Bytes};
 use std::{
     io,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{
+            AtomicU64,
+            Ordering::{Relaxed, SeqCst},
+        },
+    },
     task::{Poll, ready},
 };
-use tcio::{io::AsyncIoRead, tokio::IoStream};
+use tcio::io::AsyncIoRead;
+use tokio::net::TcpStream;
 
 mod collect;
 
 pub use collect::Collect;
 
-/// HTTP Body.
-#[derive(Debug)]
-pub struct Body {
-    io: Option<Arc<IoStream>>,
+// ===== BodyInner =====
 
+#[derive(Debug)]
+pub(crate) struct BodyInner {
+    pub(crate) io: TcpStream,
     /// Body size limit
     ///
     /// always equal to or more than `self.bytes.len()`
-    remaining: u64,
+    pub(crate) remaining: AtomicU64,
+}
 
-    /// Buffer
+impl BodyInner {
+    pub(crate) fn new(io: TcpStream, remaining: AtomicU64) -> Self {
+        Self { io, remaining }
+    }
+
+    pub(crate) fn remaining(&self) -> usize {
+        self.remaining.load(Relaxed) as _
+    }
+
+    pub(crate) fn has_remaining(&self) -> bool {
+        self.remaining() != 0
+    }
+
+    pub(crate) fn poll_read(&self, buf: &mut [u8], cx: &mut std::task::Context) -> Poll<io::Result<usize>> {
+        if !self.has_remaining() {
+            return Poll::Ready(Err(io_err!(QuotaExceeded)));
+        }
+
+        match ready!(self.io.poll_read(buf, cx)) {
+            Ok(read_u) => {
+                let read = read_u.try_into().unwrap_or(u64::MAX);
+                self.remaining.fetch_sub(read, SeqCst);
+                Poll::Ready(Ok(read_u))
+            },
+            Err(err) => Poll::Ready(Err(err)),
+        }
+    }
+
+    /// Try to read body from underlying io into the buffer, advancing the buffer cursor.
+    #[inline]
+    pub fn poll_read_buf<B>(
+        &self,
+        buf: &mut B,
+        cx: &mut std::task::Context,
+    ) -> Poll<io::Result<usize>>
+    where
+        B: bytes::BufMut + ?Sized,
+    {
+        tcio::io::poll_read_fn(|buf, cx| self.poll_read(buf, cx), buf, cx)
+    }
+}
+
+// ===== Body =====
+
+// TODO: streaming response body ?
+
+/// HTTP Body.
+#[derive(Debug)]
+pub struct Body {
+    inner: Option<Arc<BodyInner>>,
     bytes: Bytes,
 }
 
 impl Body {
-    /// Create an empty [`Body`].
-    pub fn empty() -> Self {
-        Self { io: None, remaining: 0, bytes: Bytes::new()  }
-    }
-
     /// Create exact size buffered [`Body`].
-    pub fn exact(bytes: impl Into<Bytes>) -> Self {
-        let bytes = bytes.into();
-        Self { io: None, remaining: bytes.len().try_into().unwrap_or(u64::MAX), bytes }
+    #[inline]
+    pub fn new(bytes: impl Into<Bytes>) -> Self {
+        Self {
+            inner: None,
+            bytes: bytes.into(),
+        }
     }
 
-    #[allow(unused, reason = "used later")]
-    pub(crate) fn from_io(io: Arc<IoStream>, remaining: u64, bytes: Bytes) -> Self {
-        Self { io: Some(io), remaining, bytes  }
+    /// Create an empty [`Body`].
+    #[inline]
+    pub fn empty() -> Self {
+        Self {
+            inner: None,
+            bytes: Bytes::new(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn from_io(state: Arc<BodyInner>, bytes: Bytes) -> Self {
+        Self {
+            inner: Some(state),
+            bytes,
+        }
+    }
+
+    pub(crate) fn exact_len(&self) -> usize {
+        self.bytes.len()
     }
 
     /// Returns the remaining body length.
     #[inline]
     pub fn remaining(&self) -> usize {
-        self.remaining as _
+        match self.inner.as_ref() {
+            Some(ok) => ok.remaining(),
+            None => 0,
+        }
     }
 
     /// Returns `true` if there is more body to read.
     #[inline]
     pub fn has_remaining(&self) -> bool {
-        self.remaining != 0
+        self.remaining() != 0
     }
 
     /// Try to read body from underlying io into the buffer.
     pub fn poll_read(&mut self, buf: &mut [u8], cx: &mut std::task::Context) -> Poll<io::Result<usize>> {
-        debug_assert!(self.remaining as usize >= self.bytes.len());
-
-        if self.remaining == 0 {
-            return Poll::Ready(Err(io_err!(QuotaExceeded)));
-        }
-
         if buf.is_empty() {
             return Poll::Ready(Ok(0))
         }
 
+        let mut remaining = self.remaining();
+
+        if remaining == 0 {
+            return Poll::Ready(Err(io_err!(QuotaExceeded)));
+        }
+
         if self.bytes.has_remaining() {
-            let read = buf.len().min(self.bytes.remaining()).min(self.remaining as usize);
+            let read = buf.len().min(self.bytes.remaining()).min(remaining);
 
             buf[..read].copy_from_slice(&self.bytes[..read]);
 
             self.bytes.advance(read);
-            self.remaining -= read as u64;
+
+            if let Some(state) = self.inner.as_ref() {
+                state.remaining.fetch_sub(read.try_into().unwrap_or(u64::MAX), SeqCst);
+            }
+
+            remaining -= read;
 
             // destination buf is already full,
             // or body limit exhausted
-            if buf.len() == read || self.remaining == 0 {
+            if buf.len() == read || remaining == 0 {
                 return Poll::Ready(Ok(read))
             }
 
@@ -85,17 +164,14 @@ impl Body {
         }
 
         // io call, if it exists
-        let Some(io) = self.io.as_mut() else {
-            return Poll::Ready(Err(io_err!(QuotaExceeded)));
-        };
-
-        let result = ready!(io.poll_read(buf, cx))
-            .inspect(|&read|self.remaining -= read.try_into().unwrap_or(u64::MAX));
-
-        Poll::Ready(result)
+        match self.inner.as_ref() {
+            Some(ok) => ok.poll_read(buf, cx),
+            None => Poll::Ready(Err(io_err!(QuotaExceeded))),
+        }
     }
 
     /// Try to read body from underlying io into the buffer, advancing the buffer cursor.
+    #[inline]
     pub fn poll_read_buf<B>(
         &mut self,
         buf: &mut B,
@@ -104,27 +180,12 @@ impl Body {
     where
         B: bytes::BufMut + ?Sized,
     {
-        if !buf.has_remaining_mut() {
-            return Poll::Ready(Ok(0));
-        }
+        tcio::io::poll_read_fn(|buf, cx| self.poll_read(buf, cx), buf, cx)
+    }
 
-        let read = {
-            // SAFETY: we will only write initialized value and `MaybeUninit<T>` is guaranteed to
-            // have the same size as `T`:
-            let dst = unsafe {
-                &mut *(buf.chunk_mut().as_uninit_slice_mut() as *mut [std::mem::MaybeUninit<u8>]
-                    as *mut [u8])
-            };
-
-            tri!(ready!(self.poll_read(dst, cx)))
-        };
-
-        // SAFETY: This is guaranteed to be the number of initialized by `try_read`
-        unsafe {
-            buf.advance_mut(read);
-        }
-
-        Poll::Ready(Ok(read))
+    /// only used for body writing in `rt`
+    pub(crate) fn bytes_mut(&mut self) -> &mut Bytes {
+        &mut self.bytes
     }
 
     /// Collect the entire body into [`BytesMut`][bytes::BytesMut].
@@ -159,13 +220,4 @@ macro_rules! io_err {
     };
 }
 
-macro_rules! tri {
-    ($e:expr) => {
-        match $e {
-            Ok(ok) => ok,
-            Err(err) => return Poll::Ready(Err(err)),
-        }
-    };
-}
-
-use {io_err, tri};
+use {io_err};

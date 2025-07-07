@@ -2,6 +2,8 @@
 use std::convert::Infallible;
 use tcio::futures::{Map, map};
 
+use crate::{request::Request, response::Response};
+
 // ===== Service =====
 
 pub trait Service<Request> {
@@ -12,6 +14,25 @@ pub trait Service<Request> {
     type Future: Future<Output = Result<Self::Response, Self::Error>>;
 
     fn call(&self, request: Request) -> Self::Future;
+}
+
+pub trait HttpService:
+    Service<
+        Request,
+        Response = Response,
+        Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    >
+{
+}
+
+impl<
+    S: Service<
+            Request,
+            Response = Response,
+            Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+        >,
+> HttpService for S
+{
 }
 
 // ===== FromFn =====

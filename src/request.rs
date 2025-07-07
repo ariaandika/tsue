@@ -2,7 +2,7 @@
 use crate::{
     body::Body,
     headers::HeaderMap,
-    http::{Extensions, Method, Path, Version},
+    http::{Extensions, Method, Uri, Version},
 };
 
 pub mod parser;
@@ -11,7 +11,7 @@ pub mod parser;
 #[derive(Debug)]
 pub struct Parts {
     pub method: Method,
-    pub uri: Path,
+    pub uri: Uri,
     pub version: Version,
     pub headers: HeaderMap,
     pub extensions: Extensions,

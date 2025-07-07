@@ -1,5 +1,16 @@
 use super::{HeaderMap, HeaderName, HeaderValue, entry::GetAll};
 
+impl<'a> IntoIterator for &'a HeaderMap {
+    type Item = <Iter<'a> as Iterator>::Item;
+
+    type IntoIter = Iter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// Iterator returned from [`HeaderMap::iter`].
 #[derive(Debug)]
 pub struct Iter<'a> {
