@@ -9,6 +9,7 @@ name = "example"
 path = "main.rs"
 
 [dependencies]
+tcio = { git = "https://github.com/ariaandika/tcio", features = ["tokio"] }
 tokio = { version = "1.45.1", features = ["rt-multi-thread"] }
 tsue = { version = "0.1.0", path = ".." }
 
