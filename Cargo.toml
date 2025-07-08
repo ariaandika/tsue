@@ -6,12 +6,13 @@ edition = "2024"
 [dependencies]
 bytes = "1.10.1"
 futures-core = { version = "0.3.31" }
-tcio = { version = "0.1.0", features = ["tokio"] }
-tokio = { version = "1.43.0", features = ["net", "rt"] }
+tcio = { git = "https://github.com/ariaandika/tcio", features = ["tokio"] }
+tokio = { version = "1.46.1", features = ["net", "sync", "rt"] }
 
 # Optionals
 
 log = { version = "0.4.26", optional = true }
+itoa = "1.0.15"
 
 [features]
 log = ["dep:log"]
