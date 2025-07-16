@@ -1,13 +1,6 @@
 //! Web Server and Client Toolkit
 #![warn(missing_debug_implementations)]
 
-// NOTE:
-// on progress of pulling out modules into other crates
-// - serialization
-// - service
-// take out
-// - from request, into response, routing
-
 pub use tcio::ByteStr;
 
 pub mod http;
@@ -18,7 +11,6 @@ pub mod response;
 mod ws;
 
 pub mod proto;
-mod task;
 pub mod service;
 pub mod rt;
 
