@@ -1,5 +1,6 @@
 //! HTTP Request Parser
 use std::{io, mem::MaybeUninit};
+use bytes::Bytes;
 use tcio::{
     ByteStr,
     slice::{range_of, slice_of, slice_of_bytes_mut},
@@ -50,7 +51,7 @@ pub fn parse_line_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<RequestLin
     let remaining = total_len - (uri_offset + uri_len);
 
     buf.advance(uri_offset);
-    // SAFETY: `request.uri` is a `str`
+    // SAFETY: `uri` is a `str`
     let uri = unsafe { ByteStr::from_utf8_unchecked(buf.copy_to_bytes(uri_len)) };
 
     buf.advance(remaining);
@@ -61,6 +62,8 @@ pub fn parse_line_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<RequestLin
         version,
     }))
 }
+
+// TODO: simd request parser
 
 /// Parse HTTP Request line.
 pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLineRef<'a>>> {
@@ -157,7 +160,7 @@ pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLineRef<'a
 // ===== Header =====
 
 /// Result of [`parse_header`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HeaderRef<'a> {
     pub name: &'a str,
     pub value: &'a [u8],
@@ -165,6 +168,37 @@ pub struct HeaderRef<'a> {
 
 impl<'a> HeaderRef<'a> {
     pub const EMPTY: Self = Self { name: "", value: b"" };
+}
+
+/// Result of [`parse_header_buf`].
+#[derive(Debug, Clone)]
+pub struct HeaderBuf {
+    pub name: ByteStr,
+    pub value: Bytes,
+}
+
+pub fn parse_header_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<HeaderBuf>> {
+    let mut bytes = buf.chunk();
+    let offset = bytes.as_ptr() as usize;
+
+    let HeaderRef { name, value } = tri!(parse_header(&mut bytes));
+
+    debug_assert_eq!(offset, name.as_ptr() as usize);
+
+    let name_len = name.len();
+    let value_offset = value.as_ptr() as usize - offset;
+    let value_len = value.len();
+    let sep_len = value_offset - name_len;
+
+    // SAFETY: `name` is a `str`
+    let name = unsafe { ByteStr::from_utf8_unchecked(buf.copy_to_bytes(name_len)) };
+    buf.advance(sep_len);
+    let value = buf.copy_to_bytes(value_len);
+
+    debug_assert_eq!(&buf.chunk()[..2], b"\r\n");
+    buf.advance(2);
+
+    Ok(Some(HeaderBuf { name, value }))
 }
 
 /// Parse HTTP Header.
@@ -199,10 +233,10 @@ pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<HeaderRef<'a>>>
     }
 
     let value = {
-        let Some(n) = bytes.iter().position(|e| e == &b'\r') else {
+        let Some(cr) = bytes.iter().position(|e| e == &b'\r') else {
             return Ok(None);
         };
-        match bytes.get(n + 1) {
+        match bytes.get(cr + 1) {
             Some(lf) => {
                 if lf != &b'\n' {
                     return Err(io_data_err("unexpected cariage in header value"));
@@ -210,8 +244,10 @@ pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<HeaderRef<'a>>>
             }
             None => return Ok(None),
         }
-        let ok = unsafe { bytes.get_unchecked(..n) };
-        bytes = unsafe { bytes.get_unchecked(n + 2..) };
+        // SAFETY: checked by `bytes.get(n + 1)`
+        let ok = unsafe { bytes.get_unchecked(..cr) };
+        // SAFETY: checked by `bytes.get(n + 1)`
+        bytes = unsafe { bytes.get_unchecked(cr + 2..) };
         ok
     };
 
@@ -260,9 +296,10 @@ pub fn parse_headers_uninit<'a, 'h>(
     }
 
     *buf = bytes;
-    let headers = &mut headers[..n];
+    // SAFETY: `n` is the amount of `MaybeUninit` that has been initialized
+    let headers = unsafe { headers.get_unchecked_mut(..n) };
     // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
-    let headers = unsafe { &mut *assume_init_slice!(headers as HeaderRef) };
+    let headers = unsafe { &mut *(headers as *mut [MaybeUninit<HeaderRef>] as *mut [HeaderRef]) };
     Ok(Some(headers))
 }
 
@@ -336,7 +373,7 @@ pub fn parse_headers_range_uninit<'h>(
     *buf = bytes;
     let headers = &mut headers[..n];
     // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
-    let headers = unsafe { &mut *assume_init_slice!(headers as HeaderRange) };
+    let headers = unsafe { &mut *(headers as *mut [MaybeUninit<HeaderRange>]as *mut [HeaderRange]) };
     Ok(Some(headers))
 }
 
@@ -344,18 +381,9 @@ fn io_data_err<E: Into<Box<dyn std::error::Error + Send + Sync>>,>(e: E) -> io::
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
 
-// ===== Macros =====
-
-macro_rules! assume_init_slice {
-    ($e:ident as $ty:ty) => {
-        ($e as *mut [MaybeUninit<$ty>] as *mut [$ty])
-    };
-}
-
-use assume_init_slice;
-
 #[cfg(test)]
 mod test {
+    use bytes::BytesMut;
     use super::*;
 
     #[test]
@@ -378,6 +406,14 @@ mod test {
         assert_eq!(ok.uri, "/users/get");
         assert_eq!(ok.version, Version::HTTP_11);
         assert_eq!(&buf, b"Host: ");
+
+
+        let mut buf = BytesMut::from(&b"GET /users/get HTTP/1.1\r\nHost: "[..]);
+        let ok = parse_line_buf(&mut buf).unwrap().unwrap();
+        assert_eq!(ok.method, Method::GET);
+        assert_eq!(ok.uri, "/users/get");
+        assert_eq!(ok.version, Version::HTTP_11);
+        assert_eq!(&buf[..], b"Host: ");
     }
 
     #[test]
@@ -394,28 +430,15 @@ mod test {
     }
 
     #[test]
-    fn test_parse_line_buf() {
-        use bytes::BytesMut;
-
-        let mut buf = BytesMut::from(&b"GET /users/get HTTP/1.1\r\nHost: "[..]);
-        let ok = parse_line_buf(&mut buf).unwrap().unwrap();
-
-        assert_eq!(ok.method, Method::GET);
-        assert_eq!(ok.uri, "/users/get");
-        assert_eq!(ok.version, Version::HTTP_11);
-        assert_eq!(&buf[..], b"Host: ");
-    }
-
-    #[test]
     fn test_parse_header() {
-        assert!(parse_header(&mut &b""[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Hos"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host:"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host: "[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host: loca"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host: localhost"[..]).unwrap().is_none());
-        assert!(parse_header(&mut &b"Host: localhost\r"[..]).unwrap().is_none());
+        assert!(parse_header_buf(&b""[..]).unwrap().is_none());
+        assert!(parse_header_buf(&b"Hos"[..]).unwrap().is_none());
+        assert!(parse_header_buf(&b"Host"[..]).unwrap().is_none());
+        assert!(parse_header_buf(&b"Host:"[..]).unwrap().is_none());
+        assert!(parse_header_buf(&b"Host: "[..]).unwrap().is_none());
+        assert!(parse_header_buf(&b"Host: loca"[..]).unwrap().is_none());
+        assert!(parse_header_buf(&b"Host: localhost"[..]).unwrap().is_none());
+        assert!(parse_header_buf(&b"Host: localhost\r"[..]).unwrap().is_none());
 
 
         let mut buf = &b"Host: localhost\r\nConte"[..];
@@ -423,6 +446,13 @@ mod test {
         assert_eq!(ok.name, "Host");
         assert_eq!(ok.value, b"localhost");
         assert_eq!(&buf, b"Conte");
+
+
+        let mut buf = BytesMut::from(&b"Host: localhost\r\nConte"[..]);
+        let ok = parse_header_buf(&mut buf).unwrap().unwrap();
+        assert_eq!(ok.name, "Host");
+        assert_eq!(&ok.value[..], b"localhost");
+        assert_eq!(&buf[..], b"Conte");
     }
 
     const HEADERS: &str = "\
