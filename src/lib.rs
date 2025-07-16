@@ -17,6 +17,7 @@ pub mod request;
 pub mod response;
 mod ws;
 
+pub mod proto;
 mod task;
 pub mod service;
 pub mod rt;

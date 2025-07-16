@@ -5,8 +5,6 @@ use crate::{
     http::{Extensions, Method, Uri, Version},
 };
 
-pub mod parser;
-
 /// HTTP Request Parts.
 #[derive(Debug, Default, Clone)]
 pub struct Parts {
