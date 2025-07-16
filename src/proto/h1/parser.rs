@@ -167,7 +167,16 @@ pub struct HeaderRef<'a> {
 }
 
 impl<'a> HeaderRef<'a> {
+    /// Constant for empty [`HeaderRef`].
     pub const EMPTY: Self = Self { name: "", value: b"" };
+
+    /// Returns a slice of `buf` containing the header name and value.
+    pub fn slice_ref(&self, buf: &Bytes) -> HeaderBuf {
+        HeaderBuf {
+            name: ByteStr::from_slice_of(self.name, buf),
+            value: buf.slice_ref(self.value),
+        }
+    }
 }
 
 /// Result of [`parse_header_buf`].
@@ -175,6 +184,19 @@ impl<'a> HeaderRef<'a> {
 pub struct HeaderBuf {
     pub name: ByteStr,
     pub value: Bytes,
+}
+
+impl HeaderBuf {
+    /// Create new empty [`HeaderBuf`].
+    pub const fn new() -> Self {
+        Self { name: ByteStr::new(), value: Bytes::new() }
+    }
+}
+
+impl Default for HeaderBuf {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub fn parse_header_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<HeaderBuf>> {
@@ -469,19 +491,32 @@ mod test {
 
         assert!(parse_headers(&mut buf, &mut headers).unwrap().is_none());
 
-        let mut buf = HEADERS.as_bytes();
+        let buf = Bytes::copy_from_slice(HEADERS.as_bytes());
+        let mut chunk = &buf[..];
 
-        let sliced = parse_headers(&mut buf, &mut headers).unwrap().unwrap();
+        let sliced = parse_headers(&mut chunk, &mut headers).unwrap().unwrap();
 
         assert_eq!(sliced[0].name, "Host");
         assert_eq!(sliced[0].value, b"localhost");
         assert_eq!(sliced[1].name, "Content-Type");
         assert_eq!(sliced[1].value, b"text/html");
-        assert_eq!(headers[0].name, "Host");
-        assert_eq!(headers[0].value, b"localhost");
-        assert_eq!(headers[1].name, "Content-Type");
-        assert_eq!(headers[1].value, b"text/html");
-        assert_eq!(buf, b"Hello World!");
+        assert_eq!(chunk, b"Hello World!");
+
+        let mut headers_buf = [const { HeaderBuf::new() };4];
+
+        for (i, header_ref) in sliced.iter().enumerate() {
+            headers_buf[i] = header_ref.slice_ref(&buf);
+        }
+
+        // no copy
+        assert_eq!(sliced[0].name.as_ptr(), headers_buf[0].name.as_ptr());
+        assert_eq!(sliced[0].value.as_ptr(), headers_buf[0].value.as_ptr());
+
+        assert_eq!(headers_buf[0].name, "Host");
+        assert_eq!(&headers_buf[0].value[..], b"localhost");
+        assert_eq!(headers_buf[1].name, "Content-Type");
+        assert_eq!(&headers_buf[1].value[..], b"text/html");
+        assert_eq!(chunk, b"Hello World!");
     }
 
     #[test]
