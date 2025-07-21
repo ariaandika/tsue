@@ -465,13 +465,6 @@ impl std::fmt::Debug for InvalidUri {
 mod test {
     use super::*;
 
-    #[allow(unused, reason = "debugging in test")]
-    macro_rules! panic_uri {
-        ($e:expr) => {
-            panic!("{:?}",Uri::try_copy_from($e))
-        };
-    }
-
     macro_rules! assert_uri {
         (
             $rw:expr;

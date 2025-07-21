@@ -45,7 +45,6 @@ impl Body {
     }
 
     #[inline]
-    #[allow(unused, reason = "todo")]
     pub(crate) fn from_handle(handle: IoHandle, remaining: u64, remain: BytesMut) -> Self {
         Self {
             repr: Repr::Handle(BodyHandle::new(handle, remaining, remain)),

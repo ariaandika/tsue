@@ -3,5 +3,5 @@ pub mod parser;
 pub mod driver;
 mod io;
 
-pub use io::{IoHandle, IoBuffer};
+pub use io::IoHandle;
 
