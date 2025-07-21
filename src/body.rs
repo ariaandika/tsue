@@ -1,15 +1,12 @@
 //! Request and Response Body.
 use bytes::{Bytes, BytesMut};
 use std::{io, task::Poll};
-use tcio::sync::Agent;
-
-use crate::task::IoHandle;
 
 mod handle;
 mod stream;
 mod collect;
 
-use handle::BodyHandle;
+use handle::{BodyHandle, IoHandle};
 use stream::BodyStreamHandle;
 
 pub use stream::BodyStream;
@@ -48,7 +45,8 @@ impl Body {
     }
 
     #[inline]
-    pub(crate) fn from_handle(handle: Agent<IoHandle>, remaining: u64, remain: BytesMut) -> Self {
+    #[allow(unused, reason = "todo")]
+    pub(crate) fn from_handle(handle: IoHandle, remaining: u64, remain: BytesMut) -> Self {
         Self {
             repr: Repr::Handle(BodyHandle::new(handle, remaining, remain)),
         }

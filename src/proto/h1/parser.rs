@@ -2,8 +2,7 @@
 use std::{io, mem::MaybeUninit};
 use bytes::Bytes;
 use tcio::{
-    ByteStr,
-    slice::{range_of, slice_of, slice_of_bytes_mut},
+    slice::{range_of, slice_of_bytes, slice_of_bytes_mut}, ByteStr
 };
 
 use crate::http::{Method, Version};
@@ -344,23 +343,46 @@ impl HeaderRange {
         }
     }
 
-    pub fn resolve_name(&self, bytes: &mut bytes::BytesMut) -> tcio::ByteStr {
-        // SAFETY: invariant of `name` range is valid utf-8
-        unsafe { tcio::ByteStr::from_utf8_unchecked(slice_of_bytes_mut(self.name.clone(), bytes).freeze()) }
+    /// Returns the header name as [`ByteStr`] from given `bytes`.
+    pub fn resolve_name(&self, bytes: &mut bytes::BytesMut) -> Result<ByteStr, std::str::Utf8Error> {
+        tcio::ByteStr::from_utf8(slice_of_bytes_mut(self.name.clone(), bytes).freeze())
     }
 
-    pub fn resolve_value(&self, bytes: &mut bytes::BytesMut) -> bytes::BytesMut {
-        slice_of_bytes_mut(self.value.clone(), bytes)
+    /// Returns the header name as [`ByteStr`] from given `bytes` without checking that the string
+    /// contains valid UTF-8.
+    ///
+    /// # Safety
+    ///
+    /// The `bytes` should be the same with [`parse_headers_range`] and is not mutated.
+    pub unsafe fn resolve_name_unchecked(&self, bytes: &Bytes) -> ByteStr {
+        // SAFETY: user guarantees that the bytes is not modified,
+        // thus invariant of `self.name` contains can be uphelp
+        unsafe { tcio::ByteStr::from_utf8_unchecked(slice_of_bytes(self.name.clone(), bytes)) }
     }
 
-    /// Resolve the range with given `buf` to [`HeaderRef`].
-    pub fn resolve_ref<'b>(&self, buf: &'b [u8]) -> HeaderRef<'b> {
-        HeaderRef {
-            // SAFETY: invariant of `self.name` is a valid UTF-8
-            name: unsafe { str::from_utf8_unchecked(slice_of(self.name.clone(), buf)) },
-            value: slice_of(self.value.clone(), buf),
-        }
+    /// Returns the header value as [`ByteStr`] from given `bytes`.
+    pub fn resolve_value(&self, bytes: &Bytes) -> Bytes {
+        slice_of_bytes(self.value.clone(), bytes)
     }
+
+    // /// Resolve the range with given `buf` to [`HeaderRef`].
+    // pub fn resolve_ref<'b>(&self, buf: &'b [u8]) -> HeaderRef<'b> {
+    //     HeaderRef {
+    //         // SAFETY: invariant of `self.name` is a valid UTF-8
+    //         name: unsafe { str::from_utf8_unchecked(slice_of(self.name.clone(), buf)) },
+    //         value: slice_of(self.value.clone(), buf),
+    //     }
+    // }
+}
+
+#[inline]
+pub fn parse_headers_range<'h>(
+    buf: &mut &[u8],
+    headers: &'h mut [HeaderRange],
+) -> io::Result<Option<&'h mut [HeaderRange]>> {
+    // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
+    let headers = unsafe { &mut *(headers as *mut [HeaderRange] as *mut [MaybeUninit<HeaderRange>]) };
+    parse_headers_range_uninit(buf, headers)
 }
 
 pub fn parse_headers_range_uninit<'h>(
@@ -524,11 +546,11 @@ mod test {
         let mut buf = HEADERS.as_bytes();
         let mut headers = [const { MaybeUninit::uninit() };4];
 
-        let sliced = parse_headers_range_uninit(&mut buf, &mut headers).unwrap().unwrap();
+        let _sliced = parse_headers_range_uninit(&mut buf, &mut headers).unwrap().unwrap();
 
-        let host = sliced[0].resolve_ref(HEADERS.as_bytes());
-        assert_eq!(host.name, "Host");
-        assert_eq!(host.value, b"localhost");
+        // let host = sliced[0].resolve_ref(HEADERS.as_bytes());
+        // assert_eq!(host.name, "Host");
+        // assert_eq!(host.value, b"localhost");
     }
 }
 

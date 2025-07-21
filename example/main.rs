@@ -5,18 +5,18 @@ use tsue::{
     body::Body,
     request::Request,
     response::{Parts, Response},
+    server::Http1Server,
     service::from_fn,
 };
 
 fn main() -> io::Result<()> {
-    Runtime::new()
-        .unwrap()
-        .block_on(async {
-            let io = TcpListener::bind("0.0.0.0:3000").await?;
+    Runtime::new().unwrap().block_on(async {
+        let io = TcpListener::bind("0.0.0.0:3000").await?;
 
-            tsue::rt::serve(io, from_fn(handle)).await;
-            Ok(())
-        })
+        Http1Server::new(io, from_fn(handle)).await;
+
+        Ok(())
+    })
 }
 
 async fn handle(req: Request) -> Response {
@@ -25,9 +25,8 @@ async fn handle(req: Request) -> Response {
 
     if parts.uri.path() != "/null" {
         let body = req.into_body().collect().await.unwrap();
-        println!("{}",lossy(&body));
+        println!("{}", lossy(&body));
     }
 
     Response::from_parts(Parts::default(), Body::new(&b"Hell"[..]))
 }
-

@@ -3,19 +3,19 @@ use std::{
     io,
     task::{Poll, ready},
 };
-use tcio::sync::Agent;
 
-use crate::body::IoHandle;
+pub use crate::proto::h1::IoHandle;
 
 #[derive(Debug)]
 pub struct BodyHandle {
-    handle: Agent<IoHandle>,
+    handle: IoHandle,
     remaining: u64,
     remain: BytesMut,
 }
 
 impl BodyHandle {
-    pub fn new(handle: Agent<IoHandle>, remaining: u64, remain: BytesMut) -> Self {
+    pub fn new(handle: IoHandle, remaining: u64, remain: BytesMut) -> Self {
+        debug_assert!(remaining as usize >= remain.len());
         Self {
             handle,
             remaining,

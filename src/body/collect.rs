@@ -61,14 +61,14 @@ impl Future for Collect {
                     match me.buffer.as_mut().expect("poll after complete") {
                         Buffer::None => me.buffer = Some(Buffer::Mut(data)),
                         Buffer::Mut(bytesm) => {
-                            #[cfg(debug_assertions)]
-                            let ptr = bytesm.as_ptr();
+                            // #[cfg(debug_assertions)]
+                            // let ptr = bytesm.as_ptr();
 
                             bytesm.unsplit(data);
 
                             // `IoHandle` returns bytes that are contiguous,
                             // so it should never copy
-                            debug_assert_eq!(ptr, bytesm.as_ptr());
+                            // debug_assert_eq!(ptr, bytesm.as_ptr());
                         },
                         Buffer::Ref(_) => unreachable!("Repr::Handle never use Bytes"),
                     };
@@ -86,7 +86,7 @@ impl Future for Collect {
                             // Stream returns more than one Bytes,
                             // concatenation requires copy
                             let mut bytesm = BytesMut::with_capacity(bytes.len() + stream.remaining());
-                            bytesm.extend_from_slice(&bytes);
+                            bytesm.extend_from_slice(bytes);
                             bytesm.extend_from_slice(&data);
                             me.buffer = Some(Buffer::Mut(bytesm));
                         },

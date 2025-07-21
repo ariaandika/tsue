@@ -188,6 +188,10 @@ impl HeaderMap {
 // ===== Mutation =====
 
 impl HeaderMap {
+    pub fn reserve(&mut self, _capacity: usize) {
+        // TODO: HeaderMap::reserve
+    }
+
     /// Removes a header from the map, returning the first header value at the key if the key was
     /// previously in the map.
     pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
