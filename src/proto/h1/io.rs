@@ -1,8 +1,6 @@
 use bytes::BytesMut;
 use std::{
-    cmp,
-    io,
-    mem,
+    cmp, io, mem,
     sync::{
         Arc, Mutex,
         atomic::{
@@ -16,7 +14,7 @@ use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use crate::body::Body;
 
-pub struct IoBuffer<IO> {
+pub(crate) struct IoBuffer<IO> {
     io: IO,
     read_buffer: BytesMut,
     write_buffer: BytesMut,
@@ -62,8 +60,15 @@ impl<IO> IoBuffer<IO> {
         BodyWrite::new(body)
     }
 
-    pub fn reclaim(&mut self) {
-        let _ = self.read_buffer.try_reclaim(512);
+    pub fn clear_reclaim(&mut self) {
+        self.read_buffer.clear();
+
+        // `reserve` will try to reclaim buffer, but if the underlying buffer is grow thus
+        // reallocated, and the new allocated capacity is not at least 512, reclaiming does not
+        // work, so another reallocation required
+        //
+        // also this allocation does not need to copy any data
+        self.read_buffer.reserve(512);
     }
 }
 
@@ -89,6 +94,7 @@ where
 
                 // SAFETY: read <= self.remaining
                 self.remaining = unsafe { self.remaining.unchecked_sub(read) };
+
                 Ok(self.read_buffer.split_to(read as _))
             }
             Err(err) => Err(err),
@@ -109,7 +115,6 @@ where
     /// Returns `true` if data is available, `Service` should be polled again immediately.
     ///
     /// This should be polled at the same time with `Service` which holds [`IoHandle`].
-    #[allow(unused, reason = "todo")]
     pub(crate) fn poll_io_wants(&mut self, cx: &mut std::task::Context) -> Poll<io::Result<bool>> {
         let Some(wants) = self.shared.wants.load_is_want() else {
             // `IoHandle` have not been called yet
@@ -208,7 +213,7 @@ impl BodyWrite {
                 Phase::Write(bytes) => {
                     ready!(io.io.poll_write(bytes, cx))?;
                     bytes.clear();
-                    if bytes.is_empty(){
+                    if bytes.is_empty() {
                         self.phase = Phase::Read;
                     }
                 }

@@ -1,11 +1,5 @@
 use futures_core::ready;
-use std::{
-    io,
-    mem::MaybeUninit,
-    pin::Pin,
-    sync::Arc,
-    task::Poll,
-};
+use std::{io, mem::MaybeUninit, pin::Pin, sync::Arc, task::Poll};
 use tcio::{
     ByteStr,
     io::{AsyncIoRead, AsyncIoWrite},
@@ -24,11 +18,11 @@ use crate::{
 
 use super::{io::IoBuffer, parser};
 
-macro_rules! tri_ready {
+macro_rules! retry_read {
     ($e:expr) => {
         match $e {
             Ok(Some(ok)) => ok,
-            Ok(None) => return Poll::Pending,
+            Ok(None) => continue,
             Err(err) => return Poll::Ready(Err(err)),
         }
     };
@@ -47,6 +41,7 @@ enum Phase<F> {
     Service(F),
     Drain(Option<Response>),
     Flush(BodyWrite),
+    Cleanup,
 }
 
 const MAX_HEADERS: usize = 64;
@@ -99,7 +94,10 @@ where
         loop {
             match phase.as_mut().project() {
                 Project::Read => {
-                    ready!(io.poll_read(cx))?;
+                    let read = ready!(io.poll_read(cx))?;
+                    if read == 0 {
+                        return Poll::Ready(Ok(()));
+                    }
 
                     let mut chunk = io.read_buffer();
                     let offset = chunk.as_ptr() as usize;
@@ -108,12 +106,12 @@ where
                         method,
                         uri,
                         version,
-                    } = tri_ready!(parser::parse_line(&mut chunk));
+                    } = retry_read!(parser::parse_line(&mut chunk));
                     let uri_range = range_of(uri.as_bytes());
 
                     let mut headers = [const { MaybeUninit::uninit() }; MAX_HEADERS];
                     let headers_ref =
-                        tri_ready!(parser::parse_headers_range_uninit(&mut chunk, &mut headers));
+                        retry_read!(parser::parse_headers_range_uninit(&mut chunk, &mut headers));
 
                     // parse complete
 
@@ -155,6 +153,10 @@ where
 
                     let content_len: u64 = content_len.unwrap_or(0);
                     let remain = io.read_buffer_mut().split();
+
+                    // at this point, buffer is empty, so reserve will not need to copy any data if
+                    // allocation required
+                    io.read_buffer_mut().reserve(content_len as _);
 
                     // `IoBuffer` remaining is only calculated excluding the already read body
                     let Some(remaining) = content_len.checked_sub(remain.len() as _) else {
@@ -215,7 +217,7 @@ where
 
                     io.write(b"\r\n");
 
-                    // TODO: wait for HeaderMap
+                    // TODO: wait for HeaderMap::clear
                     // let mut map = mem::take(res.headers_mut());
                     // map.clear();
                     // header_map.replace(map);
@@ -225,11 +227,13 @@ where
                 Project::Flush(b) => {
                     ready!(io.poll_flush(cx))?;
                     ready!(b.poll_write(io, cx))?;
-
-                    io.read_buffer_mut().clear();
-                    io.reclaim();
+                    phase.set(Phase::Cleanup);
+                }
+                Project::Cleanup => {
+                    // this phase exists to ensure all shared bytes is dropped, thus can be
+                    // reclaimed
+                    io.clear_reclaim();
                     phase.set(Phase::Read);
-                    println!("[DEBUG] complete");
                 }
             }
         }
@@ -258,6 +262,7 @@ where
             eprintln!("{err}")
         }
 
+        println!(">> Disconnected");
         Poll::Ready(())
     }
 }
@@ -269,6 +274,7 @@ enum Project<'a, F> {
     Service(Pin<&'a mut F>),
     Drain(&'a mut Option<Response>),
     Flush(&'a mut BodyWrite),
+    Cleanup,
 }
 
 impl<F> Phase<F> {
@@ -280,6 +286,7 @@ impl<F> Phase<F> {
                 Self::Service(f) => Project::Service(Pin::new_unchecked(f)),
                 Self::Drain(r) => Project::Drain(r),
                 Self::Flush(b) => Project::Flush(b),
+                Self::Cleanup => Project::Cleanup,
             }
         }
     }
