@@ -5,13 +5,22 @@ use super::{HeaderName, HeaderValue};
 type Size = u16;
 
 /// Header Entry.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Entry {
     hash: Size,
     name: HeaderName,
     value: HeaderValue,
     next: *mut EntryExtra,
     extra_len: Size,
+}
+
+impl std::fmt::Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry")
+            .field("name", &self.name)
+            .field("values", &GetAll::new(self))
+            .finish()
+    }
 }
 
 // SAFETY: EntryExtra pointer is exclusively owned by Entry
@@ -26,7 +35,7 @@ struct EntryExtra {
 }
 
 impl Entry {
-    pub fn new(hash: Size, name: HeaderName, value: HeaderValue) -> Self {
+    pub(crate) fn new(hash: Size, name: HeaderName, value: HeaderValue) -> Self {
         Self {
             hash,
             name,
@@ -41,18 +50,22 @@ impl Entry {
         &self.hash
     }
 
-    pub fn name(&self) -> &HeaderName {
+    /// Returns reference to [`HeaderName`].
+    pub const fn name(&self) -> &HeaderName {
         &self.name
     }
 
-    pub fn value(&self) -> &HeaderValue {
+    /// Returns reference to [`HeaderValue`].
+    pub const fn value(&self) -> &HeaderValue {
         &self.value
     }
 
-    pub fn extra_len(&self) -> u16 {
+    /// Returns duplicate header name length.
+    pub const fn extra_len(&self) -> u16 {
         self.extra_len
     }
 
+    /// Push value with duplicate header name.
     pub fn push(&mut self, value: HeaderValue) {
         let new = Box::into_raw(Box::new(EntryExtra {
             value,
@@ -81,6 +94,9 @@ impl Entry {
         }
     }
 
+    /// Consume [`Entry`] into [`HeaderName`] and [`HeaderValue`].
+    ///
+    /// Extra header value will be dropped.
     pub fn into_parts(mut self) -> (HeaderName, HeaderValue) {
         (
             replace(&mut self.name, HeaderName::PLACEHOLDER),
@@ -97,7 +113,7 @@ impl Drop for Entry {
             if now.is_null() {
                 break;
             }
-            // SAFETY: null chekced
+            // SAFETY: null checked
             let now = unsafe { Box::from_raw(now) };
             next = now.next;
             drop(now);
@@ -108,29 +124,40 @@ impl Drop for Entry {
 // ===== Iterator =====
 
 /// Iterator returned from [`HeaderMap::get_all`][super::HeaderMap::get_all].
-#[derive(Debug)]
 pub struct GetAll<'a> {
-    entry: Option<&'a Entry>,
+    first: Option<&'a Entry>,
     next: *const EntryExtra,
+}
+
+impl std::fmt::Debug for GetAll<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_list()
+            .entries(Self {
+                first: self.first,
+                next: self.next,
+            })
+            .finish()
+    }
 }
 
 impl<'a> GetAll<'a> {
     pub(crate) fn new(entry: &'a Entry) -> Self {
         Self {
+            first: Some(entry),
             next: entry.next,
-            entry: Some(entry),
         }
     }
 
     pub(crate) fn empty() -> Self {
         Self {
-            entry: None,
+            first: None,
             next: std::ptr::null(),
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entry.is_none() && self.next.is_null()
+    /// Returns `true` if there is still remaining value.
+    pub const fn has_remaining(&self) -> bool {
+        self.first.is_some() || !self.next.is_null()
     }
 }
 
@@ -138,13 +165,14 @@ impl<'a> Iterator for GetAll<'a> {
     type Item = &'a HeaderValue;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.entry.take() {
+        match self.first.take() {
             Some(e) => Some(e.value()),
             None => {
                 if self.next.is_null() {
                     return None;
                 }
 
+                // SAFETY: null checked
                 let extra = unsafe { &*self.next };
                 self.next = extra.next;
                 Some(&extra.value)
