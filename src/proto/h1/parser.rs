@@ -1,9 +1,122 @@
 //! HTTP Request Parser
-use std::{io, mem::MaybeUninit};
+//!
+//! # Parsing
+//!
+//! This module provide parsing http [request line][rl] and headers.
+//!
+//! The main parsing functions have signature of `fn parse(buf: &mut &[u8]) -> Result<Option<T>>`.
+//!
+//! The argument `buf: &mut &[u8]` can represent how many data is consumed while parsing. If the
+//! parsing is incomplete, `buf` is unchanged.
+//!
+//! The return type is `Result<Option<T>>` which can represent an error, incomplete parsing
+//! (`Ok(None)`), and success. When parsing is incomplete, more data read is required then parsing
+//! can be retried.
+//!
+//! The main parsing functions are:
+//!
+//! - [`parse_line`] -> [`RequestLineRef`]
+//! - [`parse_header`] -> [`HeaderRef`]
+//!
+//! # Slice Indexing
+//!
+//! Returning shared reference to the buffer as parsing result will prevent the buffer from being
+//! mutated. This is a problem for achieving no-copy parsing strategy.
+//!
+//! We can workaround this by storing the index of the resulting slice. As long as the buffer
+//! content is not mutated or reallocated, the index should points to the correct data, while
+//! removing lifetime bounds.
+//!
+//! The function [`range_of`], [`slice_of_bytes`], and [`slice_of_bytes_mut`] can help with this.
+//!
+//! There is also [`parse_headers_range`] which achieve the same goal.
+//!
+//! # Other APIs
+//!
+//! Other APIs for integration with other types:
+//!
+//! - [`parse_line_buf`], work with [`bytes::Buf`]
+//! - [`parse_header_buf`], work with [`bytes::Buf`]
+//! - [`parse_headers`], parse multiple headers
+//! - [`parse_headers_uninit`], integration with [`MaybeUninit`]
+//! - [`parse_headers_range`], returning slice range
+//! - [`parse_headers_range_uninit`], returning slice range with [`MaybeUninit`]
+//!
+//! # Examples
+//!
+//! ```rust
+//! # use bytes::{BytesMut, Buf};
+//! # use std::mem::MaybeUninit;
+//! # use tsue::{
+//! #       request::Parts,
+//! #       http::{Uri, Extensions},
+//! #       headers::{HeaderMap, HeaderName, HeaderValue}};
+//! # use tcio::ByteStr;
+//! use tsue::proto::h1::parser::{
+//!     self, RequestLineRef,
+//!     range_of, slice_of_bytes, slice_of_bytes_mut
+//! };
+//!
+//! fn parse_request(buffer: &mut BytesMut) {
+//!     let mut chunk = buffer.chunk();
+//!
+//!     let Some(RequestLineRef {
+//!         method,
+//!         uri,
+//!         version,
+//!     }) = parser::parse_line(&mut chunk).unwrap() else {
+//!         todo!("read more")
+//!     };
+//!
+//!     let uri_range = range_of(uri.as_bytes());
+//!
+//!     let mut headers = [const { MaybeUninit::uninit() }; 64];
+//!     let Some(headers_range) = parser::parse_headers_range_uninit(&mut chunk, &mut headers)
+//!         .unwrap()
+//!     else {
+//!         todo!("read more")
+//!     };
+//!
+//!     // parsing complete, no more retry
+//!
+//!     let read = chunk.as_ptr() as usize - buffer.chunk().as_ptr() as usize;
+//!     let mut buffer = buffer.split_to(read);
+//!
+//!     // Uri
+//!     let uri_bytes = slice_of_bytes_mut(uri_range, &mut buffer).freeze();
+//!     let uri = Uri::try_from_shared(ByteStr::from_utf8(uri_bytes).unwrap()).unwrap();
+//!
+//!     // Headers
+//!     let mut headers = HeaderMap::new();
+//!
+//!     for header in headers_range {
+//!         let name = header.resolve_name(&mut buffer).unwrap();
+//!         let value = header.resolve_value_mut(&mut buffer).freeze();
+//!
+//!         if let Ok(value) = HeaderValue::try_from_slice(value) {
+//!             headers.insert(name, value);
+//!         }
+//!     }
+//!
+//!     // Parse Complete
+//!     let parts = Parts {
+//!         method,
+//!         uri,
+//!         version,
+//!         headers,
+//!         extensions: Extensions::new(),
+//!     };
+//! }
+//! ```
+//!
+//! [rl]: <https://httpwg.org/specs/rfc9112.html#request.line>
+//! [`BytesMut`]: bytes::BytesMut
+//! [`MaybeUninit`]: std::mem::MaybeUninit
 use bytes::Bytes;
-use tcio::{
-    slice::{range_of, slice_of_bytes, slice_of_bytes_mut}, ByteStr
-};
+use std::{io, mem::MaybeUninit};
+use tcio::ByteStr;
+
+pub use tcio::slice::{range_of, slice_of_bytes, slice_of_bytes_mut};
 
 use crate::http::{Method, Version};
 
@@ -35,6 +148,7 @@ pub struct RequestLine {
     pub version: Version,
 }
 
+/// Parse HTTP Request line with [`bytes::Buf`].
 pub fn parse_line_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<RequestLine>> {
     let mut bytes = buf.chunk();
 
@@ -200,6 +314,7 @@ impl Default for HeaderBuf {
     }
 }
 
+/// Parse header with [`bytes::Buf`].
 pub fn parse_header_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<HeaderBuf>> {
     let mut bytes = buf.chunk();
     let offset = bytes.as_ptr() as usize;
@@ -279,6 +394,7 @@ pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<HeaderRef<'a>>>
     Ok(Some(HeaderRef { name, value }))
 }
 
+/// Parse multiple headers.
 #[inline]
 pub fn parse_headers<'a, 'h>(
     buf: &mut &'a [u8],
@@ -289,6 +405,7 @@ pub fn parse_headers<'a, 'h>(
     parse_headers_uninit(buf, headers)
 }
 
+/// Parse multiple headers with uninit slice.
 pub fn parse_headers_uninit<'a, 'h>(
     buf: &mut &'a [u8],
     headers: &'h mut [MaybeUninit<HeaderRef<'a>>],
@@ -367,6 +484,11 @@ impl HeaderRange {
         slice_of_bytes(self.value.clone(), bytes)
     }
 
+    /// Returns the header value as [`ByteStr`] from given `bytes`.
+    pub fn resolve_value_mut(&self, bytes: &mut bytes::BytesMut) -> bytes::BytesMut {
+        slice_of_bytes_mut(self.value.clone(), bytes)
+    }
+
     // /// Resolve the range with given `buf` to [`HeaderRef`].
     // pub fn resolve_ref<'b>(&self, buf: &'b [u8]) -> HeaderRef<'b> {
     //     HeaderRef {
@@ -377,6 +499,7 @@ impl HeaderRange {
     // }
 }
 
+/// Parse multiple headers returning a slice ranges.
 #[inline]
 pub fn parse_headers_range<'h>(
     buf: &mut &[u8],
@@ -387,6 +510,7 @@ pub fn parse_headers_range<'h>(
     parse_headers_range_uninit(buf, headers)
 }
 
+/// Parse multiple headers returning a slice ranges with uninit slice.
 pub fn parse_headers_range_uninit<'h>(
     buf: &mut &[u8],
     headers: &'h mut [MaybeUninit<HeaderRange>],
