@@ -65,6 +65,8 @@ pub fn parse_line_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<RequestLin
 // TODO: simd request parser
 
 /// Parse HTTP Request line.
+///
+/// [httpwg](https://httpwg.org/specs/rfc9112.html#request.line)
 pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLineRef<'a>>> {
     let mut bytes = *buf;
 

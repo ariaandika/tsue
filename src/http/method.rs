@@ -1,6 +1,6 @@
-/// HTTP [Method][rfc].
+/// HTTP Method.
 ///
-/// [rfc]: <https://datatracker.ietf.org/doc/html/rfc9110#name-methods>
+/// [httpwg](https://httpwg.org/specs/rfc9110.html#method.definitions)
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Method(Inner);
 
@@ -20,28 +20,52 @@ enum Inner {
 
 impl Method {
     forward! {
-        /// The `GET` method requests a representation of the specified resource.
+        /// The `GET` method requests transfer of a current selected representation for the target
+        /// resource.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc9110.html#GET)
         pub const GET: Get = b"GET";
-        /// The `HEAD` method asks for a response identical to a GET request, but without a
-        /// response body.
+        /// The `HEAD` method is identical to `GET` except that the server MUST NOT send content in
+        /// the response.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc9110.html#HEAD)
         pub const HEAD: Head = b"HEAD";
-        /// The `POST` method submits an entity to the specified resource, often causing a change
-        /// in state or side effects on the server.
+        /// The `POST` method requests that the target resource process the representation enclosed
+        /// in the request according to the resource's own specific semantics.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc9110.html#POST)
         pub const POST: Post = b"POST";
-        /// The `PUT` method replaces all current representations of the target resource with the
-        /// request content.
+        /// The `PUT` method requests that the state of the target resource be created or replaced
+        /// with the state defined by the representation enclosed in the request message content.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc9110.html#PUT)
         pub const PUT: Put = b"PUT";
-        /// The `DELETE` method deletes the specified resource.
+        /// The `DELETE` method requests that the origin server remove the association between the
+        /// target resource and its current functionality.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc9110.html#DELETE)
         pub const DELETE: Delete = b"DELETE";
-        /// The `CONNECT` method establishes a tunnel to the server identified by the target
-        /// resource.
+        /// The `CONNECT` method requests that the recipient establish a tunnel to the destination
+        /// origin server identified by the request target and, if successful, thereafter restrict
+        /// its behavior to blind forwarding of data, in both directions, until the tunnel is
+        /// closed.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc9110.html#CONNECT)
         pub const CONNECT: Connect = b"CONNECT";
-        /// The `OPTIONS` method describes the communication options for the target resource.
+        /// The `OPTIONS` method requests information about the communication options available for
+        /// the target resource, at either the origin server or an intervening intermediary.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc9110.html#OPTIONS)
         pub const OPTIONS: Options = b"OPTIONS";
-        /// The `TRACE` method performs a message loop-back test along the path to the target
-        /// resource.
+        /// The `TRACE` method requests a remote, application-level loop-back of the request
+        /// message.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc9110.html#TRACE)
         pub const TRACE: Trace = b"TRACE";
-        /// The `PATCH` method applies partial modifications to a resource.
+        /// The `PATCH` method requests that a set of changes described in the request entity be
+        /// applied to the resource identified by the Request-URI.
+        ///
+        /// [httpwg](https://httpwg.org/specs/rfc5789.html#patch)
         pub const PATCH: Patch = b"PATCH";
     }
 }
@@ -90,4 +114,3 @@ macro_rules! forward {
 }
 
 use forward;
-
