@@ -126,8 +126,7 @@ impl HeaderMap {
                 Slot::Some(entry_index) => {
                     let entry = &self.entries[entry_index as usize];
 
-                    // TODO: case sensitivity
-                    if entry.get_hashed() == &hash && entry.name().as_str() == name.name {
+                    if entry.get_hashed() == &hash && entry.name().as_str().eq_ignore_ascii_case(name.name) {
                         return Some(entry.value());
                     }
                 },
@@ -419,14 +418,14 @@ mod test {
         assert_ne!(ptr, map.entries.as_ptr());
         assert_ne!(cap, map.capacity());
 
-        assert!(map.contains_key("content-type"));
-        assert!(map.contains_key("accept"));
-        assert!(map.contains_key("content-length"));
-        assert!(map.contains_key("host"));
-        assert!(map.contains_key("date"));
-        assert!(map.contains_key("referer"));
-        assert!(map.contains_key("rim"));
-        assert!(map.contains_key("lea"));
+        assert!(map.contains_key("Content-type"));
+        assert!(map.contains_key("Accept"));
+        assert!(map.contains_key("Content-length"));
+        assert!(map.contains_key("Host"));
+        assert!(map.contains_key("Date"));
+        assert!(map.contains_key("Referer"));
+        assert!(map.contains_key("Rim"));
+        assert!(map.contains_key("Lea"));
 
         // Insert Multi
 

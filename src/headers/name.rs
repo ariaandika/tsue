@@ -39,7 +39,7 @@ impl HeaderName {
     pub(crate) fn hash(&self) -> u16 {
         match &self.repr {
             Repr::Standard(s) => s.hash,
-            Repr::Bytes(b) => fnv_hash(b.as_bytes()),
+            Repr::Bytes(b) => fnv_hash_to_lowercase(b.as_bytes()),
         }
     }
 
@@ -56,7 +56,7 @@ impl HeaderName {
 // ===== Hash =====
 
 #[inline]
-const fn fnv_hash(bytes: &[u8]) -> u16 {
+const fn fnv_hash_to_lowercase(bytes: &[u8]) -> u16 {
     const INITIAL_STATE: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0100_0000_01b3;
 
@@ -64,7 +64,7 @@ const fn fnv_hash(bytes: &[u8]) -> u16 {
     let mut i = 0;
 
     while i < bytes.len() {
-        hash ^= bytes[i] as u64;
+        hash ^= bytes[i].to_ascii_lowercase() as u64;
         hash = hash.wrapping_mul(PRIME);
         i += 1;
     }
@@ -113,7 +113,7 @@ impl<S: SealedRef> SealedRef for &S {
 impl AsHeaderName for &str { }
 impl SealedRef for &str {
     fn hash(&self) -> u16 {
-        fnv_hash(self.as_bytes())
+        fnv_hash_to_lowercase(self.as_bytes())
     }
 
     fn as_str(&self) -> &str {
@@ -124,10 +124,7 @@ impl SealedRef for &str {
 impl AsHeaderName for HeaderName { }
 impl SealedRef for HeaderName {
     fn hash(&self) -> u16 {
-        match &self.repr {
-            Repr::Standard(s) => s.hash,
-            Repr::Bytes(s) => fnv_hash(s.as_bytes()),
-        }
+        self.hash()
     }
 
     fn as_str(&self) -> &str {
@@ -617,7 +614,7 @@ macro_rules! standard_header {
         $(
             $(#[$doc])*
             pub const $id: $t = HeaderName {
-                repr: Repr::Standard(StandardHeader { name: $name, hash: fnv_hash($name.as_bytes()) })
+                repr: Repr::Standard(StandardHeader { name: $name, hash: fnv_hash_to_lowercase($name.as_bytes()) })
             };
         )*
     };
