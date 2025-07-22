@@ -23,7 +23,7 @@ macro_rules! retry_read {
         match $e {
             Ok(Some(ok)) => ok,
             Ok(None) => continue,
-            Err(err) => return Poll::Ready(Err(err)),
+            Err(err) => return Poll::Ready(Err(io_err(err))),
         }
     };
 }
@@ -102,7 +102,7 @@ where
                     let mut chunk = io.read_buffer();
                     let offset = chunk.as_ptr() as usize;
 
-                    let parser::RequestLineRef {
+                    let parser::RequestLine {
                         method,
                         uri,
                         version,
@@ -121,6 +121,8 @@ where
                     // SAFETY: `uri_range` is from `uri` which is str, and `buf` is not mutated
                     let uri_str =
                         unsafe { ByteStr::from_utf8_unchecked(slice_of_bytes(uri_range, &buf)) };
+                    // TODO: should not parse uri immediately, instead reconstruct URI from a complete Request
+                    // https://httpwg.org/specs/rfc9112.html#reconstructing.target.uri
                     let uri = Uri::try_from_shared(uri_str).map_err(io_err)?;
 
                     let mut headers = match header_map.take() {

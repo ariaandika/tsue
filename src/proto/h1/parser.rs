@@ -15,7 +15,7 @@
 //!
 //! The main parsing functions are:
 //!
-//! - [`parse_line`] -> [`RequestLineRef`]
+//! - [`parse_line`] -> [`RequestLine`]
 //! - [`parse_header`] -> [`HeaderRef`]
 //!
 //! # Slice Indexing
@@ -53,14 +53,14 @@
 //! #       headers::{HeaderMap, HeaderName, HeaderValue}};
 //! # use tcio::ByteStr;
 //! use tsue::proto::h1::parser::{
-//!     self, RequestLineRef,
+//!     self, RequestLine,
 //!     range_of, slice_of_bytes, slice_of_bytes_mut
 //! };
 //!
 //! fn parse_request(buffer: &mut BytesMut) {
 //!     let mut chunk = buffer.chunk();
 //!
-//!     let Some(RequestLineRef {
+//!     let Some(RequestLine {
 //!         method,
 //!         uri,
 //!         version,
@@ -130,59 +130,27 @@ macro_rules! tri {
     };
 }
 
+// TODO: simd request parser
+
 // ===== Request Line =====
 
 /// Result of [`parse_line`].
 #[derive(Debug)]
-pub struct RequestLineRef<'a> {
+pub struct RequestLine<'a> {
     pub method: Method,
     pub uri: &'a str,
     pub version: Version,
 }
 
-/// Result of [`parse_line_buf`].
-#[derive(Debug)]
-pub struct RequestLine {
-    pub method: Method,
-    pub uri: tcio::ByteStr,
-    pub version: Version,
-}
-
-/// Parse HTTP Request line with [`bytes::Buf`].
-pub fn parse_line_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<RequestLine>> {
-    let mut bytes = buf.chunk();
-
-    let RequestLineRef {
-        method,
-        uri,
-        version,
-    } = tri!(parse_line(&mut bytes));
-
-    let total_len = bytes.as_ptr() as usize - buf.chunk().as_ptr() as usize;
-    let uri_offset = uri.as_ptr() as usize - buf.chunk().as_ptr() as usize;
-    let uri_len = uri.len();
-    let remaining = total_len - (uri_offset + uri_len);
-
-    buf.advance(uri_offset);
-    // SAFETY: `uri` is a `str`
-    let uri = unsafe { ByteStr::from_utf8_unchecked(buf.copy_to_bytes(uri_len)) };
-
-    buf.advance(remaining);
-
-    Ok(Some(RequestLine {
-        method,
-        uri,
-        version,
-    }))
-}
-
-// TODO: simd request parser
-
 /// Parse HTTP Request line.
 ///
 /// [httpwg](https://httpwg.org/specs/rfc9112.html#request.line)
-pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLineRef<'a>>> {
+pub fn parse_line<'a>(buf: &mut &'a [u8]) -> Result<Option<RequestLine<'a>>, RequestLineError> {
+    use RequestLineError::*;
     let mut bytes = *buf;
+
+    // The method token is case-sensitive
+    // Though this library only support standardized methods
 
     let method = {
         let Some((lead, rest)) = bytes.split_first_chunk::<4>() else {
@@ -199,73 +167,156 @@ pub fn parse_line<'a>(buf: &mut &'a [u8]) -> io::Result<Option<RequestLineRef<'a
                 (b"DELE", [b'T', b'E', ..]) => (Method::DELETE, 6),
                 (b"CONN", [b'E', b'C', b'T', ..]) => (Method::CONNECT, 7),
                 (b"OPTI", [b'O', b'N', b'S', ..]) => (Method::OPTIONS, 7),
-                _ => return Ok(None),
+                _ => return Err(UnknownMethod)
             },
         };
+
         // SAFETY: `len` is acquired from `lead`, `lead` is guaranteed in `bytes` by
         // `.split_first_chunk::<4>()`
         bytes = unsafe { bytes.get_unchecked(len..) };
         ok
     };
 
-    if bytes.first() != Some(&b' ') {
-        return Err(io_data_err("expected space after method"));
-    } else {
-        // SAFETY: checked by `.first()`
-        bytes = unsafe { bytes.get_unchecked(1..) };
+    // Although the request-line grammar rule requires that each of the component elements be
+    // separated by a single SP octet, recipients MAY instead parse on whitespace-delimited word
+    // boundaries and, aside from the CRLF terminator, treat any form of whitespace as the SP
+    // separator while ignoring preceding or trailing whitespace; such whitespace includes one or
+    // more of the following octets: SP, HTAB, VT (%x0B), FF (%x0C), or bare CR.
+
+    // Note that were gonna ignore it, we only accept single space separator
+
+    match bytes.first() {
+        Some(b' ') => {},
+        Some(w) if w.is_ascii_whitespace() => return Err(InvalidSeparator),
+        Some(_) => return Err(UnknownMethod),
+        None => return Ok(None),
     }
 
+    // SAFETY: checked by `.first()`
+    bytes = unsafe { bytes.get_unchecked(1..) };
+
     let uri = {
+        // TODO: check valid request target character
         let Some(n) = bytes.iter().position(|e| e == &b' ') else {
             return Ok(None)
         };
-        match str::from_utf8(&bytes[..n]) {
+        // SAFETY: we trust `.position()` to returns valid index
+        let (uri, rest) = unsafe { bytes.split_at_unchecked(n) };
+        match str::from_utf8(uri) {
             Ok(uri) => {
-                bytes = &bytes[n..];
+                bytes = rest;
                 uri
             },
-            Err(e) => return Err(io_data_err(e)),
+            Err(_) => return Err(NonUtf8),
         }
     };
 
-    if bytes.first() != Some(&b' ') {
-        return Err(io_data_err("expected space after uri"));
-    } else {
-        // SAFETY: checked by `.first()`
-        bytes = unsafe { bytes.get_unchecked(1..) };
-    }
+    // SAFETY: `bytes` contains `rest`, which at least contains `' '` from `.position()`
+    bytes = unsafe { bytes.get_unchecked(1..) };
 
     let version = {
         const VERSION_SIZE: usize = b"HTTP/".len();
-        let Some((b"HTTP/", rest)) = bytes.split_first_chunk::<VERSION_SIZE>() else {
-            return Ok(None);
+        let rest = match bytes.split_first_chunk::<VERSION_SIZE>() {
+            Some((b"HTTP/", rest)) => rest,
+            Some(_) => return Err(InvalidToken),
+            None => return Ok(None),
         };
+
         let ok = match rest {
             [b'1', b'.', b'1', ..] => Version::HTTP_11,
             [b'2', b'.', b'0', ..] => Version::HTTP_2,
+            [b'3', b'.', b'0', ..] => Version::HTTP_2,
             [b'1', b'.', b'0', ..] => Version::HTTP_10,
             [b'0', b'.', b'9', ..] => Version::HTTP_09,
+            [_, _, _, ..] => return Err(InvalidToken),
             _ => return Ok(None),
         };
+
         // SAFETY: checked against static value
         bytes = unsafe { bytes.get_unchecked(VERSION_SIZE + 3..) };
         ok
     };
 
-    {
-        match bytes.first_chunk::<2>() {
-            Some(crlf) => if crlf != b"\r\n" {
-                return Err(io_data_err("expected cariage returns"));
-            },
-            None => return Ok(None),
+    match bytes.first_chunk::<2>() {
+        Some(b"\r\n") => {
+            // SAFETY: checked by `.first_chunk()`
+            bytes = unsafe { bytes.get_unchecked(2..) };
         }
-        // SAFETY: checked by `.first_chunk()`
-        bytes = unsafe { bytes.get_unchecked(2..) };
+        Some([b'\n', field]) if field.is_ascii_whitespace() => {
+            return Err(InvalidSeparator);
+        }
+        Some([b'\n', _]) => {
+            // SAFETY: checked by `.first_chunk()`
+            bytes = unsafe { bytes.get_unchecked(1..) };
+        }
+        Some(_) => return Err(InvalidSeparator),
+        None => return Ok(None),
     }
 
     *buf = bytes;
 
-    Ok(Some(RequestLineRef {
+    Ok(Some(RequestLine {
+        method,
+        uri,
+        version,
+    }))
+}
+
+#[derive(Debug)]
+pub enum RequestLineError {
+    /// A server that receives a method longer than any that it implements SHOULD respond with a
+    /// 501 (Not Implemented) status code.
+    UnknownMethod,
+    /// A server that receives a request-target longer than any URI it wishes to parse MUST respond
+    /// with a 414 (URI Too Long) status code
+    UriTooLong,
+    /// This library only recognize single space separator, other than that is an error.
+    InvalidSeparator,
+    /// Request target or header name is not valid UTF-8.
+    NonUtf8,
+    /// Contains invalid token.
+    InvalidToken,
+}
+
+impl std::error::Error for RequestLineError { }
+
+impl std::fmt::Display for RequestLineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO: proper RequestLineError Display impl
+        write!(f, "\"{self:?}\"")
+    }
+}
+
+/// Result of [`parse_line_buf`].
+#[derive(Debug)]
+pub struct RequestLineBuf {
+    pub method: Method,
+    pub uri: tcio::ByteStr,
+    pub version: Version,
+}
+
+/// Parse HTTP Request line with [`bytes::Buf`].
+pub fn parse_line_buf<B: bytes::Buf>(mut buf: B) -> Result<Option<RequestLineBuf>, RequestLineError> {
+    let mut bytes = buf.chunk();
+
+    let RequestLine {
+        method,
+        uri,
+        version,
+    } = tri!(parse_line(&mut bytes));
+
+    let total_len = bytes.as_ptr() as usize - buf.chunk().as_ptr() as usize;
+    let uri_offset = uri.as_ptr() as usize - buf.chunk().as_ptr() as usize;
+    let uri_len = uri.len();
+    let remaining = total_len - (uri_offset + uri_len);
+
+    buf.advance(uri_offset);
+    // SAFETY: `uri` is a `str`
+    let uri = unsafe { ByteStr::from_utf8_unchecked(buf.copy_to_bytes(uri_len)) };
+
+    buf.advance(remaining);
+
+    Ok(Some(RequestLineBuf {
         method,
         uri,
         version,
@@ -568,6 +619,8 @@ mod test {
         assert!(parse_line_buf(&b"GET /users/get HTTP/1"[..]).unwrap().is_none());
         assert!(parse_line_buf(&b"GET /users/get HTTP/1.1"[..]).unwrap().is_none());
         assert!(parse_line_buf(&b"GET /users/get HTTP/1.1\r"[..]).unwrap().is_none());
+
+        assert!(parse_line_buf(&b"OPTIONS"[..]).unwrap().is_none());
 
 
         let mut buf = &b"GET /users/get HTTP/1.1\r\nHost: "[..];
