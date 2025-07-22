@@ -5,7 +5,6 @@ use super::{HeaderName, HeaderValue};
 type Size = u16;
 
 /// Header Entry.
-#[derive(Clone)]
 pub struct Entry {
     hash: Size,
     name: HeaderName,
@@ -14,20 +13,11 @@ pub struct Entry {
     extra_len: Size,
 }
 
-impl std::fmt::Debug for Entry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Entry")
-            .field("name", &self.name)
-            .field("values", &GetAll::new(self))
-            .finish()
-    }
-}
+// SAFETY: EntryExtra pointer is exclusively owned by Entry
+unsafe impl Send for Entry {}
 
 // SAFETY: EntryExtra pointer is exclusively owned by Entry
-unsafe impl Send for Entry { }
-
-// SAFETY: EntryExtra pointer is exclusively owned by Entry
-unsafe impl Sync for Entry { }
+unsafe impl Sync for Entry {}
 
 struct EntryExtra {
     value: HeaderValue,
@@ -105,19 +95,63 @@ impl Entry {
     }
 }
 
+impl Clone for Entry {
+    fn clone(&self) -> Self {
+        Self {
+            hash: self.hash,
+            name: self.name.clone(),
+            value: self.value.clone(),
+            next: if self.next.is_null() {
+                self.next
+            } else {
+                // SAFETY: null checked
+                Box::into_raw(Box::new(EntryExtra::clone(unsafe { &*self.next })))
+            },
+            extra_len: self.extra_len,
+        }
+    }
+}
+
 impl Drop for Entry {
     fn drop(&mut self) {
-        let mut next = self.next;
-        loop {
-            let now = next;
-            if now.is_null() {
-                break;
-            }
+        if !self.next.is_null() {
             // SAFETY: null checked
-            let now = unsafe { Box::from_raw(now) };
-            next = now.next;
-            drop(now);
+            drop(unsafe { Box::from_raw(self.next) });
         }
+    }
+}
+
+impl Clone for EntryExtra {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            next: {
+                if self.next.is_null() {
+                    self.next
+                } else {
+                    // SAFETY: null checked
+                    Box::into_raw(Box::new(EntryExtra::clone(unsafe { &*self.next })))
+                }
+            },
+        }
+    }
+}
+
+impl Drop for EntryExtra {
+    fn drop(&mut self) {
+        if !self.next.is_null() {
+            // SAFETY: null checked
+            drop(unsafe { Box::from_raw(self.next) });
+        }
+    }
+}
+
+impl std::fmt::Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry")
+            .field("name", &self.name)
+            .field("values", &GetAll::new(self))
+            .finish()
     }
 }
 
