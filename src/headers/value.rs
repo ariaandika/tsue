@@ -180,7 +180,7 @@ const fn parse_from_slice(value: &[u8]) -> Result<(), InvalidHeaderValue> {
     Ok(())
 }
 
-// ===== Debug =====
+// ===== Traits =====
 
 impl std::fmt::Debug for HeaderValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

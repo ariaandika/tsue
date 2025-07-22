@@ -36,21 +36,25 @@ impl Entry {
     }
 
     /// Returns cached hash.
+    #[inline]
     pub const fn get_hashed(&self) -> &Size {
         &self.hash
     }
 
     /// Returns reference to [`HeaderName`].
+    #[inline]
     pub const fn name(&self) -> &HeaderName {
         &self.name
     }
 
     /// Returns reference to [`HeaderValue`].
+    #[inline]
     pub const fn value(&self) -> &HeaderValue {
         &self.value
     }
 
     /// Returns duplicate header name length.
+    #[inline]
     pub const fn extra_len(&self) -> u16 {
         self.extra_len
     }
@@ -87,6 +91,7 @@ impl Entry {
     /// Consume [`Entry`] into [`HeaderName`] and [`HeaderValue`].
     ///
     /// Extra header value will be dropped.
+    #[inline]
     pub fn into_parts(mut self) -> (HeaderName, HeaderValue) {
         (
             replace(&mut self.name, HeaderName::PLACEHOLDER),
@@ -157,21 +162,21 @@ impl std::fmt::Debug for Entry {
 
 // ===== Iterator =====
 
+impl<'a> IntoIterator for &'a Entry {
+    type Item = &'a HeaderValue;
+
+    type IntoIter = GetAll<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        GetAll::new(self)
+    }
+}
+
 /// Iterator returned from [`HeaderMap::get_all`][super::HeaderMap::get_all].
 pub struct GetAll<'a> {
     first: Option<&'a Entry>,
     next: *const EntryExtra,
-}
-
-impl std::fmt::Debug for GetAll<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_list()
-            .entries(Self {
-                first: self.first,
-                next: self.next,
-            })
-            .finish()
-    }
 }
 
 impl<'a> GetAll<'a> {
@@ -190,6 +195,7 @@ impl<'a> GetAll<'a> {
     }
 
     /// Returns `true` if there is still remaining value.
+    #[inline]
     pub const fn has_remaining(&self) -> bool {
         self.first.is_some() || !self.next.is_null()
     }
@@ -212,5 +218,16 @@ impl<'a> Iterator for GetAll<'a> {
                 Some(&extra.value)
             }
         }
+    }
+}
+
+impl std::fmt::Debug for GetAll<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_list()
+            .entries(Self {
+                first: self.first,
+                next: self.next,
+            })
+            .finish()
     }
 }

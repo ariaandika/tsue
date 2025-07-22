@@ -172,7 +172,13 @@ impl Sealed for HeaderName {
     }
 }
 
-// ===== Debug =====
+// ===== Traits =====
+
+impl std::fmt::Display for HeaderName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        str::fmt(self.as_str(), f)
+    }
+}
 
 impl std::fmt::Debug for HeaderName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -181,6 +187,15 @@ impl std::fmt::Debug for HeaderName {
             Repr::Standard(s) => f.field("name", &s.name),
             Repr::Bytes(b) => f.field("name", &b),
         }.finish()
+    }
+}
+
+impl std::hash::Hash for HeaderName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match &self.repr {
+            Repr::Standard(s) => s.hash.hash(state),
+            Repr::Bytes(b) => b.hash(state),
+        }
     }
 }
 
