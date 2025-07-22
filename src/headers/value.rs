@@ -26,14 +26,15 @@ impl HeaderValue {
     };
 
     /// Parse [`HeaderValue`] from slice.
+    #[inline]
     pub fn try_from_slice(value: impl Into<Bytes>) -> Result<Self, InvalidHeaderValue> {
         let bytes: Bytes = value.into();
-        for &b in &bytes {
-            valid!(b)
+        match parse_from_slice(&bytes) {
+            Ok(()) => Ok(Self {
+                repr: Repr::Bytes(bytes),
+            }),
+            Err(err) => Err(err),
         }
-        Ok(Self {
-            repr: Repr::Bytes(bytes),
-        })
     }
 
     /// Parse [`HeaderValue`] from string.
@@ -42,20 +43,26 @@ impl HeaderValue {
     ///
     /// [`to_str`]: HeaderValue::to_str
     /// [`as_str`]: HeaderValue::as_str
+    #[inline]
     pub fn try_from_string(value: impl Into<ByteStr>) -> Result<HeaderValue, InvalidHeaderValue> {
-        let value = value.into();
-        for &b in value.as_bytes() {
-            valid!(b)
+        let value: ByteStr = value.into();
+        match parse_from_slice(value.as_bytes()) {
+            Ok(()) => Ok(Self {
+                repr: Repr::Str(value),
+            }),
+            Err(err) => Err(err),
         }
-        Ok(Self {
-            repr: Repr::Str(value),
-        })
     }
 
     /// Parse [`HeaderValue`] by copying from slice.
     #[inline]
     pub fn try_copy_from_slice(value: &[u8]) -> Result<HeaderValue, InvalidHeaderValue> {
-        Self::try_from_slice(Bytes::copy_from_slice(value))
+        match parse_from_slice(value) {
+            Ok(()) => Ok(Self {
+                repr: Repr::Bytes(Bytes::copy_from_slice(value)),
+            }),
+            Err(err) => Err(err),
+        }
     }
 
     /// Parse [`HeaderValue`] by copying from str.
@@ -66,7 +73,12 @@ impl HeaderValue {
     /// [`as_str`]: HeaderValue::as_str
     #[inline]
     pub fn try_copy_from_string(value: &str) -> Result<HeaderValue, InvalidHeaderValue> {
-        Self::try_from_string(ByteStr::copy_from_str(value))
+        match parse_from_slice(value.as_bytes()) {
+            Ok(()) => Ok(Self {
+                repr: Repr::Str(ByteStr::copy_from_str(value)),
+            }),
+            Err(err) => Err(err),
+        }
     }
 
     /// Parse [`HeaderValue`] from [`ByteStr`].
@@ -81,7 +93,7 @@ impl HeaderValue {
     /// [`as_str`]: HeaderValue::as_str
     #[inline]
     pub fn from_string(value: impl Into<ByteStr>) -> HeaderValue {
-        Self::try_from_string(value).expect("failed to parse header")
+        Self::try_from_string(value).expect("called `HeaderValue::from_string` with invalid bytes")
     }
 
     /// Returns value as slice.
@@ -100,7 +112,8 @@ impl HeaderValue {
     /// Panic if header value is not a valid utf8.
     #[inline]
     pub fn as_str(&self) -> &str {
-        self.try_as_str().expect("cannot convert header value as utf8 string")
+        self.try_as_str()
+            .expect("cannot convert header value as utf8 string")
     }
 
     /// Try to parse value as [`str`].
@@ -119,7 +132,8 @@ impl HeaderValue {
     /// Panic if header value is not a valid utf8.
     #[inline]
     pub fn to_str(&mut self) -> &str {
-        self.try_to_str().expect("cannot convert header value as utf8 string")
+        self.try_to_str()
+            .expect("cannot convert header value as utf8 string")
     }
 
     /// Try to parse value as [`str`] and cache the result.
@@ -145,20 +159,32 @@ impl FromStr for HeaderValue {
     }
 }
 
+// ===== Parsing =====
+
+const fn parse_from_slice(value: &[u8]) -> Result<(), InvalidHeaderValue> {
+    let ptr = value.as_ptr();
+    let len = value.len();
+    let mut i = 0;
+    while i < len {
+        unsafe {
+            // SAFETY: i < value.len()
+            let b = *ptr.add(i);
+            if b >= b' ' && b != 127 || b == b'\t' {
+            } else {
+                return Err(InvalidHeaderValue { });
+            }
+            // SAFETY: i < value.len()
+            i = i.unchecked_add(1);
+        }
+    }
+    Ok(())
+}
+
 // ===== Debug =====
 
 impl std::fmt::Debug for HeaderValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("\"")?;
-        for &b in self.as_bytes() {
-            if b.is_ascii_graphic() || b.is_ascii_whitespace() {
-                write!(f, "{}", b as char)?;
-            } else {
-                write!(f, "\\x{b:x}")?;
-            }
-        }
-        f.write_str("\"")?;
-        Ok(())
+        write!(f, "\"{}\"",tcio::fmt::lossy(&self.as_bytes()))
     }
 }
 
@@ -183,17 +209,3 @@ impl std::fmt::Debug for InvalidHeaderValue {
         f.debug_struct("InvalidHeaderValue").finish()
     }
 }
-
-// ===== Macros =====
-
-macro_rules! valid {
-    ($b:tt) => {
-        if $b >= 32 && $b != 127 || $b == b'\t' {
-        } else {
-            return Err(InvalidHeaderValue { });
-        }
-    };
-}
-
-use valid;
-
