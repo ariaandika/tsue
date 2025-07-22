@@ -5,6 +5,8 @@ use super::{HeaderName, HeaderValue};
 type Size = u16;
 
 /// Header Entry.
+///
+/// Contains [`HeaderName`] and multiple [`HeaderValue`].
 pub struct Entry {
     hash: Size,
     name: HeaderName,
@@ -37,7 +39,7 @@ impl Entry {
 
     /// Returns cached hash.
     #[inline]
-    pub const fn get_hashed(&self) -> &Size {
+    pub(crate) const fn get_hashed(&self) -> &Size {
         &self.hash
     }
 
@@ -53,13 +55,30 @@ impl Entry {
         &self.value
     }
 
-    /// Returns duplicate header name length.
+    /// Returns the number of [`HeaderValue`].
+    ///
+    /// This function will returns at least `1`.
     #[inline]
-    pub const fn extra_len(&self) -> u16 {
+    #[allow(
+        clippy::len_without_is_empty,
+        reason = "Entry always have at least 1 value"
+    )]
+    pub const fn len(&self) -> usize {
+        self.extra_len as usize + 1
+    }
+
+    #[inline]
+    pub(crate) const fn extra_len(&self) -> u16 {
         self.extra_len
     }
 
-    /// Push value with duplicate header name.
+    /// Returns an iterator over [`HeaderValue`].
+    #[inline]
+    pub const fn iter(&self) -> GetAll<'_> {
+        GetAll::new(self)
+    }
+
+    /// Push header value.
     pub fn push(&mut self, value: HeaderValue) {
         let new = Box::into_raw(Box::new(EntryExtra {
             value,
@@ -180,14 +199,14 @@ pub struct GetAll<'a> {
 }
 
 impl<'a> GetAll<'a> {
-    pub(crate) fn new(entry: &'a Entry) -> Self {
+    pub(crate) const fn new(entry: &'a Entry) -> Self {
         Self {
             first: Some(entry),
             next: entry.next,
         }
     }
 
-    pub(crate) fn empty() -> Self {
+    pub(crate) const fn empty() -> Self {
         Self {
             first: None,
             next: std::ptr::null(),

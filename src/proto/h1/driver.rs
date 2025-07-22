@@ -192,7 +192,7 @@ where
                 Project::Drain(response) => {
                     ready!(io.poll_drain(cx)?);
 
-                    let res = response.take().unwrap();
+                    let mut res = response.take().unwrap();
 
                     io.write(res.version().as_str().as_bytes());
                     io.write(b" ");
@@ -216,10 +216,9 @@ where
 
                     io.write(b"\r\n");
 
-                    // TODO: wait for HeaderMap::clear
-                    // let mut map = mem::take(res.headers_mut());
-                    // map.clear();
-                    // header_map.replace(map);
+                    let mut map = std::mem::take(res.headers_mut());
+                    map.clear();
+                    header_map.replace(map);
 
                     phase.set(Phase::Flush(io.write_body(res.into_body())));
                 }

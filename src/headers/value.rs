@@ -190,7 +190,7 @@ impl std::fmt::Debug for HeaderValue {
 
 // ===== Error =====
 
-/// An error that can occur when inseting header value.
+/// An error that can occur when parsing header value.
 #[non_exhaustive]
 pub struct InvalidHeaderValue {
 

@@ -22,7 +22,7 @@ pub struct HeaderMap {
     is_full: bool,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 enum Slot {
     Some(Size),
     /// there is collision previously, but index removed,
@@ -34,7 +34,7 @@ enum Slot {
 
 impl Slot {
     fn take_as_tombstone(&mut self) -> Self {
-        std::mem::replace(self, Self::Tombstone)
+        replace(self, Self::Tombstone)
     }
 }
 
@@ -42,6 +42,7 @@ impl HeaderMap {
     /// Create new empty [`HeaderMap`].
     ///
     /// This function does not allocate.
+    #[inline]
     pub fn new() -> Self {
         Self {
             // zero sized type does not allocate
@@ -72,22 +73,28 @@ impl HeaderMap {
 
     /// Returns headers length.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entries.len() + self.extra_len as usize
+    }
+
+    /// Returns the total number of elements the map can hold without reallocating.
+    #[inline]
+    pub const fn capacity(&self) -> usize {
+        self.entries.capacity()
     }
 
     /// Returns `true` if headers has no element.
     #[inline]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+    pub const fn is_empty(&self) -> bool {
+        self.entries.len() == 0 && self.extra_len == 0
     }
 }
 
 // ===== Lookup =====
 
 impl HeaderMap {
-    /// Returns `true` if the map contains a header value for the header key.
+    /// Returns `true` if the map contains a header value for given header name.
     #[inline]
     pub fn contains_key<K: AsHeaderName>(&self, name: K) -> bool {
         if self.is_empty() {
@@ -98,7 +105,7 @@ impl HeaderMap {
         self.try_get(name.to_header_ref()).is_some()
     }
 
-    /// Returns a reference to the first header value corresponding to the header name.
+    /// Returns a reference to the first header value corresponding to the given header name.
     #[inline]
     pub fn get<K: AsHeaderName>(&self, name: K) -> Option<&HeaderValue> {
         if self.is_empty() {
@@ -133,7 +140,7 @@ impl HeaderMap {
         }
     }
 
-    /// Returns a reference to all header values corresponding to the header name.
+    /// Returns an iterator to all header values corresponding to the given header name.
     #[inline]
     pub fn get_all<K: AsHeaderName>(&self, name: K) -> GetAll {
         if self.is_empty() {
@@ -169,15 +176,16 @@ impl HeaderMap {
         }
     }
 
-    /// Returns an iterator over the headers.
+    /// Returns an iterator over headers as name and value pair.
     #[inline]
     pub fn iter(&self) -> Iter {
         Iter::new(self)
     }
 
+    /// Returns an iterator over header [`Entry`].
     #[inline]
-    pub(crate) fn entries(&self) -> &[Entry] {
-        &self.entries
+    pub const fn entries(&self) -> &[Entry] {
+        self.entries.as_slice()
     }
 
     // pub(crate) fn entries_mut(&mut self) -> &mut Vec<Entry> {
@@ -188,10 +196,6 @@ impl HeaderMap {
 // ===== Mutation =====
 
 impl HeaderMap {
-    pub fn reserve(&mut self, _capacity: usize) {
-        // TODO: HeaderMap::reserve
-    }
-
     /// Removes a header from the map, returning the first header value at the key if the key was
     /// previously in the map.
     pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
@@ -342,7 +346,30 @@ impl HeaderMap {
         *self = me;
     }
 
-    // TODO: HeaderMap::clear
+    /// Reserves capacity for at least `additional` more headers.
+    pub fn reserve(&mut self, additional: usize) {
+        if self.entries.capacity() - self.entries.len() > additional {
+            return;
+        }
+
+        let mut me = HeaderMap::with_capacity(self.entries.capacity() + additional);
+
+        for entry in take(&mut self.entries) {
+            let (name,value) = entry.into_parts();
+            me.try_insert(name, value, true);
+        }
+
+        *self = me;
+    }
+
+    /// Clear headers map, removing all the value.
+    pub fn clear(&mut self) {
+        for index in &mut self.indices {
+            take(index);
+        }
+        self.entries.clear();
+        self.is_full = self.entries.capacity() == 0;
+    }
 }
 
 impl std::fmt::Debug for HeaderMap {
@@ -364,6 +391,9 @@ mod test {
         map.insert("content-type", HeaderValue::from_string("FOO"));
         assert!(map.contains_key("content-type"));
 
+        let ptr = map.entries.as_ptr();
+        let cap = map.capacity();
+
         map.insert("accept", HeaderValue::from_string("BAR"));
         map.insert("content-length", HeaderValue::from_string("LEN"));
         map.insert("host", HeaderValue::from_string("BAR"));
@@ -379,9 +409,15 @@ mod test {
         assert!(map.contains_key("referer"));
         assert!(map.contains_key("rim"));
 
-        println!("Insert Allocate");
+        assert_eq!(ptr, map.entries.as_ptr());
+        assert_eq!(cap, map.capacity());
+
+        // Insert Allocate
 
         map.insert("lea", HeaderValue::from_string("BAR"));
+
+        assert_ne!(ptr, map.entries.as_ptr());
+        assert_ne!(cap, map.capacity());
 
         assert!(map.contains_key("content-type"));
         assert!(map.contains_key("accept"));
@@ -392,7 +428,7 @@ mod test {
         assert!(map.contains_key("rim"));
         assert!(map.contains_key("lea"));
 
-        println!("Insert Multi");
+        // Insert Multi
 
         map.append("content-length", HeaderValue::from_string("BAR"));
 
@@ -407,7 +443,7 @@ mod test {
         assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("BAR"))));
         assert!(all.next().is_none());
 
-        println!("Remove accept");
+        // Remove accept
 
         assert!(map.remove("accept").is_some());
         assert!(map.contains_key("content-type"));
@@ -418,7 +454,7 @@ mod test {
         assert!(map.contains_key("rim"));
         assert!(map.contains_key("lea"));
 
-        println!("Remove lea");
+        // Remove lea
 
         assert!(map.remove("lea").is_some());
         assert!(map.contains_key("content-type"));
@@ -430,8 +466,16 @@ mod test {
 
         assert!(map.remove("content-length").is_some());
 
-        dbg!(map.len());
-        dbg!(map);
+        // Clear
+
+        map.clear();
+        assert_eq!(map.len(), 0);
+        assert!(map.is_empty());
+        assert!(!map.contains_key("content-type"));
+        assert!(!map.contains_key("host"));
+        assert!(!map.contains_key("date"));
+        assert!(!map.contains_key("referer"));
+        assert!(!map.contains_key("rim"));
     }
 }
 

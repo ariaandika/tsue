@@ -23,11 +23,11 @@ pub struct Iter<'a> {
 impl<'a> Iter<'a> {
     pub(crate) fn new(map: &'a HeaderMap) -> Self {
         match map.entries().first() {
-            Some(ok) => Self {
+            Some(entry) => Self {
                 map,
                 n: 0,
-                name: ok.name(),
-                iter: map.get_all(ok.name()),
+                name: entry.name(),
+                iter: GetAll::new(entry),
             },
             None => Self::empty(map),
         }
