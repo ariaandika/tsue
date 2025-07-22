@@ -282,8 +282,13 @@ impl std::error::Error for RequestLineError { }
 
 impl std::fmt::Display for RequestLineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO: proper RequestLineError Display impl
-        write!(f, "\"{self:?}\"")
+        match self {
+            Self::UnknownMethod => f.write_str("unknown method"),
+            Self::UriTooLong => f.write_str("uri too long"),
+            Self::InvalidSeparator => f.write_str("invalid separator"),
+            Self::NonUtf8 => f.write_str("non utf8 bytes"),
+            Self::InvalidToken => f.write_str("invalid token"),
+        }
     }
 }
 
