@@ -37,7 +37,7 @@ impl Entry {
     }
 
     /// Returns cached hash.
-    pub fn hash(&self) -> &Size {
+    pub const fn get_hashed(&self) -> &Size {
         &self.hash
     }
 

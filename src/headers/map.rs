@@ -120,7 +120,7 @@ impl HeaderMap {
                     let entry = &self.entries[entry_index as usize];
 
                     // TODO: case sensitivity
-                    if entry.hash() == &hash && entry.name().as_str() == name.name {
+                    if entry.get_hashed() == &hash && entry.name().as_str() == name.name {
                         return Some(entry.value());
                     }
                 },
@@ -154,7 +154,7 @@ impl HeaderMap {
                 Slot::Some(entry_index) => {
                     let entry = &self.entries[entry_index as usize];
 
-                    if entry.hash() == &hash && entry.name().as_str() == name.name {
+                    if entry.get_hashed() == &hash && entry.name().as_str() == name.name {
                         return GetAll::new(entry);
                     }
                 },
@@ -218,12 +218,12 @@ impl HeaderMap {
                     let entry_index = *entry_index as usize;
                     let entry = &self.entries[entry_index];
 
-                    if entry.hash() == &hash && entry.name().as_str() == name.name {
+                    if entry.get_hashed() == &hash && entry.name().as_str() == name.name {
 
                         // prepare for `swap_remove` below, change indices of to be swaped entry
-                        if let Some(last_entry) = self.entries.last().filter(|last|last.hash() != entry.hash()) {
+                        if let Some(last_entry) = self.entries.last().filter(|last|last.get_hashed() != entry.get_hashed()) {
                             // this still possibly collisioned index
-                            let mut index = last_entry.hash() & (mask - 1);
+                            let mut index = last_entry.get_hashed() & (mask - 1);
 
                             loop {
                                 let Slot::Some(inner_entry_index) = &mut self.indices[index as usize] else {
@@ -232,7 +232,7 @@ impl HeaderMap {
 
                                 let inner_entry = &self.entries[*inner_entry_index as usize];
 
-                                if inner_entry.hash() == last_entry.hash()
+                                if inner_entry.get_hashed() == last_entry.get_hashed()
                                     && inner_entry.name().as_str() == last_entry.name().as_str()
                                 {
                                     *inner_entry_index = entry_index as Size;
@@ -304,7 +304,7 @@ impl HeaderMap {
                 Slot::Some(entry_index) => {
                     let entry = &mut self.entries[*entry_index as usize];
 
-                    if entry.hash() == &hash && entry.name().as_str() == name.as_str() {
+                    if entry.get_hashed() == &hash && entry.name().as_str() == name.as_str() {
                         break if append {
                             // Append
                             entry.push(value);
