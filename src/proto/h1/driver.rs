@@ -139,11 +139,10 @@ where
                         let value = header.resolve_value(&buf);
 
                         if name.eq_ignore_ascii_case("content-length") {
-                            content_len = Some(
-                                str::from_utf8(&value)
-                                    .map_err(io_err)
-                                    .and_then(|e| e.parse().map_err(io_err))?,
-                            );
+                            match tcio::atou(&value) {
+                                Some(ok) => content_len = Some(ok),
+                                None => return Poll::Ready(Err(io_err("invalid content-length")))
+                            }
                         }
 
                         if let Ok(value) = HeaderValue::try_from_slice(value) {
@@ -151,7 +150,7 @@ where
                         }
                     }
 
-                    let content_len: u64 = content_len.unwrap_or(0);
+                    let content_len = content_len.unwrap_or(0);
                     let remain = io.read_buffer_mut().split();
 
                     // at this point, buffer is empty, so reserve will not need to copy any data if
