@@ -3,7 +3,7 @@ use std::{io, mem::MaybeUninit, pin::Pin, sync::Arc, task::Poll};
 use tcio::{
     ByteStr,
     io::{AsyncIoRead, AsyncIoWrite},
-    slice::{range_of, slice_of_bytes},
+    bytes::{range_of, slice_of_bytes},
 };
 
 use crate::{

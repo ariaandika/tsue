@@ -1,7 +1,7 @@
 //! HTTP [URI][rfc].
 //!
 //! [rfc]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
-use tcio::{slice::Cursor, ByteStr};
+use tcio::{bytes::Cursor, ByteStr};
 
 /// HTTP [URI][rfc].
 ///
@@ -236,33 +236,33 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
     let mut valid_scheme = Ok(());
     let mut cursor = Cursor::new(buf);
 
-    match cursor.pop_front() {
+    match cursor.next() {
         Some(lead) if lead.is_ascii_alphanumeric() => {},
         Some(lead) => valid_scheme = Err(Char(lead as char)),
         None => return Err(Incomplete),
     }
 
     loop {
-        match cursor.pop_front() {
+        match cursor.next() {
             Some(lead) => match lead {
                 // authority, no trailing colon
                 b'/' | b'?' | b'#' => {
                     // SAFETY: called `.pop_front()`
                     unsafe { cursor.step_back(1) };
                     *buf = cursor.as_bytes();
-                    return match cursor.step().u16_max(MAX_AUTH) {
+                    return match cursor.steps().u16_max(MAX_AUTH) {
                         Ok(ok) => Ok((IS_AUTHORITY, ok)),
                         Err(_) => Err(TooLong)
                     };
                 },
                 b':' => {
                     // maybe a port
-                    let Some(b'0'..=b'9') = cursor.first() else {
+                    let Some(b'0'..=b'9') = cursor.peek() else {
                         break;
                     };
 
                     let mut remain = cursor.as_bytes();
-                    let len = cursor.step();
+                    let len = cursor.steps();
                     let remain_len = parse_authority_partial(&mut remain)?;
                     *buf = remain;
                     return Ok((IS_AUTHORITY, (len + remain_len).u16_max(MAX_AUTH)?));
@@ -277,7 +277,7 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
             // no colon, authority only
             None => {
                 *buf = cursor.as_bytes();
-                return match cursor.step().u16_max(MAX_AUTH) {
+                return match cursor.steps().u16_max(MAX_AUTH) {
                     Ok(ok) => Ok((IS_AUTHORITY, ok)),
                     Err(_) => Err(TooLong)
                 };
@@ -291,14 +291,14 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
     *buf = cursor.as_bytes();
 
     // but the scheme length does not include ':'
-    Ok((IS_SCHEME, cursor.step().u16_max(MAX_SCHEME)? - 1))
+    Ok((IS_SCHEME, cursor.steps().u16_max(MAX_SCHEME)? - 1))
 }
 
 fn parse_authority_partial(buf: &mut &[u8]) -> Result<usize, InvalidUri> {
     let mut cursor = Cursor::new(buf);
 
     loop {
-        match cursor.first() {
+        match cursor.peek() {
             Some(b'/' | b'?' | b'#') => break,
             Some(_) => {
                 // SAFETY: checked by `.first()`
@@ -309,7 +309,7 @@ fn parse_authority_partial(buf: &mut &[u8]) -> Result<usize, InvalidUri> {
     }
 
     *buf = cursor.as_bytes();
-    Ok(cursor.step())
+    Ok(cursor.steps())
 }
 
 /// ```not_rust
@@ -322,7 +322,7 @@ fn parse_authority_partial(buf: &mut &[u8]) -> Result<usize, InvalidUri> {
 fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     let mut cursor = Cursor::new(buf);
 
-    match cursor.first_chunk::<2>() {
+    match cursor.peek_chunk::<2>() {
         Some(b"//") => {
             // SAFETY: checked by `.first_chunk::<2>()`
             unsafe { cursor.advance(2) }
@@ -331,7 +331,7 @@ fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     };
 
     loop {
-        match cursor.first() {
+        match cursor.peek() {
             Some(b'/' | b'?' | b'#') => break,
             Some(_) => {
                 // SAFETY: checked by `.first()`
@@ -342,7 +342,7 @@ fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     }
 
     *buf = cursor.as_bytes();
-    cursor.step().u16()
+    cursor.steps().u16()
 }
 
 /// NOTE: does not check for leading slashes
@@ -358,7 +358,7 @@ fn parse_path(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     let mut cursor = Cursor::new(buf);
 
     loop {
-        match cursor.first() {
+        match cursor.peek() {
             Some(b'?' | b'#') => break,
             Some(_) => {
                 // SAFETY: checked by `.first()`
@@ -369,7 +369,7 @@ fn parse_path(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
     }
 
     *buf = cursor.as_bytes();
-    cursor.step().u16()
+    cursor.steps().u16()
 }
 
 fn trim_fragment(value: ByteStr, query: u16) -> ByteStr {

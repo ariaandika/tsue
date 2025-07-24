@@ -114,11 +114,20 @@
 //! [`MaybeUninit`]: std::mem::MaybeUninit
 use bytes::Bytes;
 use std::{io, mem::MaybeUninit};
-use tcio::ByteStr;
-
-pub use tcio::slice::{range_of, slice_of_bytes, slice_of_bytes_mut};
+use tcio::{ByteStr, bytes::Cursor};
 
 use crate::http::{Method, Version};
+
+pub use tcio::bytes::{range_of, slice_of_bytes, slice_of_bytes_mut};
+
+macro_rules! t {
+    ($e:expr) => {
+        match $e {
+            Some(ok) => ok,
+            None => return Ok(None),
+        }
+    };
+}
 
 macro_rules! tri {
     ($e:expr) => {
@@ -147,21 +156,20 @@ pub struct RequestLine<'a> {
 /// [httpwg](https://httpwg.org/specs/rfc9112.html#request.line)
 pub fn parse_line<'a>(buf: &mut &'a [u8]) -> Result<Option<RequestLine<'a>>, RequestLineError> {
     use RequestLineError::*;
-    let mut bytes = *buf;
+    let mut cursor = Cursor::new(buf);
+    // let mut bytes = *buf;
 
     // The method token is case-sensitive
     // Though this library only support standardized methods
 
     let method = {
-        let Some((lead, rest)) = bytes.split_first_chunk::<4>() else {
-            return Ok(None);
-        };
+        let lead = t!(cursor.peek_chunk::<4>());
         let (ok, len) = match lead {
             b"GET " => (Method::GET, 3),
             b"PUT " => (Method::PUT, 3),
             b"POST" => (Method::POST, 4),
             b"HEAD" => (Method::HEAD, 4),
-            _ => match (lead, rest) {
+            _ => match (lead, cursor.as_bytes()) {
                 (b"PATC", [b'H', ..]) => (Method::PATCH, 5),
                 (b"TRAC", [b'E', ..]) => (Method::TRACE, 5),
                 (b"DELE", [b'T', b'E', ..]) => (Method::DELETE, 6),
@@ -171,9 +179,9 @@ pub fn parse_line<'a>(buf: &mut &'a [u8]) -> Result<Option<RequestLine<'a>>, Req
             },
         };
 
-        // SAFETY: `len` is acquired from `lead`, `lead` is guaranteed in `bytes` by
-        // `.split_first_chunk::<4>()`
-        bytes = unsafe { bytes.get_unchecked(len..) };
+        // SAFETY: `len` is valid constant value
+        unsafe { cursor.advance(len) };
+
         ok
     };
 
@@ -185,75 +193,55 @@ pub fn parse_line<'a>(buf: &mut &'a [u8]) -> Result<Option<RequestLine<'a>>, Req
 
     // Note that were gonna ignore it, we only accept single space separator
 
-    match bytes.first() {
+    match cursor.next() {
         Some(b' ') => {},
         Some(w) if w.is_ascii_whitespace() => return Err(InvalidSeparator),
         Some(_) => return Err(UnknownMethod),
         None => return Ok(None),
     }
 
-    // SAFETY: checked by `.first()`
-    bytes = unsafe { bytes.get_unchecked(1..) };
-
     let uri = {
-        // TODO: check valid request target character
-        let Some(n) = bytes.iter().position(|e| e == &b' ') else {
-            return Ok(None)
-        };
-        // SAFETY: we trust `.position()` to returns valid index
-        let (uri, rest) = unsafe { bytes.split_at_unchecked(n) };
+        let uri = t!(cursor.next_split(b' '));
+
         match str::from_utf8(uri) {
-            Ok(uri) => {
-                bytes = rest;
-                uri
-            },
+            Ok(uri) => uri,
             Err(_) => return Err(NonUtf8),
         }
     };
 
-    // SAFETY: `bytes` contains `rest`, which at least contains `' '` from `.position()`
-    bytes = unsafe { bytes.get_unchecked(1..) };
-
     let version = {
         const VERSION_SIZE: usize = b"HTTP/".len();
-        let rest = match bytes.split_first_chunk::<VERSION_SIZE>() {
-            Some((b"HTTP/", rest)) => rest,
-            Some(_) => return Err(InvalidToken),
-            None => return Ok(None),
+
+        let b"HTTP/" = t!(cursor.next_chunk::<VERSION_SIZE>()) else {
+            return Err(InvalidToken)
         };
 
-        let ok = match rest {
-            [b'1', b'.', b'1', ..] => Version::HTTP_11,
-            [b'2', b'.', b'0', ..] => Version::HTTP_2,
-            [b'3', b'.', b'0', ..] => Version::HTTP_2,
-            [b'1', b'.', b'0', ..] => Version::HTTP_10,
-            [b'0', b'.', b'9', ..] => Version::HTTP_09,
-            [_, _, _, ..] => return Err(InvalidToken),
-            _ => return Ok(None),
-        };
-
-        // SAFETY: checked against static value
-        bytes = unsafe { bytes.get_unchecked(VERSION_SIZE + 3..) };
-        ok
+        match t!(cursor.next_chunk::<3>()) {
+            [b'1', b'.', b'1'] => Version::HTTP_11,
+            [b'2', b'.', b'0'] => Version::HTTP_2,
+            [b'3', b'.', b'0'] => Version::HTTP_2,
+            [b'1', b'.', b'0'] => Version::HTTP_10,
+            [b'0', b'.', b'9'] => Version::HTTP_09,
+            _ => return Err(InvalidToken),
+        }
     };
 
-    match bytes.first_chunk::<2>() {
-        Some(b"\r\n") => {
-            // SAFETY: checked by `.first_chunk()`
-            bytes = unsafe { bytes.get_unchecked(2..) };
+    match t!(cursor.peek_chunk::<2>()) {
+        b"\r\n" => {
+            // SAFETY: checked by `.first_chunk::<2>()`
+            unsafe { cursor.advance(2) };
         }
-        Some([b'\n', field]) if field.is_ascii_whitespace() => {
+        [b'\n', field] if field.is_ascii_whitespace() => {
             return Err(InvalidSeparator);
         }
-        Some([b'\n', _]) => {
-            // SAFETY: checked by `.first_chunk()`
-            bytes = unsafe { bytes.get_unchecked(1..) };
+        [b'\n', _] => {
+            // SAFETY: checked by `.first_chunk::<2>()`
+            unsafe { cursor.advance(1) };
         }
-        Some(_) => return Err(InvalidSeparator),
-        None => return Ok(None),
+        _ => return Err(InvalidSeparator),
     }
 
-    *buf = bytes;
+    *buf = cursor.as_bytes();
 
     Ok(Some(RequestLine {
         method,
@@ -281,7 +269,7 @@ pub enum RequestLineError {
 impl std::error::Error for RequestLineError { }
 
 impl std::fmt::Display for RequestLineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::UnknownMethod => f.write_str("unknown method"),
             Self::UriTooLong => f.write_str("uri too long"),
@@ -292,113 +280,19 @@ impl std::fmt::Display for RequestLineError {
     }
 }
 
-/// Result of [`parse_line_buf`].
-#[derive(Debug)]
-pub struct RequestLineBuf {
-    pub method: Method,
-    pub uri: tcio::ByteStr,
-    pub version: Version,
-}
-
-/// Parse HTTP Request line with [`bytes::Buf`].
-pub fn parse_line_buf<B: bytes::Buf>(mut buf: B) -> Result<Option<RequestLineBuf>, RequestLineError> {
-    let mut bytes = buf.chunk();
-
-    let RequestLine {
-        method,
-        uri,
-        version,
-    } = tri!(parse_line(&mut bytes));
-
-    let total_len = bytes.as_ptr() as usize - buf.chunk().as_ptr() as usize;
-    let uri_offset = uri.as_ptr() as usize - buf.chunk().as_ptr() as usize;
-    let uri_len = uri.len();
-    let remaining = total_len - (uri_offset + uri_len);
-
-    buf.advance(uri_offset);
-    // SAFETY: `uri` is a `str`
-    let uri = unsafe { ByteStr::from_utf8_unchecked(buf.copy_to_bytes(uri_len)) };
-
-    buf.advance(remaining);
-
-    Ok(Some(RequestLineBuf {
-        method,
-        uri,
-        version,
-    }))
-}
-
 // ===== Header =====
 
 /// Result of [`parse_header`].
 #[derive(Debug, Clone)]
-pub struct HeaderRef<'a> {
+pub struct Header<'a> {
     pub name: &'a str,
     pub value: &'a [u8],
-}
-
-impl<'a> HeaderRef<'a> {
-    /// Constant for empty [`HeaderRef`].
-    pub const EMPTY: Self = Self { name: "", value: b"" };
-
-    /// Returns a slice of `buf` containing the header name and value.
-    pub fn slice_ref(&self, buf: &Bytes) -> HeaderBuf {
-        HeaderBuf {
-            name: ByteStr::from_slice_of(self.name, buf),
-            value: buf.slice_ref(self.value),
-        }
-    }
-}
-
-/// Result of [`parse_header_buf`].
-#[derive(Debug, Clone)]
-pub struct HeaderBuf {
-    pub name: ByteStr,
-    pub value: Bytes,
-}
-
-impl HeaderBuf {
-    /// Create new empty [`HeaderBuf`].
-    pub const fn new() -> Self {
-        Self { name: ByteStr::new(), value: Bytes::new() }
-    }
-}
-
-impl Default for HeaderBuf {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Parse header with [`bytes::Buf`].
-pub fn parse_header_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<HeaderBuf>> {
-    let mut bytes = buf.chunk();
-    let offset = bytes.as_ptr() as usize;
-
-    let HeaderRef { name, value } = tri!(parse_header(&mut bytes));
-
-    debug_assert_eq!(offset, name.as_ptr() as usize);
-
-    let name_len = name.len();
-    let value_offset = value.as_ptr() as usize - offset;
-    let value_len = value.len();
-    let sep_len = value_offset - name_len;
-
-    // SAFETY: `name` is a `str`
-    let name = unsafe { ByteStr::from_utf8_unchecked(buf.copy_to_bytes(name_len)) };
-    buf.advance(sep_len);
-    let value = buf.copy_to_bytes(value_len);
-
-    debug_assert_eq!(&buf.chunk()[..2], b"\r\n");
-    buf.advance(2);
-
-    Ok(Some(HeaderBuf { name, value }))
 }
 
 /// Parse HTTP Header.
 ///
 /// Note that this does not check for empty line which indicate the end of headers in HTTP.
-pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<HeaderRef<'a>>> {
+pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<Header<'a>>> {
     let mut bytes = *buf;
 
     let name = {
@@ -447,25 +341,121 @@ pub fn parse_header<'a>(buf: &mut &'a [u8]) -> io::Result<Option<HeaderRef<'a>>>
 
     *buf = bytes;
 
-    Ok(Some(HeaderRef { name, value }))
+    Ok(Some(Header { name, value }))
+}
+
+// ===== Utilities =====
+
+/// Result of [`parse_line_buf`].
+#[derive(Debug)]
+pub struct RequestLineBuf {
+    pub method: Method,
+    pub uri: tcio::ByteStr,
+    pub version: Version,
+}
+
+/// Parse HTTP Request line with [`bytes::Buf`].
+pub fn parse_line_buf<B: bytes::Buf>(mut buf: B) -> Result<Option<RequestLineBuf>, RequestLineError> {
+    let mut bytes = buf.chunk();
+
+    let RequestLine {
+        method,
+        uri,
+        version,
+    } = tri!(parse_line(&mut bytes));
+
+    let total_len = bytes.as_ptr() as usize - buf.chunk().as_ptr() as usize;
+    let uri_offset = uri.as_ptr() as usize - buf.chunk().as_ptr() as usize;
+    let uri_len = uri.len();
+    let remaining = total_len - (uri_offset + uri_len);
+
+    buf.advance(uri_offset);
+    // SAFETY: `uri` is a `str`
+    let uri = unsafe { ByteStr::from_utf8_unchecked(buf.copy_to_bytes(uri_len)) };
+
+    buf.advance(remaining);
+
+    Ok(Some(RequestLineBuf {
+        method,
+        uri,
+        version,
+    }))
+}
+
+impl<'a> Header<'a> {
+    /// Constant for empty [`HeaderRef`].
+    pub const EMPTY: Self = Self { name: "", value: b"" };
+
+    /// Returns a slice of `buf` containing the header name and value.
+    pub fn slice_ref(&self, buf: &Bytes) -> HeaderBuf {
+        HeaderBuf {
+            name: ByteStr::from_slice_of(self.name, buf),
+            value: buf.slice_ref(self.value),
+        }
+    }
+}
+
+/// Result of [`parse_header_buf`].
+#[derive(Debug, Clone)]
+pub struct HeaderBuf {
+    pub name: ByteStr,
+    pub value: Bytes,
+}
+
+impl HeaderBuf {
+    /// Create new empty [`HeaderBuf`].
+    pub const fn new() -> Self {
+        Self { name: ByteStr::new(), value: Bytes::new() }
+    }
+}
+
+impl Default for HeaderBuf {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Parse header with [`bytes::Buf`].
+pub fn parse_header_buf<B: bytes::Buf>(mut buf: B) -> io::Result<Option<HeaderBuf>> {
+    let mut bytes = buf.chunk();
+    let offset = bytes.as_ptr() as usize;
+
+    let Header { name, value } = tri!(parse_header(&mut bytes));
+
+    debug_assert_eq!(offset, name.as_ptr() as usize);
+
+    let name_len = name.len();
+    let value_offset = value.as_ptr() as usize - offset;
+    let value_len = value.len();
+    let sep_len = value_offset - name_len;
+
+    // SAFETY: `name` is a `str`
+    let name = unsafe { ByteStr::from_utf8_unchecked(buf.copy_to_bytes(name_len)) };
+    buf.advance(sep_len);
+    let value = buf.copy_to_bytes(value_len);
+
+    debug_assert_eq!(&buf.chunk()[..2], b"\r\n");
+    buf.advance(2);
+
+    Ok(Some(HeaderBuf { name, value }))
 }
 
 /// Parse multiple headers.
 #[inline]
 pub fn parse_headers<'a, 'h>(
     buf: &mut &'a [u8],
-    headers: &'h mut [HeaderRef<'a>],
-) -> io::Result<Option<&'h mut [HeaderRef<'a>]>> {
+    headers: &'h mut [Header<'a>],
+) -> io::Result<Option<&'h mut [Header<'a>]>> {
     // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
-    let headers = unsafe { &mut *(headers as *mut [HeaderRef] as *mut [MaybeUninit<HeaderRef>]) };
+    let headers = unsafe { &mut *(headers as *mut [Header] as *mut [MaybeUninit<Header>]) };
     parse_headers_uninit(buf, headers)
 }
 
 /// Parse multiple headers with uninit slice.
 pub fn parse_headers_uninit<'a, 'h>(
     buf: &mut &'a [u8],
-    headers: &'h mut [MaybeUninit<HeaderRef<'a>>],
-) -> io::Result<Option<&'h mut [HeaderRef<'a>]>> {
+    headers: &'h mut [MaybeUninit<Header<'a>>],
+) -> io::Result<Option<&'h mut [Header<'a>]>> {
     let mut bytes = *buf;
     let mut n = 0;
 
@@ -495,7 +485,7 @@ pub fn parse_headers_uninit<'a, 'h>(
     // SAFETY: `n` is the amount of `MaybeUninit` that has been initialized
     let headers = unsafe { headers.get_unchecked_mut(..n) };
     // SAFETY: `MaybeUninit<T>` is guaranteed to have the same size, alignment as `T`:
-    let headers = unsafe { &mut *(headers as *mut [MaybeUninit<HeaderRef>] as *mut [HeaderRef]) };
+    let headers = unsafe { &mut *(headers as *mut [MaybeUninit<Header>] as *mut [Header]) };
     Ok(Some(headers))
 }
 
@@ -510,7 +500,7 @@ pub struct HeaderRange {
 }
 
 impl HeaderRange {
-    fn new(header: &HeaderRef) -> Self {
+    fn new(header: &Header) -> Self {
         HeaderRange {
             // INVARIANT: range buffer is valid UTF-8
             name: range_of(header.name.as_bytes()),
@@ -693,7 +683,7 @@ mod test {
     #[test]
     fn test_parse_headers() {
         let mut buf = &HEADERS.as_bytes()[..16];
-        let mut headers = [HeaderRef::EMPTY;4];
+        let mut headers = [Header::EMPTY;4];
 
         assert!(parse_headers(&mut buf, &mut headers).unwrap().is_none());
 
