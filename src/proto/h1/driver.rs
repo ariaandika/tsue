@@ -14,9 +14,10 @@ use crate::{
     request::{Parts, Request},
     response::Response,
     service::HttpService,
+    parser::h1,
 };
 
-use super::{io::IoBuffer, parser};
+use super::io::IoBuffer;
 
 macro_rules! retry_read {
     ($e:expr) => {
@@ -102,16 +103,16 @@ where
                     let mut chunk = io.read_buffer();
                     let offset = chunk.as_ptr() as usize;
 
-                    let parser::RequestLine {
+                    let h1::RequestLine {
                         method,
                         uri,
                         version,
-                    } = retry_read!(parser::parse_line(&mut chunk));
+                    } = retry_read!(h1::parse_line(&mut chunk));
                     let uri_range = range_of(uri.as_bytes());
 
                     let mut headers = [const { MaybeUninit::uninit() }; MAX_HEADERS];
                     let headers_ref =
-                        retry_read!(parser::parse_headers_range_uninit(&mut chunk, &mut headers));
+                        retry_read!(h1::parse_headers_range_uninit(&mut chunk, &mut headers));
 
                     // parse complete
 

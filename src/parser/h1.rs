@@ -118,6 +118,8 @@ use tcio::{ByteStr, bytes::Cursor};
 
 use crate::http::{Method, Version};
 
+const _MIN_REQ_LEN: usize = "GET / HTTP/1.1\n".len();
+
 pub use tcio::bytes::{range_of, slice_of_bytes, slice_of_bytes_mut};
 
 macro_rules! t {
@@ -139,8 +141,6 @@ macro_rules! tri {
     };
 }
 
-// TODO: simd request parser
-
 // ===== Request Line =====
 
 /// Result of [`parse_line`].
@@ -157,30 +157,29 @@ pub struct RequestLine<'a> {
 pub fn parse_line<'a>(buf: &mut &'a [u8]) -> Result<Option<RequestLine<'a>>, RequestLineError> {
     use RequestLineError::*;
     let mut cursor = Cursor::new(buf);
-    // let mut bytes = *buf;
 
     // The method token is case-sensitive
     // Though this library only support standardized methods
 
     let method = {
-        let lead = t!(cursor.peek_chunk::<4>());
-        let (ok, len) = match lead {
-            b"GET " => (Method::GET, 3),
-            b"PUT " => (Method::PUT, 3),
-            b"POST" => (Method::POST, 4),
-            b"HEAD" => (Method::HEAD, 4),
+        let lead = t!(cursor.next_chunk::<4>());
+        let (ok, peek) = match lead {
+            b"GET " => (Method::GET, 0),
+            b"PUT " => (Method::PUT, 0),
+            b"POST" => (Method::POST, 0),
+            b"HEAD" => (Method::HEAD, 0),
             _ => match (lead, cursor.as_bytes()) {
-                (b"PATC", [b'H', ..]) => (Method::PATCH, 5),
-                (b"TRAC", [b'E', ..]) => (Method::TRACE, 5),
-                (b"DELE", [b'T', b'E', ..]) => (Method::DELETE, 6),
-                (b"CONN", [b'E', b'C', b'T', ..]) => (Method::CONNECT, 7),
-                (b"OPTI", [b'O', b'N', b'S', ..]) => (Method::OPTIONS, 7),
+                (b"PATC", [b'H', ..]) => (Method::PATCH, 1),
+                (b"TRAC", [b'E', ..]) => (Method::TRACE, 1),
+                (b"DELE", [b'T', b'E', ..]) => (Method::DELETE, 2),
+                (b"CONN", [b'E', b'C', b'T', ..]) => (Method::CONNECT, 3),
+                (b"OPTI", [b'O', b'N', b'S', ..]) => (Method::OPTIONS, 3),
                 _ => return Err(UnknownMethod)
             },
         };
 
         // SAFETY: `len` is valid constant value
-        unsafe { cursor.advance(len) };
+        unsafe { cursor.advance(peek) };
 
         ok
     };

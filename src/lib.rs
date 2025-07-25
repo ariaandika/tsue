@@ -9,6 +9,7 @@ pub mod body;
 pub mod request;
 pub mod response;
 
+pub mod parser;
 pub mod proto;
 pub mod service;
 
