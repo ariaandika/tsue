@@ -40,6 +40,19 @@ impl Version {
             Inner::H3 => "HTTP/3.0",
         }
     }
+
+    /// Create [`Version`] from bytes.
+    #[inline]
+    pub const fn from_bytes(src: &[u8]) -> Option<Self> {
+        match src {
+            b"HTTP/0.9" => Some(Self(Inner::Http09)),
+            b"HTTP/1.0" => Some(Self(Inner::Http10)),
+            b"HTTP/1.1" => Some(Self(Inner::Http11)),
+            b"HTTP/2.0" => Some(Self(Inner::H2)),
+            b"HTTP/3.0" => Some(Self(Inner::H3)),
+            _ => None,
+        }
+    }
 }
 
 impl Default for Version {
