@@ -1,7 +1,7 @@
 //! HTTP [URI][rfc].
 //!
 //! [rfc]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
-use tcio::{bytes::Cursor, ByteStr};
+use tcio::bytes::{Cursor, ByteStr};
 
 /// HTTP [URI][rfc].
 ///
@@ -81,7 +81,7 @@ impl Uri {
     /// Returns the str representation.
     #[inline]
     pub fn as_str(&self) -> &str {
-        &self.value
+        self.value.as_str()
     }
 
     /// Returns the scheme as `str`, e.g: `http`.
@@ -247,9 +247,8 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
             Some(lead) => match lead {
                 // authority, no trailing colon
                 b'/' | b'?' | b'#' => {
-                    // SAFETY: called `.pop_front()`
-                    unsafe { cursor.step_back(1) };
-                    *buf = cursor.as_bytes();
+                    cursor.step_back(1);
+                    *buf = cursor.as_slice();
                     return match cursor.steps().u16_max(MAX_AUTH) {
                         Ok(ok) => Ok((IS_AUTHORITY, ok)),
                         Err(_) => Err(TooLong)
@@ -261,7 +260,7 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
                         break;
                     };
 
-                    let mut remain = cursor.as_bytes();
+                    let mut remain = cursor.as_slice();
                     let len = cursor.steps();
                     let remain_len = parse_authority_partial(&mut remain)?;
                     *buf = remain;
@@ -276,7 +275,7 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
             },
             // no colon, authority only
             None => {
-                *buf = cursor.as_bytes();
+                *buf = cursor.as_slice();
                 return match cursor.steps().u16_max(MAX_AUTH) {
                     Ok(ok) => Ok((IS_AUTHORITY, ok)),
                     Err(_) => Err(TooLong)
@@ -288,7 +287,7 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
     valid_scheme?;
 
     // note that ':' got eaten here
-    *buf = cursor.as_bytes();
+    *buf = cursor.as_slice();
 
     // but the scheme length does not include ':'
     Ok((IS_SCHEME, cursor.steps().u16_max(MAX_SCHEME)? - 1))
@@ -300,15 +299,12 @@ fn parse_authority_partial(buf: &mut &[u8]) -> Result<usize, InvalidUri> {
     loop {
         match cursor.peek() {
             Some(b'/' | b'?' | b'#') => break,
-            Some(_) => {
-                // SAFETY: checked by `.first()`
-                unsafe { cursor.advance(1) };
-            },
+            Some(_) => cursor.advance(1),
             None => break,
         }
     }
 
-    *buf = cursor.as_bytes();
+    *buf = cursor.as_slice();
     Ok(cursor.steps())
 }
 
@@ -324,8 +320,7 @@ fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
 
     match cursor.peek_chunk::<2>() {
         Some(b"//") => {
-            // SAFETY: checked by `.first_chunk::<2>()`
-            unsafe { cursor.advance(2) }
+            cursor.advance(2)
         },
         _ => return Ok(0),
     };
@@ -334,14 +329,13 @@ fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
         match cursor.peek() {
             Some(b'/' | b'?' | b'#') => break,
             Some(_) => {
-                // SAFETY: checked by `.first()`
-                unsafe { cursor.advance(1) };
+                cursor.advance(1);
             },
             None => break,
         }
     }
 
-    *buf = cursor.as_bytes();
+    *buf = cursor.as_slice();
     cursor.steps().u16()
 }
 
@@ -361,14 +355,13 @@ fn parse_path(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
         match cursor.peek() {
             Some(b'?' | b'#') => break,
             Some(_) => {
-                // SAFETY: checked by `.first()`
-                unsafe { cursor.advance(1) };
+                cursor.advance(1);
             }
             None => break,
         }
     }
 
-    *buf = cursor.as_bytes();
+    *buf = cursor.as_slice();
     cursor.steps().u16()
 }
 
