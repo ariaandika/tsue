@@ -1,9 +1,8 @@
-use bytes::Bytes;
 use std::{
     mem::take,
     str::{FromStr, from_utf8},
 };
-use tcio::ByteStr;
+use tcio::bytes::{ByteStr, Bytes};
 
 // ===== HeaderValue =====
 
@@ -141,7 +140,10 @@ impl HeaderValue {
     pub fn try_to_str(&mut self) -> Result<&str, std::str::Utf8Error> {
         match self.repr {
             Repr::Bytes(ref mut b) => {
-                let s = ByteStr::from_utf8(take(b))?;
+                let s = match ByteStr::from_utf8(take(b)) {
+                    Ok(s) => s,
+                    Err(err) => return Err(*err.utf8_error()),
+                };
                 self.repr = Repr::Str(s);
                 self.try_as_str()
             }
