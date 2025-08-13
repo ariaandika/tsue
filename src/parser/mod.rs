@@ -1,3 +1,4 @@
 //! Protocol parser.
-// pub mod h1;
+mod simd;
+
 pub mod h1;
