@@ -1,3 +1,4 @@
+
 /// Generic SWAR find 1 char implementation.
 ///
 /// ```not_rust
@@ -7,9 +8,9 @@
 /// // `cursor.next()` will NOT have '\n'
 /// let poll: Poll<()> = match_simd!(cursor, =b'\n')
 /// ```
-macro_rules! match_simd {
+macro_rules! match_swar {
     (@build{$($add:tt)*} $cursor:expr, $b:literal) => {
-        'simd: {
+        'swar: {
             const CHUNK_SIZE: usize = size_of::<usize>();
             const MSB: usize = usize::from_ne_bytes([128; CHUNK_SIZE]);
             const LSB: usize = usize::from_ne_bytes([1; CHUNK_SIZE]);
@@ -22,14 +23,14 @@ macro_rules! match_simd {
                 if lf_result != 0 {
                     let lf_pos = (lf_result.trailing_zeros() / 8) as usize;
                     $cursor.advance(lf_pos $($add)*);
-                    break 'simd std::task::Poll::Ready(());
+                    break 'swar std::task::Poll::Ready(());
                 }
 
                 $cursor.advance(CHUNK_SIZE);
             }
             while let Some(b) = $cursor.next() {
-                if b == b'\n' {
-                    break 'simd std::task::Poll::Ready(());
+                if b == $b {
+                    break 'swar std::task::Poll::Ready(());
                 }
             }
             std::task::Poll::Pending
@@ -37,10 +38,21 @@ macro_rules! match_simd {
     };
 
     ($cursor:expr, =$b:literal) => {
-        match_simd!(@build{+ 1} $cursor, $b)
+        match_swar!(@build{+ 1} $cursor, $b)
     };
     ($cursor:expr, $b:literal) => {
-        match_simd!(@build{()} $cursor, $b)
+        match_swar!(@build{} $cursor, $b)
     };
 }
-pub(crate) use {match_simd};
+
+macro_rules! not_ascii_block {
+    ($value:ident) => {
+        // validate ASCII (< 127)
+        (usize::wrapping_sub($value, usize::from_ne_bytes([127; size_of::<usize>()]))
+            & !$value
+            & usize::from_ne_bytes([128; CHUNK_SIZE]))
+            != usize::from_ne_bytes([128; CHUNK_SIZE])
+    };
+}
+
+pub(crate) use {match_swar, not_ascii_block};

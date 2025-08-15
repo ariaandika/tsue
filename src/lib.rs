@@ -7,7 +7,7 @@ pub mod body;
 pub mod request;
 pub mod response;
 
-mod parser;
+pub mod parser; // temporary public to silent unused warning
 mod proto;
 
 pub mod service;
