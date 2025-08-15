@@ -25,7 +25,7 @@ async fn handle(req: Request) -> Response {
 
     if parts.uri.path() != "/null" {
         let body = req.into_body().collect().await.unwrap();
-        println!("{}", lossy(&body));
+        println!("{}", lossy(&body.as_slice()));
     }
 
     Response::from_parts(Parts::default(), Body::new(&b"Hell"[..]))
