@@ -1,10 +1,11 @@
 use std::task::Poll;
-use tcio::bytes::Bytes;
+use tcio::{bytes::Bytes, ByteStr};
 
 use crate::parser::simd::not_ascii_block;
 use super::{
     path::Path,
-    error::InvalidUri
+    error::InvalidUri,
+    scheme::Scheme,
 };
 
 // ```not_rust
@@ -62,13 +63,9 @@ impl Target {
         let mut cursor = bytes.cursor_mut();
 
         'leader: {
-            const CHUNK_SIZE: usize = size_of::<usize>();
-            const MSB: usize = usize::from_ne_bytes([128; CHUNK_SIZE]);
-            const LSB: usize = usize::from_ne_bytes([1; CHUNK_SIZE]);
-            const COLON: usize = usize::from_ne_bytes([b':'; CHUNK_SIZE]);
-            const HASH: usize = usize::from_ne_bytes([b'#'; CHUNK_SIZE]);
+            use crate::parser::simd::{BLOCK, MSB, LSB, COLON, HASH};
 
-            while let Some(chunk) = cursor.peek_chunk::<CHUNK_SIZE>() {
+            while let Some(chunk) = cursor.peek_chunk::<BLOCK>() {
                 let value = usize::from_ne_bytes(*chunk);
 
                 // look for "#"
@@ -89,7 +86,7 @@ impl Target {
                     return Poll::Ready(Err(InvalidUri::NonAscii));
                 }
 
-                cursor.advance(CHUNK_SIZE);
+                cursor.advance(BLOCK);
             }
 
             while let Some(b) = cursor.next() {
@@ -103,31 +100,35 @@ impl Target {
             return Poll::Pending;
         };
 
-        let leader = cursor.split_to();
+        // SAFETY: in leader iteration also check for valid ASCII
+        let leader = unsafe { ByteStr::from_utf8_unchecked(cursor.split_to()) };
 
         // absolute-form
-        let me = if let Some(b"://") = cursor.peek_chunk() {
-            let scheme = leader;
+        if let Some(b"://") = cursor.peek_chunk() {
+            let scheme = Scheme::new(leader);
             cursor.advance(3);
             cursor.advance_buf();
             todo!()
 
         } else {
             match cursor.peek() {
-                // authority without port
-                Some(b'/') => {
-                    let host = leader;
-                    Self::Authority(host)
-                },
+                // Some(b'/') => {
+                //     let host = leader;
+                //     todo!()
+                //     // Self::Authority(host)
+                // },
+
                 // authority with port
                 Some(b':') => {
                     let domain = leader;
                     cursor.advance(1);
                     cursor.advance_buf();
-                    todo!()
+
                 },
-                Some(_) => unreachable!("invalid leader search"),
+
+                // authority without port
                 None => return Poll::Ready(Err(InvalidUri::Incomplete)),
+                Some(_) => unreachable!("invalid leader search"),
             }
         };
 

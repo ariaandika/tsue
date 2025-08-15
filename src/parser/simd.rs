@@ -1,4 +1,21 @@
 
+/// Pointer size.
+pub const BLOCK: usize = size_of::<usize>();
+/// Block of most significant bit.
+pub const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+/// Block of least significant bit.
+pub const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+
+/// Block of ":".
+pub const COLON: usize = usize::from_ne_bytes([b':'; BLOCK]);
+/// Block of "#".
+pub const HASH: usize = usize::from_ne_bytes([b'#'; BLOCK]);
+/// Block of "?".
+pub const QS: usize = usize::from_ne_bytes([b'?'; BLOCK]);
+
+/// Block of DEL byte, used for validating ASCII.
+pub const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
+
 /// Generic SWAR find 1 char implementation.
 ///
 /// ```not_rust
@@ -11,11 +28,10 @@
 macro_rules! match_swar {
     (@build{$($add:tt)*} $cursor:expr, $b:literal) => {
         'swar: {
-            const CHUNK_SIZE: usize = size_of::<usize>();
-            const MSB: usize = usize::from_ne_bytes([128; CHUNK_SIZE]);
-            const LSB: usize = usize::from_ne_bytes([1; CHUNK_SIZE]);
-            const DATA: usize = usize::from_ne_bytes([$b; CHUNK_SIZE]);
-            while let Some(chunk) = $cursor.peek_chunk::<CHUNK_SIZE>() {
+            use crate::parser::simd::{BLOCK, MSB, LSB};
+            const DATA: usize = usize::from_ne_bytes([$b; BLOCK]);
+
+            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
                 let value = usize::from_ne_bytes(*chunk);
                 let lf_xor = value ^ DATA;
                 let lf_result = lf_xor.wrapping_sub(LSB) & !lf_xor & MSB;
@@ -26,13 +42,15 @@ macro_rules! match_swar {
                     break 'swar std::task::Poll::Ready(());
                 }
 
-                $cursor.advance(CHUNK_SIZE);
+                $cursor.advance(crate::parser::simd::BLOCK);
             }
+
             while let Some(b) = $cursor.next() {
                 if b == $b {
                     break 'swar std::task::Poll::Ready(());
                 }
             }
+
             std::task::Poll::Pending
         }
     };
@@ -48,10 +66,8 @@ macro_rules! match_swar {
 macro_rules! not_ascii_block {
     ($value:ident) => {
         // validate ASCII (< 127)
-        (usize::wrapping_sub($value, usize::from_ne_bytes([127; size_of::<usize>()]))
-            & !$value
-            & usize::from_ne_bytes([128; CHUNK_SIZE]))
-            != usize::from_ne_bytes([128; CHUNK_SIZE])
+        ($value.wrapping_sub(crate::parser::simd::DEL) & !$value & crate::parser::simd::MSB)
+            != crate::parser::simd::MSB
     };
 }
 

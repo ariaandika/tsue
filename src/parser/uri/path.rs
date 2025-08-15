@@ -1,10 +1,7 @@
-use tcio::{
-    ByteStr,
-    bytes::{Bytes},
-};
+use tcio::{ByteStr, bytes::Bytes};
 
-use crate::parser::simd::not_ascii_block;
 use super::error::InvalidUri;
+use crate::parser::simd::not_ascii_block;
 
 #[derive(Debug)]
 pub struct Path {
@@ -21,6 +18,7 @@ impl Path {
         }
     }
 
+    #[inline]
     pub const fn path(&self) -> &str {
         match self.query {
             0 => "/",
@@ -28,6 +26,7 @@ impl Path {
         }
     }
 
+    #[inline]
     pub const fn query(&self) -> Option<&str> {
         match self.bytes.as_str().split_at_checked((self.query + 1) as usize) {
             Some((_, q)) if q.is_empty() => None,
@@ -36,21 +35,16 @@ impl Path {
         }
     }
 
-    /// Panic in debug mode if bytes is empty.
+    /// Caller must have bytes not empty.
     pub(crate) fn parse(mut bytes: Bytes) -> Result<Self, InvalidUri> {
-        const CHUNK_SIZE: usize = size_of::<usize>();
-        const MSB: usize = usize::from_ne_bytes([128; CHUNK_SIZE]);
-        const LSB: usize = usize::from_ne_bytes([1; CHUNK_SIZE]);
-
-        const QS: usize = usize::from_ne_bytes([b'?'; CHUNK_SIZE]);
-        const HASH: usize = usize::from_ne_bytes([b'#'; CHUNK_SIZE]);
+        use crate::parser::simd::{BLOCK, MSB, LSB, QS, HASH};
 
         debug_assert!(!bytes.is_empty());
 
         let mut cursor = bytes.cursor_mut();
 
         'swar: {
-            while let Some(chunk) = cursor.peek_chunk::<CHUNK_SIZE>() {
+            while let Some(chunk) = cursor.peek_chunk::<BLOCK>() {
                 let value = usize::from_ne_bytes(*chunk);
 
                 // look for "?"
@@ -72,7 +66,7 @@ impl Path {
                     return Err(InvalidUri::NonAscii);
                 }
 
-                cursor.advance(CHUNK_SIZE);
+                cursor.advance(BLOCK);
             }
 
             while let Some(b) = cursor.next() {
@@ -96,7 +90,7 @@ impl Path {
                 let steps = cursor.steps();
 
                 'swar: {
-                    while let Some(chunk) = cursor.peek_chunk::<CHUNK_SIZE>() {
+                    while let Some(chunk) = cursor.peek_chunk::<BLOCK>() {
                         let value = usize::from_ne_bytes(*chunk);
 
                         // look for "#"
@@ -114,7 +108,7 @@ impl Path {
                             return Err(InvalidUri::NonAscii);
                         }
 
-                        cursor.advance(CHUNK_SIZE);
+                        cursor.advance(BLOCK);
                     }
 
                     while let Some(b) = cursor.next() {
