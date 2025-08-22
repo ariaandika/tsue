@@ -13,7 +13,7 @@ fn test_match_uri_leader() {
             {
                 let bytes = Bytes::from_static($i);
                 let mut cursor = bytes.cursor();
-                match_uri_leader(&mut cursor);
+                match_uri_leader!(cursor else { unreachable!() });
                 assert_eq!(cursor.next(), $n);
                 assert_eq!(cursor.as_slice(), $r);
             }

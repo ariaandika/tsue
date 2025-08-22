@@ -4,10 +4,8 @@ const BLOCK: usize = size_of::<usize>();
 const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
 const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
 
-const COLON: usize = usize::from_ne_bytes([b':'; BLOCK]);
 const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
 const HASH: usize = usize::from_ne_bytes([b'#'; BLOCK]);
-const SLASH: usize = usize::from_ne_bytes([b'/'; BLOCK]);
 const QS: usize = usize::from_ne_bytes([b'?'; BLOCK]);
 const DEL: usize = usize::from_ne_bytes([b'~' + 1; BLOCK]);
 
@@ -44,37 +42,48 @@ macro_rules! block_lt_no_msb {
     };
 }
 
-/// Check the result of `cursor.next()`, may returns ':', invalid character, or None.
-///
-/// URI leader is for matching `scheme ":"` or `host ":"`
-///
-/// Invalid character: `matches!(byte, b'/') || !matches!(b'!'..=b'~')`
-pub fn match_uri_leader(cursor: &mut Cursor) {
-    while let Some(chunk) = cursor.peek_chunk::<BLOCK>() {
-        let block = usize::from_ne_bytes(*chunk);
+macro_rules! match_uri_leader {
+    (
+        $cursor:ident else { $err:expr }
+    ) => {
+        'swar: {
+            const BLOCK: usize = size_of::<usize>();
+            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+            const SLASH: usize = usize::from_ne_bytes([b'/'; BLOCK]);
+            const COLON: usize = usize::from_ne_bytes([b':'; BLOCK]);
+            const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
+            const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
 
-        // look for ":"
-        let is_colon = block_eq!(block, COLON);
-        // look for "/"
-        let is_sl = block_eq!(block, SLASH);
-        // 33(BANG) <= byte < 127(DEL)
-        // if MSB is set on `block`, value is >= 128
-        let lt_33 = block_lt_no_msb!(block, BANG);
-        let is_del = block_eq!(block, DEL);
+            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
+                let block = usize::from_ne_bytes(*chunk);
 
-        let result = (is_colon | is_sl | lt_33 | is_del | block) & MSB;
-        if result != 0 {
-            cursor.advance((result.trailing_zeros() / 8) as usize);
-            return;
-        }
+                // look for ":"
+                let is_cl = (block ^ COLON).wrapping_sub(LSB);
+                // look for "/"
+                let is_sl = (block ^ SLASH).wrapping_sub(LSB);
+                // 33(BANG) <= byte
+                let lt_33 = block.wrapping_sub(BANG);
+                // look for "/"
+                let is_del = (block ^ DEL).wrapping_sub(LSB);
 
-        cursor.advance(BLOCK);
-    }
+                let result = (is_cl | is_sl | lt_33 | is_del | block) & MSB;
+                if result != 0 {
+                    $cursor.advance((result.trailing_zeros() / 8) as usize);
+                    break 'swar;
+                }
 
-    while let Some(byte) = cursor.next() {
-        if matches!(byte, b':' | b'/') || !matches!(byte, b'!'..=b'~') {
-            cursor.step_back(1);
-            return;
+                $cursor.advance(BLOCK);
+            }
+
+            while let Some(byte) = $cursor.next() {
+                if matches!(byte, b':' | b'/') || !matches!(byte, b'!'..=b'~') {
+                    $cursor.step_back(1);
+                    break 'swar;
+                }
+            }
+
+            $err
         }
     }
 }
@@ -146,4 +155,6 @@ pub fn match_fragment(cursor: &mut Cursor) {
 
     // contains full path
 }
+
+pub(crate) use {match_uri_leader};
 

@@ -34,7 +34,9 @@ pub fn parse(string: ByteStr) -> Result<Target, InvalidUri> {
     let mut bytes = string.into_bytes();
     let mut cursor = bytes.cursor_mut();
 
-    simd::match_uri_leader(&mut cursor);
+    simd::match_uri_leader!(cursor else {
+        return Err(InvalidUri::Incomplete)
+    });
 
     if let Some(b"://") = cursor.peek_chunk() {
         // ===== absolute-form =====
@@ -45,7 +47,9 @@ pub fn parse(string: ByteStr) -> Result<Target, InvalidUri> {
         cursor.advance(b"://".len());
         cursor.advance_buf();
 
-        simd::match_uri_leader(&mut cursor);
+        simd::match_uri_leader!(cursor else {
+            return Err(InvalidUri::Incomplete)
+        });
 
         let host = cursor.split_to();
 
