@@ -1,4 +1,4 @@
-use tcio::{ByteStr, bytes::Cursor};
+use tcio::bytes::{Bytes, Cursor};
 
 use super::{
     authority::Authority,
@@ -26,18 +26,17 @@ pub enum Target {
 }
 
 /// Parse full uri.
-pub fn parse(string: ByteStr) -> Result<Target, InvalidUri> {
-    match string.as_bytes() {
+pub fn parse(mut bytes: Bytes) -> Result<Target, InvalidUri> {
+    match bytes.as_slice() {
         [] => return Err(InvalidUri::Incomplete),
         [b'*'] => return Ok(Target::Asterisk),
         [b'/'] => return Ok(Target::Origin(Path::slash())),
-        [b'/' | b'?', ..] => return path::parse(string).map(Target::Origin),
+        [b'/' | b'?', ..] => return path::parse(bytes).map(Target::Origin),
         _ => {}
     }
 
     // absolute-form or authority-form
 
-    let mut bytes = string.into_bytes();
     let mut cursor = bytes.cursor_mut();
 
     simd::match_uri_leader!(cursor else {
@@ -47,7 +46,7 @@ pub fn parse(string: ByteStr) -> Result<Target, InvalidUri> {
     if let Some(b"://") = cursor.peek_chunk() {
         // ===== absolute-form =====
 
-        // SAFETY: input is valid ASCII
+        // SAFETY: `match_uri_leader!` check for valid ASCII
         let scheme = unsafe { Scheme::new_unchecked(cursor.split_to()) };
 
         cursor.advance(b"://".len());
@@ -70,10 +69,7 @@ pub fn parse(string: ByteStr) -> Result<Target, InvalidUri> {
         };
         cursor.advance_buf();
 
-        // SAFETY: input is valid ASCII
-        let path = unsafe { ByteStr::from_utf8_unchecked(bytes) };
-
-        match Path::parse(path) {
+        match Path::parse(bytes) {
             Ok(path) => Ok(Target::Absolute {
                 scheme,
                 path,
@@ -91,7 +87,7 @@ pub fn parse(string: ByteStr) -> Result<Target, InvalidUri> {
             return Err(InvalidUri::Char);
         };
 
-        // SAFETY: input is valid ASCII
+        // SAFETY: `match_uri_leader!` check for valid ASCII
         Ok(Target::Authority(unsafe {
             Authority::new_unchecked(host, port)
         }))

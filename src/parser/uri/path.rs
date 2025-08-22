@@ -1,4 +1,4 @@
-use tcio::bytes::ByteStr;
+use tcio::bytes::{ByteStr, Bytes};
 
 use super::{error::InvalidUri, simd};
 
@@ -26,13 +26,13 @@ impl Path {
     }
 
     #[inline]
-    pub fn parse(string: ByteStr) -> Result<Self, InvalidUri> {
-        match string.as_bytes() {
+    pub fn parse(bytes: Bytes) -> Result<Self, InvalidUri> {
+        match bytes.as_slice() {
             [] => Err(InvalidUri::Incomplete),
             [b'*'] => Ok(Self::asterisk()),
             [b'/'] => Ok(Path::slash()),
             // should check for leading slash ?
-            _ => parse(string)
+            _ => parse(bytes)
         }
     }
 
@@ -64,8 +64,7 @@ impl Path {
 }
 
 /// Does not check for common cases or empty string.
-pub(crate) fn parse(string: ByteStr) -> Result<Path, InvalidUri> {
-    let mut bytes = string.into_bytes();
+pub(crate) fn parse(mut bytes: Bytes) -> Result<Path, InvalidUri> {
     let mut cursor = bytes.cursor_mut();
 
     simd::match_path!(cursor);
@@ -96,7 +95,7 @@ pub(crate) fn parse(string: ByteStr) -> Result<Path, InvalidUri> {
     };
 
     Ok(Path {
-        // SAFETY: input is valid ASCII
+        // SAFETY: `match_path!` check for valid ASCII
         bytes: unsafe { ByteStr::from_utf8_unchecked(path) },
         query,
     })

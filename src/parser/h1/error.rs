@@ -26,6 +26,8 @@ pub enum ErrorKind {
     UnsupportedVersion,
     /// Headers exceed configured maximum count.
     TooManyHeaders,
+    /// Invalid Character
+    InvalidChar,
 }
 
 impl std::error::Error for Error {}
@@ -38,6 +40,17 @@ impl std::fmt::Display for Error {
             ErrorKind::UnsupportedVersion => f.write_str("unsupported HTTP version"),
             ErrorKind::InvalidSeparator => f.write_str("invalid separator"),
             ErrorKind::TooManyHeaders => f.write_str("received headers count exceeded the configured maximum"),
+            ErrorKind::InvalidChar => f.write_str("found invalid character"),
+        }
+    }
+}
+
+impl From<crate::parser::uri::InvalidUri> for Error {
+    fn from(value: crate::parser::uri::InvalidUri) -> Self {
+        match value {
+            crate::parser::uri::InvalidUri::Incomplete => Self::from(ErrorKind::TooShort),
+            crate::parser::uri::InvalidUri::TooLong => Self::from(ErrorKind::TooLong),
+            crate::parser::uri::InvalidUri::Char => Self::from(ErrorKind::InvalidChar),
         }
     }
 }

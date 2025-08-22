@@ -1,4 +1,4 @@
-use tcio::bytes::{ByteStr, Bytes};
+use tcio::bytes::Bytes;
 
 #[test]
 fn test_match_uri_leader() {
@@ -105,14 +105,14 @@ fn test_uri_parse() {
 
     macro_rules! test_origin {
         (#[error] input: $i:expr) => {
-            assert!(parse(ByteStr::copy_from_str($i)).is_err());
+            assert!(parse(Bytes::copy_from_slice($i.as_bytes())).is_err());
         };
         {
             input: $i:expr,
             path: $p:expr,
             query: $q:expr,
         } => {
-            let Target::Origin(origin) = parse(ByteStr::copy_from_str($i)).unwrap() else {
+            let Target::Origin(origin) = parse(Bytes::copy_from_slice($i.as_bytes())).unwrap() else {
                 unreachable!("parse uri is not an origin form")
             };
             assert_eq!(origin.path(), $p);
