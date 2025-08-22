@@ -17,9 +17,23 @@ impl Path {
         }
     }
 
+    /// `*`
+    pub(crate) const fn asterisk() -> Path {
+        Self {
+            bytes: ByteStr::from_static("*"),
+            query: 1,
+        }
+    }
+
     #[inline]
     pub fn parse(string: ByteStr) -> Result<Self, InvalidUri> {
-        parse(string)
+        match string.as_bytes() {
+            [] => Err(InvalidUri::Incomplete),
+            [b'*'] => Ok(Self::asterisk()),
+            [b'/'] => Ok(Path::slash()),
+            // should check for leading slash ?
+            _ => parse(string)
+        }
     }
 
     #[inline]
@@ -28,6 +42,11 @@ impl Path {
             0 => "/",
             q => self.bytes.as_str().split_at(q as usize).0,
         }
+    }
+
+    #[inline]
+    pub const fn path_and_query(&self) -> &str {
+        self.bytes.as_str()
     }
 
     #[inline]
@@ -49,14 +68,14 @@ pub(crate) fn parse(string: ByteStr) -> Result<Path, InvalidUri> {
     let mut bytes = string.into_bytes();
     let mut cursor = bytes.cursor_mut();
 
-    simd::match_path(&mut cursor);
+    simd::match_path!(cursor);
 
     let (query, path) = match cursor.peek() {
         None => (bytes.len(), bytes),
         Some(b'?') => {
             let steps = cursor.steps();
 
-            simd::match_fragment(&mut cursor);
+            simd::mmatch_fragment!(cursor);
 
             if !matches!(cursor.peek(), Some(b'#') | None) {
                 return Err(InvalidUri::Char);
@@ -81,4 +100,13 @@ pub(crate) fn parse(string: ByteStr) -> Result<Path, InvalidUri> {
         bytes: unsafe { ByteStr::from_utf8_unchecked(path) },
         query,
     })
+}
+
+// ===== std Traits =====
+
+impl PartialEq for Path {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
 }

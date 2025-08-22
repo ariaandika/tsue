@@ -28,3 +28,10 @@ impl Authority {
         self.port
     }
 }
+
+impl PartialEq for Authority {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}

@@ -1,9 +1,15 @@
 use tcio::{ByteStr, bytes::Cursor};
 
-use super::{authority::Authority, error::InvalidUri, path::Path, scheme::Scheme, simd};
+use super::{
+    authority::Authority,
+    error::InvalidUri,
+    path::{self, Path},
+    scheme::Scheme,
+    simd,
+};
 
 /// Request Target.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Target {
     /// `/users/all?page=4&filter=available`
     Origin(Path),
@@ -25,7 +31,7 @@ pub fn parse(string: ByteStr) -> Result<Target, InvalidUri> {
         [] => return Err(InvalidUri::Incomplete),
         [b'*'] => return Ok(Target::Asterisk),
         [b'/'] => return Ok(Target::Origin(Path::slash())),
-        [b'/' | b'?', ..] => return Path::parse(string).map(Target::Origin),
+        [b'/' | b'?', ..] => return path::parse(string).map(Target::Origin),
         _ => {}
     }
 

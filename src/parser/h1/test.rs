@@ -15,6 +15,7 @@ macro_rules! ready {
 #[test]
 fn test_parse_reqline() {
     use super::request::parse_reqline;
+    use crate::parser::uri::Target;
 
     macro_rules! test {
         (#[pending] $input:literal) => {
@@ -39,7 +40,8 @@ fn test_parse_reqline() {
             let reqline = ready!(parse_reqline(&mut bytes)).unwrap();
 
             assert_eq!(reqline.method, Method::$m);
-            assert_eq!(reqline.target.as_slice(), $u);
+            let Target::Origin(target) = reqline.target else { unreachable!() };
+            assert_eq!(target.path_and_query().as_bytes(), $u);
             assert_eq!(reqline.version, Version::$v);
             assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");
         };

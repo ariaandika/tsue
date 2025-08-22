@@ -1,11 +1,17 @@
 mod simd;
 
 #[allow(clippy::module_inception)]
-pub mod uri;
-pub mod scheme;
-pub mod path;
-pub mod authority;
-pub mod error;
+mod uri;
+mod scheme;
+mod path;
+mod authority;
+mod error;
+
+pub use uri::{parse, Target};
+pub use scheme::Scheme;
+pub use path::Path;
+pub use authority::Authority;
+pub use error::InvalidUri;
 
 #[cfg(test)]
 mod test;

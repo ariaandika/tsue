@@ -1,6 +1,6 @@
 use tcio::bytes::{ByteStr, Bytes};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Scheme {
     repr: Repr,
 }
@@ -8,7 +8,7 @@ pub struct Scheme {
 const HTTP: u8  = 0b0000_0000;
 const HTTPS: u8 = 0b0000_0001;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Repr {
     Static(u8),
     ByteStr(ByteStr),
@@ -53,5 +53,4 @@ impl Scheme {
         }
     }
 }
-
 
