@@ -42,15 +42,14 @@ pub fn parse_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>>
 
     simd::match_crlf!(cursor);
 
-    let crlf = match cursor.next() {
-        Some(b'\n') => 1,
-        Some(b'\r') => match cursor.next() {
+    let crlf = match cursor.next().unwrap() {
+        b'\n' => 1,
+        b'\r' => match cursor.next() {
             Some(b'\n') => 2,
             Some(_) => return err!(InvalidSeparator),
             None => return Poll::Pending,
         },
-        Some(_) => todo!(),
-        None => todo!(),
+        _ => return err!(InvalidChar),
     };
 
     let mut header_line = cursor.split_to();
