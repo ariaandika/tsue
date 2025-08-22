@@ -55,7 +55,7 @@ fn test_parse_uri_origin() {
             {
                 let bytes = Bytes::from_static($i);
                 let mut cursor = bytes.cursor();
-                match_path(&mut cursor);
+                match_path!(cursor);
                 assert_eq!(cursor.next(), $n);
                 assert_eq!(cursor.as_slice(), $r);
             }

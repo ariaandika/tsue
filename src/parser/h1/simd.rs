@@ -11,11 +11,11 @@ macro_rules! match_crlf {
             while let Some(chunk) = $cursor.peek_chunk() {
                 let block = usize::from_ne_bytes(*chunk);
 
-                // this does not handle (byte >= 128),
-                // but it checked below
+                // most checks does not handle `byte >= 128`,
+                // because its already checked with `.. | block) & ..`
+
                 // '\r'
                 let is_cr = (block ^ CR).wrapping_sub(LSB);
-
                 // '\n'
                 let is_lf = (block ^ LF).wrapping_sub(LSB);
 
