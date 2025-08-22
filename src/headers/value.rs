@@ -20,9 +20,11 @@ enum Repr {
 
 impl HeaderValue {
     /// used in iterator.
-    pub(crate) const PLACEHOLDER: Self = Self {
-        repr: Repr::Bytes(Bytes::new()),
-    };
+    pub(crate) fn placeholder() -> Self {
+        Self {
+            repr: Repr::Bytes(Bytes::new()),
+        }
+    }
 
     /// Parse [`HeaderValue`] from slice.
     #[inline]

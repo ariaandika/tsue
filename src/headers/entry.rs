@@ -114,7 +114,7 @@ impl Entry {
     pub fn into_parts(mut self) -> (HeaderName, HeaderValue) {
         (
             replace(&mut self.name, HeaderName::PLACEHOLDER),
-            replace(&mut self.value, HeaderValue::PLACEHOLDER),
+            replace(&mut self.value, HeaderValue::placeholder()),
         )
     }
 }

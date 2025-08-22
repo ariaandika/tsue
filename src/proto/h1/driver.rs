@@ -3,7 +3,6 @@ use std::{io, mem::MaybeUninit, pin::Pin, sync::Arc, task::Poll};
 use tcio::{
     ByteStr,
     io::{AsyncIoRead, AsyncIoWrite},
-    bytes::{range_of, slice_of_bytes},
 };
 
 use crate::{
@@ -14,7 +13,7 @@ use crate::{
     request::{Parts, Request},
     response::Response,
     service::HttpService,
-    parser::h1,
+    // parser::h1,
 };
 
 use super::io::IoBuffer;
@@ -95,91 +94,95 @@ where
         loop {
             match phase.as_mut().project() {
                 Project::Read => {
-                    let read = ready!(io.poll_read(cx))?;
-                    if read == 0 {
-                        return Poll::Ready(Ok(()));
-                    }
-
-                    let mut chunk = io.read_buffer();
-                    let offset = chunk.as_ptr() as usize;
-
-                    let h1::RequestLine {
-                        method,
-                        uri,
-                        version,
-                    } = retry_read!(h1::parse_line(&mut chunk));
-                    let uri_range = range_of(uri.as_bytes());
-
-                    let mut headers = [const { MaybeUninit::uninit() }; MAX_HEADERS];
-                    let headers_ref =
-                        retry_read!(h1::parse_headers_range_uninit(&mut chunk, &mut headers));
-
-                    // parse complete
-
-                    let read = chunk.as_ptr() as usize - offset;
-                    let buf = io.read_buffer_mut().split_to(read).freeze();
-
-                    // SAFETY: `uri_range` is from `uri` which is str, and `buf` is not mutated
-                    let uri_str =
-                        unsafe { ByteStr::from_utf8_unchecked(slice_of_bytes(uri_range, &buf)) };
-                    // TODO: should not parse uri immediately, instead reconstruct URI from a complete Request
-                    // https://httpwg.org/specs/rfc9112.html#reconstructing.target.uri
-                    let uri = Uri::try_from_shared(uri_str).map_err(io_err)?;
-
-                    let mut headers = match header_map.take() {
-                        Some(mut map) => {
-                            map.reserve(headers_ref.len());
-                            map
-                        }
-                        None => HeaderMap::with_capacity(headers_ref.len()),
-                    };
-
-                    let mut content_len = None;
-
-                    for header in headers_ref {
-                        // SAFETY: `buf` is not mutated
-                        let name = unsafe { header.resolve_name_unchecked(&buf) };
-                        let value = header.resolve_value(&buf);
-
-                        if name.eq_ignore_ascii_case("content-length") {
-                            match tcio::atou(&value) {
-                                Some(ok) => content_len = Some(ok),
-                                None => return Poll::Ready(Err(io_err("invalid content-length")))
-                            }
-                        }
-
-                        if let Ok(value) = HeaderValue::try_from_slice(value) {
-                            headers.insert(name, value);
-                        }
-                    }
-
-                    let content_len = content_len.unwrap_or(0);
-                    let remain = io.read_buffer_mut().split();
-
-                    // at this point, buffer is empty, so reserve will not need to copy any data if
-                    // allocation required
-                    io.read_buffer_mut().reserve(content_len as _);
-
-                    // `IoBuffer` remaining is only calculated excluding the already read body
-                    let Some(remaining) = content_len.checked_sub(remain.len() as _) else {
-                        return Poll::Ready(Err(io_err("content-length is less than body")));
-                    };
-                    io.set_remaining(remaining);
-
-                    let parts = Parts {
-                        method,
-                        uri,
-                        version,
-                        headers,
-                        extensions: Extensions::new(),
-                    };
-
-                    let body = Body::from_handle(io.get_handle(), content_len, remain);
-
-                    let request = Request::from_parts(parts, body);
-
-                    let f = service.call(request);
-                    phase.set(Phase::Service(f));
+                    // let read = ready!(io.poll_read(cx))?;
+                    // if read == 0 {
+                    //     return Poll::Ready(Ok(()));
+                    // }
+                    //
+                    // let mut chunk = io.read_buffer();
+                    // let offset = chunk.as_ptr() as usize;
+                    //
+                    // let h1::RequestLine {
+                    //     method,
+                    //     uri,
+                    //     version,
+                    // } = retry_read!(h1::parse_line(&mut chunk));
+                    // // let uri_range = range_of(uri.as_bytes());
+                    // let uri_range: &[u8] = todo!();
+                    //
+                    // #[allow(unreachable_code)]
+                    // let mut headers = [const { MaybeUninit::uninit() }; MAX_HEADERS];
+                    // let headers_ref =
+                    //     retry_read!(h1::parse_headers_range_uninit(&mut chunk, &mut headers));
+                    //
+                    // // parse complete
+                    //
+                    // let read = chunk.as_ptr() as usize - offset;
+                    // let buf = io.read_buffer_mut().split_to(read).freeze();
+                    //
+                    // // SAFETY: `uri_range` is from `uri` which is str, and `buf` is not mutated
+                    // let uri_str: &str = todo!();
+                    //     // unsafe { ByteStr::from_utf8_unchecked(slice_of_bytes(uri_range, &buf)) };
+                    // // TODO: should not parse uri immediately, instead reconstruct URI from a complete Request
+                    // // https://httpwg.org/specs/rfc9112.html#reconstructing.target.uri
+                    // #[allow(unreachable_code)]
+                    // let uri = Uri::try_from_shared(uri_str).map_err(io_err)?;
+                    //
+                    // let mut headers = match header_map.take() {
+                    //     Some(mut map) => {
+                    //         map.reserve(headers_ref.len());
+                    //         map
+                    //     }
+                    //     None => HeaderMap::with_capacity(headers_ref.len()),
+                    // };
+                    //
+                    // let mut content_len = None;
+                    //
+                    // for header in headers_ref {
+                    //     // SAFETY: `buf` is not mutated
+                    //     let name = unsafe { header.resolve_name_unchecked(&buf) };
+                    //     let value = header.resolve_value(&buf);
+                    //
+                    //     if name.eq_ignore_ascii_case("content-length") {
+                    //         match tcio::atou(&value) {
+                    //             Some(ok) => content_len = Some(ok),
+                    //             None => return Poll::Ready(Err(io_err("invalid content-length")))
+                    //         }
+                    //     }
+                    //
+                    //     if let Ok(value) = HeaderValue::try_from_slice(value) {
+                    //         headers.insert(name, value);
+                    //     }
+                    // }
+                    //
+                    // let content_len = content_len.unwrap_or(0);
+                    // let remain = io.read_buffer_mut().split();
+                    //
+                    // // at this point, buffer is empty, so reserve will not need to copy any data if
+                    // // allocation required
+                    // io.read_buffer_mut().reserve(content_len as _);
+                    //
+                    // // `IoBuffer` remaining is only calculated excluding the already read body
+                    // let Some(remaining) = content_len.checked_sub(remain.len() as _) else {
+                    //     return Poll::Ready(Err(io_err("content-length is less than body")));
+                    // };
+                    // io.set_remaining(remaining);
+                    //
+                    // let parts = Parts {
+                    //     method,
+                    //     uri,
+                    //     version,
+                    //     headers,
+                    //     extensions: Extensions::new(),
+                    // };
+                    //
+                    // let body = Body::from_handle(io.get_handle(), content_len, remain);
+                    //
+                    // let request = Request::from_parts(parts, body);
+                    //
+                    // let f = service.call(request);
+                    // phase.set(Phase::Service(f));
+                    todo!()
                 }
                 Project::Service(f) => {
                     let Poll::Ready(res) = f.poll(cx).map_err(io_err)? else {

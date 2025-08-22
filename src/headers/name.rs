@@ -1,4 +1,4 @@
-use tcio::ByteStr;
+use tcio::bytes::ByteStr;
 
 // ===== HeaderName =====
 
@@ -91,7 +91,7 @@ pub(crate) trait SealedRef: Sized {
     fn as_str(&self) -> &str;
 
     /// May calculate hash
-    fn to_header_ref(&self) -> HeaderNameRef {
+    fn to_header_ref(&self) -> HeaderNameRef<'_> {
         HeaderNameRef {
             name: self.as_str(),
             hash: self.hash(),

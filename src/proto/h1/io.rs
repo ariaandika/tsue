@@ -1,4 +1,3 @@
-use bytes::BytesMut;
 use std::{
     cmp, io, mem,
     sync::{
@@ -10,7 +9,10 @@ use std::{
     },
     task::{Poll, ready},
 };
-use tcio::io::{AsyncIoRead, AsyncIoWrite};
+use tcio::{
+    bytes::BytesMut,
+    io::{AsyncIoRead, AsyncIoWrite},
+};
 
 use crate::body::Body;
 
@@ -184,7 +186,7 @@ pub(crate) struct BodyWrite {
 
 enum Phase {
     Read,
-    Write(bytes::Bytes),
+    Write(tcio::bytes::Bytes),
 }
 
 impl BodyWrite {

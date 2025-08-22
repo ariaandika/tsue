@@ -141,7 +141,7 @@ impl HeaderMap {
 
     /// Returns an iterator to all header values corresponding to the given header name.
     #[inline]
-    pub fn get_all<K: AsHeaderName>(&self, name: K) -> GetAll {
+    pub fn get_all<K: AsHeaderName>(&self, name: K) -> GetAll<'_> {
         if self.is_empty() {
             return GetAll::empty();
         }
@@ -150,7 +150,7 @@ impl HeaderMap {
         self.try_get_all(name.to_header_ref())
     }
 
-    fn try_get_all(&self, name: HeaderNameRef) -> GetAll {
+    fn try_get_all(&self, name: HeaderNameRef) -> GetAll<'_> {
         let mask = self.indices.len() as Size;
         let hash = name.hash;
         let mut index = hash & (mask - 1);
@@ -177,7 +177,7 @@ impl HeaderMap {
 
     /// Returns an iterator over headers as name and value pair.
     #[inline]
-    pub fn iter(&self) -> Iter {
+    pub fn iter(&self) -> Iter<'_> {
         Iter::new(self)
     }
 
