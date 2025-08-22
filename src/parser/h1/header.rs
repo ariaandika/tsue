@@ -1,14 +1,14 @@
-use std::task::{Poll, ready};
-use tcio::bytes::{Buf, Bytes, BytesMut, Cursor};
+use std::task::Poll;
+use tcio::bytes::{Buf, BytesMut};
 
 use super::{
     error::{Error, ErrorKind},
-    message::find_line_buf,
+    simd,
 };
 
 macro_rules! err {
     ($variant:ident) => {
-        Poll::Ready(Some(Err(Error::from(ErrorKind::$variant))))
+        Poll::Ready(Err(Error::from(ErrorKind::$variant)))
     };
 }
 
@@ -18,30 +18,66 @@ pub struct Header {
     pub value: BytesMut,
 }
 
-pub fn parse_header(bytes: &mut BytesMut) -> Poll<Option<Result<Header, Error>>> {
-    let mut line = ready!(find_line_buf(bytes));
+pub fn parse_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
+    let mut cursor = bytes.cursor_mut();
 
-    if line.is_empty() {
-        return Poll::Ready(None);
-    }
-
-    let mut cursor = Cursor::new(&line);
-
-    loop {
-        match cursor.next() {
-            Some(b':') => break,
-            Some(_) => {}
-            None => return err!(InvalidSeparator),
+    match cursor.next() {
+        Some(b'\n') => {
+            bytes.advance(1);
+            return Poll::Ready(Ok(None));
         }
+        Some(b'\r') => match cursor.next() {
+            Some(b'\n') => {
+                bytes.advance(2);
+                return Poll::Ready(Ok(None));
+            }
+            Some(_) => return err!(InvalidSeparator),
+            None => return Poll::Pending,
+        },
+        Some(_) => {}
+        None => return Poll::Pending,
     }
 
-    let name = line.split_to(cursor.steps() - 1);
-    line.advance(1);
+    cursor = bytes.cursor_mut();
 
-    if !matches!(line.first(), Some(b' ')) {
-        return err!(InvalidSeparator);
-    }
-    line.advance(1);
+    simd::match_crlf!(cursor);
 
-    Poll::Ready(Some(Ok(Header { name, value: line })))
+    let crlf = match cursor.next() {
+        Some(b'\n') => 1,
+        Some(b'\r') => match cursor.next() {
+            Some(b'\n') => 2,
+            Some(_) => return err!(InvalidSeparator),
+            None => return Poll::Pending,
+        },
+        Some(_) => todo!(),
+        None => todo!(),
+    };
+
+    let mut header_line = cursor.split_to();
+    header_line.truncate_off(crlf);
+
+    let name = {
+        let mut cursor = header_line.cursor_mut();
+
+        loop {
+            match cursor.next() {
+                Some(b':') => break,
+                Some(_) => {}
+                None => return err!(InvalidSeparator),
+            }
+        }
+        cursor.step_back(1);
+
+        let name = cursor.split_to();
+        let Some(b": ") = cursor.next_chunk() else {
+            return err!(InvalidSeparator);
+        };
+        cursor.advance_buf();
+        name
+    };
+
+    Poll::Ready(Ok(Some(Header {
+        name,
+        value: header_line,
+    })))
 }

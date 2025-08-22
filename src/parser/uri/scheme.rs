@@ -1,4 +1,4 @@
-use tcio::bytes::ByteStr;
+use tcio::bytes::{ByteStr, Bytes};
 
 #[derive(Debug)]
 pub struct Scheme {
@@ -29,25 +29,27 @@ impl Scheme {
         }
     }
 
-    #[inline]
-    pub fn new(scheme: ByteStr) -> Scheme {
-        // TODO: spec validation
-        match scheme.as_str() {
-            "http" => Self::http(),
-            "https" => Self::https(),
+    /// # Safety
+    ///
+    /// Scheme must be valid ASCII.
+    pub(crate) unsafe fn new_unchecked(scheme: Bytes) -> Scheme {
+        match scheme.as_slice() {
+            b"http" => Self::http(),
+            b"https" => Self::https(),
             _ => Self {
-                repr: Repr::ByteStr(scheme),
+                // SAFETY: ensured by caller
+                repr: Repr::ByteStr(unsafe { ByteStr::from_utf8_unchecked(scheme) }),
             },
         }
     }
 
     #[inline]
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match &self.repr {
             Repr::Static(HTTP) => "http",
             Repr::Static(HTTPS) => "https",
             Repr::ByteStr(s) => s.as_str(),
-            Repr::Static(_) => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }

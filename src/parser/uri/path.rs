@@ -1,7 +1,6 @@
-use tcio::{ByteStr, bytes::Bytes};
+use tcio::bytes::ByteStr;
 
-use super::error::InvalidUri;
-use crate::parser::simd::not_ascii_block;
+use super::{error::InvalidUri, simd};
 
 #[derive(Debug)]
 pub struct Path {
@@ -19,6 +18,11 @@ impl Path {
     }
 
     #[inline]
+    pub fn parse(string: ByteStr) -> Result<Self, InvalidUri> {
+        parse(string)
+    }
+
+    #[inline]
     pub const fn path(&self) -> &str {
         match self.query {
             0 => "/",
@@ -28,114 +32,53 @@ impl Path {
 
     #[inline]
     pub const fn query(&self) -> Option<&str> {
-        match self.bytes.as_str().split_at_checked((self.query + 1) as usize) {
+        match self
+            .bytes
+            .as_str()
+            .split_at_checked((self.query + 1) as usize)
+        {
             Some((_, q)) if q.is_empty() => None,
             Some((_, query)) => Some(query),
             None => None,
         }
     }
-
-    /// Caller must have bytes not empty.
-    pub(crate) fn parse(mut bytes: Bytes) -> Result<Self, InvalidUri> {
-        use crate::parser::simd::{BLOCK, MSB, LSB, QS, HASH};
-
-        debug_assert!(!bytes.is_empty());
-
-        let mut cursor = bytes.cursor_mut();
-
-        'swar: {
-            while let Some(chunk) = cursor.peek_chunk::<BLOCK>() {
-                let value = usize::from_ne_bytes(*chunk);
-
-                // look for "?"
-                let qs_xor = value ^ QS;
-                let qs_result = qs_xor.wrapping_sub(LSB) & !qs_xor;
-
-                // look for "#"
-                let hash_xor = value ^ HASH;
-                let hash_result = hash_xor.wrapping_sub(LSB) & !hash_xor;
-
-                let result = (qs_result | hash_result) & MSB;
-                if result != 0 {
-                    cursor.advance((result.trailing_zeros() / 8) as usize);
-                    break 'swar;
-                }
-
-                // validate ASCII (< 127)
-                if not_ascii_block!(value) {
-                    return Err(InvalidUri::NonAscii);
-                }
-
-                cursor.advance(BLOCK);
-            }
-
-            while let Some(b) = cursor.next() {
-                if matches!(b, b'?' | b'#') {
-                    cursor.step_back(1);
-                    break 'swar;
-                } else if !b.is_ascii() {
-                    return Err(InvalidUri::NonAscii);
-                }
-            }
-
-            // contained full path
-        };
-
-        let (query, path) = match cursor.peek() {
-            Some(b'#') => {
-                cursor.truncate_buf();
-                (bytes.len(), bytes)
-            }
-            Some(b'?') => {
-                let steps = cursor.steps();
-
-                'swar: {
-                    while let Some(chunk) = cursor.peek_chunk::<BLOCK>() {
-                        let value = usize::from_ne_bytes(*chunk);
-
-                        // look for "#"
-                        let hash_xor = value ^ HASH;
-                        let hash_result = hash_xor.wrapping_sub(LSB) & !hash_xor & MSB;
-
-                        if hash_result != 0 {
-                            cursor.advance((hash_result.trailing_zeros() / 8) as usize);
-                            cursor.truncate_buf();
-                            break 'swar;
-                        }
-
-                        // validate ASCII (< 127)
-                        if not_ascii_block!(value) {
-                            return Err(InvalidUri::NonAscii);
-                        }
-
-                        cursor.advance(BLOCK);
-                    }
-
-                    while let Some(b) = cursor.next() {
-                        if b == b'#' {
-                            cursor.step_back(1);
-                            cursor.truncate_buf();
-                            break 'swar;
-                        } else if !b.is_ascii() {
-                            return Err(InvalidUri::NonAscii);
-                        }
-                    }
-                }
-
-                (steps, bytes)
-            }
-            Some(_) => unreachable!("error in swar lookup"),
-            None => (bytes.len(), bytes),
-        };
-
-        match u16::try_from(query) {
-            Ok(query) => Ok(Self {
-                // SAFETY: iterated and validated that all contains ASCII
-                bytes: unsafe { ByteStr::from_utf8_unchecked(path) },
-                query
-            }),
-            Err(_) => Err(InvalidUri::TooLong),
-        }
-    }
 }
 
+/// Does not check for common cases or empty string.
+pub(crate) fn parse(string: ByteStr) -> Result<Path, InvalidUri> {
+    let mut bytes = string.into_bytes();
+    let mut cursor = bytes.cursor_mut();
+
+    simd::match_path(&mut cursor);
+
+    let (query, path) = match cursor.peek() {
+        None => (bytes.len(), bytes),
+        Some(b'?') => {
+            let steps = cursor.steps();
+
+            simd::match_fragment(&mut cursor);
+
+            if !matches!(cursor.peek(), Some(b'#') | None) {
+                return Err(InvalidUri::Char);
+            }
+            cursor.truncate_buf();
+
+            (steps, bytes)
+        }
+        Some(b'#') => {
+            cursor.truncate_buf();
+            (bytes.len(), bytes)
+        }
+        Some(_) => return Err(InvalidUri::Char),
+    };
+
+    let Ok(query) = query.try_into() else {
+        return Err(InvalidUri::TooLong);
+    };
+
+    Ok(Path {
+        // SAFETY: input is valid ASCII
+        bytes: unsafe { ByteStr::from_utf8_unchecked(path) },
+        query,
+    })
+}

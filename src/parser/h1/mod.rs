@@ -1,7 +1,8 @@
-mod message;
-mod request;
-mod header;
-mod error;
+mod simd;
+
+pub mod request;
+pub mod header;
+pub mod error;
 
 #[cfg(test)]
 mod test;

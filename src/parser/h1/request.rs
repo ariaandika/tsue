@@ -1,9 +1,9 @@
-use std::task::{Poll, ready};
-use tcio::bytes::{Buf, BytesMut, Cursor};
+use std::task::Poll;
+use tcio::bytes::BytesMut;
 
 use super::{
     error::{Error, ErrorKind},
-    message::find_line_buf,
+    simd,
 };
 use crate::http::{Method, Version};
 
@@ -22,33 +22,73 @@ pub struct Reqline {
     pub version: Version,
 }
 
+// ===== Parsing Request Line =====
+//
+// #1 SIMD Find CRLF, find Method, find backward Version
+//
+// - fast `Pending` case
+// - cannot check for valid URI char in SIMD
+//
+// #2 Find Method, SIMD find URI, find Version
+//
+// - slightly slower `Pending` case
+// - can check for valid URI char in SIMD
+//
+// #3 SIMD Find CRLF, find Method, find backward Version, parse URI (#CURRENT)
+//
+// - fast `Pending` case
+// - parsing while checking valid URI char
+// - merged logic code
+//
+// #4 Find Method, parse URI, find Version
+//
+// - slow `Pending` case
+// - parsing while checking valid URI char
+// - parsing URI also check for separator
+// - merged logic code
+
 pub fn parse_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
-    let mut reqline = ready!(find_line_buf(bytes));
+    let mut cursor = bytes.cursor_mut();
+
+    simd::match_crlf!(cursor);
+
+    let crlf = match cursor.next().unwrap() {
+        b'\n' => 1,
+        b'\r' => match cursor.next() {
+            Some(b'\n') => 2,
+            Some(_) => return err!(InvalidSeparator),
+            None => return Poll::Pending,
+        },
+        _ => return err!(InvalidSeparator),
+    };
+
+    let mut reqline = cursor.split_to();
+    reqline.truncate_off(crlf);
 
     let method = {
-        let mut cursor = Cursor::new(&reqline);
+        let mut cursor = reqline.cursor_mut();
 
         loop {
             match cursor.next() {
                 Some(b' ') => break,
-                Some(_) => {}
-                None => return err!(TooLong),
+                Some(_) => {},
+                None => return err!(InvalidSeparator),
             }
         }
-
         cursor.step_back(1);
 
         let Some(ok) = Method::from_bytes(cursor.advanced_slice()) else {
             return err!(UnknownMethod);
         };
+        cursor.advance(1);
+        cursor.advance_buf();
 
-        reqline.advance(cursor.steps() + 1);
         ok
     };
 
     let version = {
         let Some((rest, version)) = reqline.split_last_chunk::<VERSION_SIZE>() else {
-            return err!(TooShort);
+            return err!(UnsupportedVersion);
         };
 
         let Some(ok) = Version::from_bytes(version) else {
@@ -59,7 +99,7 @@ pub fn parse_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
             return err!(InvalidSeparator);
         }
 
-        reqline.truncate(reqline.len() - (VERSION_SIZE + 1));
+        reqline.truncate_off(VERSION_SIZE + 1);
         ok
     };
 
@@ -69,3 +109,4 @@ pub fn parse_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
         version,
     }))
 }
+
