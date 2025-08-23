@@ -1,20 +1,28 @@
 use tcio::bytes::{ByteStr, Bytes};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Scheme {
     repr: Repr,
 }
 
-const HTTP: u8  = 0b0000_0000;
-const HTTPS: u8 = 0b0000_0001;
+const NONE: u8  = 0b0000_0000;
+const HTTP: u8  = 0b0000_0001;
+const HTTPS: u8 = 0b0000_0010;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Repr {
     Static(u8),
     ByteStr(ByteStr),
 }
 
 impl Scheme {
+    #[inline]
+    pub const fn none() -> Scheme {
+        Self {
+            repr: Repr::Static(NONE),
+        }
+    }
+
     #[inline]
     pub const fn http() -> Scheme {
         Self {
@@ -44,12 +52,13 @@ impl Scheme {
     }
 
     #[inline]
-    pub const fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> Option<&str> {
         match &self.repr {
-            Repr::Static(HTTP) => "http",
-            Repr::Static(HTTPS) => "https",
-            Repr::ByteStr(s) => s.as_str(),
-            _ => unreachable!(),
+            Repr::Static(NONE) => None,
+            Repr::Static(HTTP) => Some("http"),
+            Repr::Static(HTTPS) => Some("https"),
+            Repr::ByteStr(s) => Some(s.as_str()),
+            _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
 }

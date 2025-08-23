@@ -2,7 +2,7 @@ use tcio::bytes::{ByteStr, Bytes};
 
 use super::{error::InvalidUri, simd};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Path {
     bytes: ByteStr,
     query: u16,
