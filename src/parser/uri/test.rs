@@ -44,7 +44,7 @@ fn test_match_uri_leader() {
 
 #[test]
 fn test_parse_uri_origin() {
-    use super::simd::match_path;
+    use super::simd;
 
     macro_rules! test {
         {
@@ -55,7 +55,7 @@ fn test_parse_uri_origin() {
             {
                 let bytes = Bytes::from_static($i);
                 let mut cursor = bytes.cursor();
-                match_path!(cursor);
+                simd::match_path!(cursor);
                 assert_eq!(cursor.next(), $n);
                 assert_eq!(cursor.as_slice(), $r);
             }

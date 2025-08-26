@@ -1,4 +1,29 @@
 #[doc(hidden)]
+macro_rules! inverted_byte_map {
+    (const $cnid:ident = #[false]($nepat:pat) #[true]($pat:pat)) => {
+        const $cnid: [bool; 256] = {
+            let mut bytes = [true; 256];
+            let mut byte = 0;
+            loop {
+                byte += 1;
+                bytes[byte as usize] = !matches!(byte, $nepat);
+                if byte == 255 {
+                    break;
+                }
+            }
+            byte = 0;
+            loop {
+                byte += 1;
+                bytes[byte as usize] = matches!(byte, $pat);
+                if byte == 255 {
+                    break;
+                }
+            }
+            bytes
+        };
+    };
+}
+#[doc(hidden)]
 macro_rules! byte_map {
     ($byte:ident, $pat:pat) => {{
         const LUT: [bool; 256] = {
@@ -95,6 +120,9 @@ macro_rules! match_uri_leader {
     }
 }
 
+/// `cursor.next()` returns '?', '#', invalid character or `None`.
+///
+/// invalid character is not any of: `b'!'..=b'~'`.
 macro_rules! match_path {
     ($cursor:ident) => {
         'swar: {
@@ -113,7 +141,7 @@ macro_rules! match_path {
                 let is_qs = (block ^ QS).wrapping_sub(LSB);
                 // '#'
                 let is_hs = (block ^ HASH).wrapping_sub(LSB);
-                // 33('!') <= byte
+                // 33('!') < byte
                 let lt_33 = block.wrapping_sub(BANG);
                 // 127(DEL)
                 let is_del = (block ^ DEL).wrapping_sub(LSB);
@@ -128,7 +156,15 @@ macro_rules! match_path {
             }
 
             while let Some(byte) = $cursor.next() {
-                if matches!(byte, b'?' | b'#') || !matches!(byte, b'!'..=b'~') {
+                simd::inverted_byte_map! {
+                    const PAT =
+                        // byte matching this will not trigger `break`
+                        #[false](b'!'..=b'~')
+                        // exclusively this pattern
+                        #[true](b'?' | b'#')
+                }
+
+                if PAT[byte as usize] {
                     $cursor.step_back(1);
                     break 'swar;
                 }
@@ -139,7 +175,10 @@ macro_rules! match_path {
     };
 }
 
-macro_rules! mmatch_fragment {
+/// `cursor.next()` returns '#', invalid character or `None`.
+///
+/// invalid character is not any of: `b'!'..=b'~'`.
+macro_rules! match_fragment {
     ($cursor:ident) => {
         'swar: {
             const BLOCK: usize = size_of::<usize>();
@@ -154,7 +193,7 @@ macro_rules! mmatch_fragment {
 
                 // '#'
                 let is_hs = (block ^ HASH).wrapping_sub(LSB);
-                // 33('!') <= byte
+                // 33('!') < byte
                 let lt_33 = block.wrapping_sub(BANG);
                 // 127(DEL)
                 let is_del = (block ^ DEL).wrapping_sub(LSB);
@@ -169,13 +208,21 @@ macro_rules! mmatch_fragment {
             }
 
             while let Some(byte) = $cursor.next() {
-                if byte == b'#' || !matches!(byte, b'!'..=b'~') {
+                simd::inverted_byte_map! {
+                    const PAT =
+                        // byte matching this will not trigger `break`
+                        #[false](b'!'..=b'~')
+                        // exclusively this pattern
+                        #[true](b'#')
+                }
+
+                if PAT[byte as usize] {
                     $cursor.step_back(1);
                     break 'swar;
                 }
             }
 
-            // contains full path
+            // contains no fragment
         }
     };
 }
@@ -199,6 +246,6 @@ macro_rules! validate_scheme {
 }
 
 pub(crate) use {
-    byte_map, eq_block, match_path, match_uri_leader, mmatch_fragment, validate_scheme,
+    byte_map, eq_block, match_path, match_uri_leader, match_fragment, validate_scheme, inverted_byte_map,
 };
 

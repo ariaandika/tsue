@@ -4,7 +4,7 @@ use super::{error::InvalidUri, simd};
 
 #[derive(Debug, Clone)]
 pub struct Path {
-    bytes: ByteStr,
+    value: ByteStr,
     query: u16,
 }
 
@@ -12,7 +12,7 @@ impl Path {
     /// `/`
     pub(crate) const fn slash() -> Path {
         Self {
-            bytes: ByteStr::from_static("/"),
+            value: ByteStr::from_static("/"),
             query: 1,
         }
     }
@@ -20,19 +20,27 @@ impl Path {
     /// `*`
     pub(crate) const fn asterisk() -> Path {
         Self {
-            bytes: ByteStr::from_static("*"),
+            value: ByteStr::from_static("*"),
             query: 1,
         }
     }
 
+    /// Construct a [`Path`] from [`Bytes`].
+    ///
+    /// Input is validated for valid path characters.
+    ///
+    /// Fragment is trimmed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if `value` contains invalid character.
     #[inline]
-    pub fn parse(bytes: Bytes) -> Result<Self, InvalidUri> {
-        match bytes.as_slice() {
+    pub fn try_from_bytes(value: Bytes) -> Result<Self, InvalidUri> {
+        match value.as_slice() {
             [] => Err(InvalidUri::Incomplete),
             [b'*'] => Ok(Self::asterisk()),
             [b'/'] => Ok(Path::slash()),
-            // should check for leading slash ?
-            _ => parse(bytes)
+            _ => parse(value)
         }
     }
 
@@ -40,24 +48,29 @@ impl Path {
     pub const fn path(&self) -> &str {
         match self.query {
             0 => "/",
-            q => self.bytes.as_str().split_at(q as usize).0,
+            q => self.value.as_str().split_at(q as usize).0,
         }
     }
 
     #[inline]
     pub const fn path_and_query(&self) -> &str {
-        self.bytes.as_str()
+        self.value.as_str()
     }
 
     #[inline]
     pub const fn query(&self) -> Option<&str> {
         match self
-            .bytes
+            .value
             .as_str()
             .split_at_checked((self.query + 1) as usize)
         {
-            Some((_, q)) if q.is_empty() => None,
-            Some((_, query)) => Some(query),
+            Some((_, q)) => {
+                if q.is_empty() {
+                    None
+                } else {
+                    Some(q)
+                }
+            }
             None => None,
         }
     }
@@ -72,16 +85,16 @@ pub(crate) fn parse(mut bytes: Bytes) -> Result<Path, InvalidUri> {
     let (query, path) = match cursor.peek() {
         None => (bytes.len(), bytes),
         Some(b'?') => {
-            let steps = cursor.steps();
+            let query = cursor.steps();
 
-            simd::mmatch_fragment!(cursor);
+            simd::match_fragment!(cursor);
 
             if !matches!(cursor.peek(), Some(b'#') | None) {
                 return Err(InvalidUri::Char);
             }
             cursor.truncate_buf();
 
-            (steps, bytes)
+            (query, bytes)
         }
         Some(b'#') => {
             cursor.truncate_buf();
@@ -95,8 +108,8 @@ pub(crate) fn parse(mut bytes: Bytes) -> Result<Path, InvalidUri> {
     };
 
     Ok(Path {
-        // SAFETY: `match_path!` check for valid ASCII
-        bytes: unsafe { ByteStr::from_utf8_unchecked(path) },
+        // SAFETY: `simd::match_*!` check for valid ASCII
+        value: unsafe { ByteStr::from_utf8_unchecked(path) },
         query,
     })
 }
@@ -106,6 +119,6 @@ pub(crate) fn parse(mut bytes: Bytes) -> Result<Path, InvalidUri> {
 impl PartialEq for Path {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.bytes == other.bytes
+        self.value == other.value
     }
 }

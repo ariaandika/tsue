@@ -69,7 +69,7 @@ pub fn parse(mut bytes: Bytes) -> Result<Target, InvalidUri> {
         };
         cursor.advance_buf();
 
-        match Path::parse(bytes) {
+        match Path::try_from_bytes(bytes) {
             Ok(path) => Ok(Target::Absolute {
                 scheme,
                 path,
