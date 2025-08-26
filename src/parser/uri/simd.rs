@@ -1,3 +1,53 @@
+#[doc(hidden)]
+macro_rules! byte_map {
+    ($byte:ident, $pat:pat) => {{
+        const LUT: [bool; 256] = {
+            let mut bytes = [false; 256];
+            let mut byte = 0;
+            loop {
+                byte += 1;
+                bytes[byte as usize] = matches!(byte, $pat);
+                if byte == 255 {
+                    break;
+                }
+            }
+            bytes
+        };
+        LUT[$byte as usize]
+    }};
+    ($(#[$meta:meta])* pub const fn $fnid:ident($pat:pat)) => {
+        $(#[$meta])*
+        #[inline(always)]
+        pub const fn $fnid(byte: u8) -> bool {
+            const LUT: [bool; 256] = {
+                let mut bytes = [false; 256];
+                let mut byte = 0;
+                loop {
+                    byte += 1;
+                    bytes[byte as usize] = matches!(byte, $pat);
+                    if byte == 255 {
+                        break;
+                    }
+                }
+                bytes
+            };
+            LUT[byte as usize]
+        }
+    };
+}
+
+macro_rules! eq_block {
+    ($block:ident, $byte:literal) => {
+        (
+            $block ^
+            usize::from_ne_bytes([$byte; size_of::<usize>()])
+        )
+            .wrapping_sub(usize::from_ne_bytes([0b0000_0001; size_of::<usize>()]))
+    };
+}
+
+// ===== General =====
+
 macro_rules! match_uri_leader {
     ($cursor:ident else { $err:expr }) => {
         'swar: {
@@ -130,5 +180,25 @@ macro_rules! mmatch_fragment {
     };
 }
 
-pub(crate) use {match_uri_leader, match_path, mmatch_fragment};
+/// `cursor.next()` returns invalid character or None.
+///
+/// invalid character is not any of: b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.'
+///
+/// no simd, scheme is generally short, and too complicated for simd logic.
+macro_rules! validate_scheme {
+    ($value:ident else { $err:expr }) => {
+        let mut cursor = $value.cursor();
+
+        while let Some(byte) = cursor.next() {
+            if !simd::byte_map!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.') {
+                cursor.step_back(1);
+                $err
+            }
+        }
+    };
+}
+
+pub(crate) use {
+    byte_map, eq_block, match_path, match_uri_leader, mmatch_fragment, validate_scheme,
+};
 
