@@ -1,30 +1,37 @@
 #[doc(hidden)]
-macro_rules! inverted_byte_map {
-    (const $cnid:ident = #[false]($nepat:pat) #[true]($pat:pat)) => {
+macro_rules! byte_map {
+    {
+        const $cnid:ident =
+            #[default($def:literal)]
+            $(#[false]($nepat:pat))?
+            $(#[true]($pat:pat))?
+    } => {
         const $cnid: [bool; 256] = {
-            let mut bytes = [true; 256];
-            let mut byte = 0;
-            loop {
-                byte += 1;
-                bytes[byte as usize] = !matches!(byte, $nepat);
-                if byte == 255 {
-                    break;
+            let mut bytes = [$def; 256];
+            let mut byte;
+            $(
+                byte = 0;
+                loop {
+                    byte += 1;
+                    bytes[byte as usize] = !matches!(byte, $nepat);
+                    if byte == 255 {
+                        break;
+                    }
                 }
-            }
-            byte = 0;
-            loop {
-                byte += 1;
-                bytes[byte as usize] = matches!(byte, $pat);
-                if byte == 255 {
-                    break;
+            )?
+            $(
+                byte = 0;
+                loop {
+                    byte += 1;
+                    bytes[byte as usize] = matches!(byte, $pat);
+                    if byte == 255 {
+                        break;
+                    }
                 }
-            }
+            )?
             bytes
         };
     };
-}
-#[doc(hidden)]
-macro_rules! byte_map {
     ($byte:ident, $pat:pat) => {{
         const LUT: [bool; 256] = {
             let mut bytes = [false; 256];
@@ -156,8 +163,9 @@ macro_rules! match_path {
             }
 
             while let Some(byte) = $cursor.next() {
-                simd::inverted_byte_map! {
+                simd::byte_map! {
                     const PAT =
+                        #[default(true)]
                         // byte matching this will not trigger `break`
                         #[false](b'!'..=b'~')
                         // exclusively this pattern
@@ -208,8 +216,9 @@ macro_rules! match_fragment {
             }
 
             while let Some(byte) = $cursor.next() {
-                simd::inverted_byte_map! {
+                simd::byte_map! {
                     const PAT =
+                        #[default(true)]
                         // byte matching this will not trigger `break`
                         #[false](b'!'..=b'~')
                         // exclusively this pattern
@@ -245,7 +254,75 @@ macro_rules! validate_scheme {
     };
 }
 
+/// `cursor.next()` returns '@', invalid character or None.
+///
+/// invalid character is: b'#' | b'/' | b'<' | b'>' | b'?' | b'\[' | b'\\' | b']' | b'^' |
+/// b'`' | b'{' | b'|' | b'}'
+macro_rules! validate_authority {
+    ($cursor:ident) => {{
+        let mut col = None;
+
+        while let Some(byte) = $cursor.next() {
+            simd::byte_map! {
+                const PAT =
+                    #[default(false)]
+                    #[true](
+                        b'#' | b'/' | b'<' | b'>' | b'?' | b'[' | b'\\' |
+                        b']' | b'^' | b'`' | b'{' | b'|' | b'}' | b'@'
+                    )
+            }
+
+            if PAT[byte as usize] {
+                $cursor.step_back(1);
+                break;
+            } else if byte == b':' {
+                col = Some($cursor.steps())
+            }
+        }
+
+        col
+    }};
+}
+
+macro_rules! match_port_rev {
+    ($cursor:ident else { $expr:expr }) => {
+        'swar: {
+            const BLOCK: usize = size_of::<usize>();
+            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+            const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
+
+            while let Some(chunk) = $cursor.peek_prev_chunk::<BLOCK>() {
+                let block = usize::from_ne_bytes(*chunk);
+
+                // ':'
+                let result = (block ^ COL).wrapping_sub(LSB) & MSB;
+
+                if result != 0 {
+                    $cursor.step_back(8 - (result.trailing_zeros() / 8) as usize);
+                    break 'swar;
+                }
+
+                $cursor.step_back(BLOCK);
+            }
+
+            while let Some(byte) = $cursor.prev() {
+                if byte == b':' {
+                    break 'swar;
+                }
+            }
+
+            $expr
+        }
+    };
+}
+
+byte_map! {
+    pub const fn is_digit(b'0'..=b'9')
+}
+
 pub(crate) use {
-    byte_map, eq_block, match_path, match_uri_leader, match_fragment, validate_scheme, inverted_byte_map,
+    byte_map, eq_block, /* inverted_byte_map, */ match_fragment, match_path, match_uri_leader,
+    validate_authority, validate_scheme, match_port_rev
 };
 
