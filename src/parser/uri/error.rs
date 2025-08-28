@@ -1,5 +1,5 @@
 
-pub enum InvalidUri {
+pub enum UriError {
     /// Bytes ends before all components parsed.
     Incomplete,
     /// Bytes length is too large.
@@ -8,11 +8,11 @@ pub enum InvalidUri {
     Char,
 }
 
-impl std::error::Error for InvalidUri { }
+impl std::error::Error for UriError { }
 
-impl std::fmt::Display for InvalidUri {
+impl std::fmt::Display for UriError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use InvalidUri::*;
+        use UriError::*;
         f.write_str("invalid uri, ")?;
         match self {
             TooLong => f.write_str("data length is too large"),
@@ -22,7 +22,7 @@ impl std::fmt::Display for InvalidUri {
     }
 }
 
-impl std::fmt::Debug for InvalidUri {
+impl std::fmt::Debug for UriError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "\"{self}\"")
     }

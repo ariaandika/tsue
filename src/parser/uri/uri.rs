@@ -1,8 +1,10 @@
 use tcio::bytes::{Bytes, Cursor};
 
+use crate::http::Uri;
+
 use super::{
     authority::Authority,
-    error::InvalidUri,
+    error::UriError,
     path::{self, Path},
     scheme::Scheme,
     simd,
@@ -26,9 +28,9 @@ pub enum Target {
 }
 
 /// Parse full uri.
-pub fn parse(mut bytes: Bytes) -> Result<Target, InvalidUri> {
+pub fn parse(mut bytes: Bytes) -> Result<Target, UriError> {
     match bytes.as_slice() {
-        [] => return Err(InvalidUri::Incomplete),
+        [] => return Err(UriError::Incomplete),
         [b'*'] => return Ok(Target::Asterisk),
         [b'/'] => return Ok(Target::Origin(Path::slash())),
         [b'/' | b'?', ..] => return path::parse(bytes).map(Target::Origin),
@@ -40,7 +42,7 @@ pub fn parse(mut bytes: Bytes) -> Result<Target, InvalidUri> {
     let mut cursor = bytes.cursor_mut();
 
     simd::match_uri_leader!(cursor else {
-        return Err(InvalidUri::Incomplete)
+        return Err(UriError::Incomplete)
     });
 
     if let Some(b"://") = cursor.peek_chunk() {
@@ -53,19 +55,19 @@ pub fn parse(mut bytes: Bytes) -> Result<Target, InvalidUri> {
         cursor.advance_buf();
 
         simd::match_uri_leader!(cursor else {
-            return Err(InvalidUri::Incomplete)
+            return Err(UriError::Incomplete)
         });
 
         let host = cursor.split_to();
 
         let Some(b':') = cursor.next() else {
-            return Err(InvalidUri::Char);
+            return Err(UriError::Char);
         };
         cursor.advance_buf();
 
         let port = match_port(&mut cursor);
         let Some(b'/') = cursor.peek() else {
-            return Err(InvalidUri::Char);
+            return Err(UriError::Char);
         };
         cursor.advance_buf();
 
@@ -92,7 +94,7 @@ pub fn parse(mut bytes: Bytes) -> Result<Target, InvalidUri> {
             Authority::new_unchecked(host, port)
         }))
     } else {
-        Err(InvalidUri::Char)
+        Err(UriError::Char)
     }
 }
 

@@ -3,6 +3,8 @@
 //! [rfc]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
 use tcio::bytes::{Cursor, ByteStr};
 
+use crate::parser::uri::UriError;
+
 /// HTTP [URI][rfc].
 ///
 /// A Uniform Resource Identifier ([URI][rfc]) provides a simple and extensible means for identifying a
@@ -68,13 +70,13 @@ const AUTH_NONE: u16  = 0b1000_0000_0000_0000;
 impl Uri {
     /// Try parse uri from [`ByteStr`].
     #[inline]
-    pub fn try_from_shared(value: impl Into<ByteStr>) -> Result<Self, InvalidUri> {
+    pub fn try_from_shared(value: impl Into<ByteStr>) -> Result<Self, UriError> {
         parse_uri(value.into())
     }
 
     /// Copy and try parse uri from `str`.
     #[inline]
-    pub fn try_copy_from(value: &str) -> Result<Self, InvalidUri> {
+    pub fn try_copy_from(value: &str) -> Result<Self, UriError> {
         parse_uri(ByteStr::copy_from_str(value))
     }
 
@@ -141,13 +143,13 @@ impl Uri {
 /// NOTE: no uri fragment, will be striped by `trim_fragment`
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3)
-fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
+fn parse_uri(value: ByteStr) -> Result<Uri, UriError> {
     let mut bufm = value.as_bytes();
 
     // ===== Common cases =====
 
     if bufm.is_empty() {
-        return Err(InvalidUri::Incomplete);
+        return Err(UriError::Incomplete);
     }
 
     if bufm.len() == 1 {
@@ -227,8 +229,8 @@ fn parse_uri(value: ByteStr) -> Result<Uri, InvalidUri> {
 /// will be parsed as authority, otherwise, as scheme
 ///
 /// returns (is_scheme, len)
-fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
-    use InvalidUri::*;
+fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), UriError> {
+    use UriError::*;
 
     const IS_SCHEME: bool = true;
     const IS_AUTHORITY: bool = false;
@@ -238,7 +240,7 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
 
     match cursor.next() {
         Some(lead) if lead.is_ascii_alphanumeric() => {},
-        Some(lead) => valid_scheme = Err(Char(lead as char)),
+        Some(_) => valid_scheme = Err(Char),
         None => return Err(Incomplete),
     }
 
@@ -269,8 +271,8 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
 
                 b'+' | b'-' | b'.' => {}
                 e if e.is_ascii_alphanumeric() => {}
-                ch => if valid_scheme.is_ok() {
-                    valid_scheme = Err(Char(ch as char));
+                _ => if valid_scheme.is_ok() {
+                    valid_scheme = Err(Char);
                 },
             },
             // no colon, authority only
@@ -293,7 +295,7 @@ fn parse_leader(buf: &mut &[u8]) -> Result<(bool, u16), InvalidUri> {
     Ok((IS_SCHEME, cursor.steps().u16_max(MAX_SCHEME)? - 1))
 }
 
-fn parse_authority_partial(buf: &mut &[u8]) -> Result<usize, InvalidUri> {
+fn parse_authority_partial(buf: &mut &[u8]) -> Result<usize, UriError> {
     let mut cursor = Cursor::new(buf);
 
     loop {
@@ -315,7 +317,7 @@ fn parse_authority_partial(buf: &mut &[u8]) -> Result<usize, InvalidUri> {
 /// terminated by `/`, `?`, `#`, or by the end
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3.2)
-fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
+fn parse_authority(buf: &mut &[u8]) -> Result<u16, UriError> {
     let mut cursor = Cursor::new(buf);
 
     match cursor.peek_chunk::<2>() {
@@ -348,7 +350,7 @@ fn parse_authority(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
 /// characters (`//`).
 ///
 /// [source](https://datatracker.ietf.org/doc/html/rfc3986#section-3.3)
-fn parse_path(buf: &mut &[u8]) -> Result<u16, InvalidUri> {
+fn parse_path(buf: &mut &[u8]) -> Result<u16, UriError> {
     let mut cursor = Cursor::new(buf);
 
     loop {
@@ -405,52 +407,21 @@ impl std::fmt::Display for Uri {
 // ===== Helper =====
 
 trait TryU16 {
-    fn u16(self) -> Result<u16, InvalidUri>;
+    fn u16(self) -> Result<u16, UriError>;
 
-    fn u16_max(self, max: u16) -> Result<u16, InvalidUri>;
+    fn u16_max(self, max: u16) -> Result<u16, UriError>;
 }
 
 impl TryU16 for usize {
-    fn u16(self) -> Result<u16, InvalidUri> {
-        self.try_into().map_err(|_|InvalidUri::TooLong)
+    fn u16(self) -> Result<u16, UriError> {
+        self.try_into().map_err(|_|UriError::TooLong)
     }
 
-    fn u16_max(self, max: u16) -> Result<u16, InvalidUri> {
+    fn u16_max(self, max: u16) -> Result<u16, UriError> {
         match self.try_into() {
             Ok(ok) if ok <= max => Ok(ok),
-            _ => Err(InvalidUri::TooLong),
+            _ => Err(UriError::TooLong),
         }
-    }
-}
-
-// ===== Error =====
-
-pub enum InvalidUri {
-    /// Bytes ends before all components parsed.
-    Incomplete,
-    /// Bytes length is too large.
-    TooLong,
-    /// Invalid character found.
-    Char(char),
-}
-
-impl std::error::Error for InvalidUri { }
-
-impl std::fmt::Display for InvalidUri {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use InvalidUri::*;
-        f.write_str("invalid uri: ")?;
-        match self {
-            TooLong => f.write_str("data length is too large"),
-            Incomplete => f.write_str("data is incomplete"),
-            Char(ch) => write!(f, "unexpected character `{ch}`"),
-        }
-    }
-}
-
-impl std::fmt::Debug for InvalidUri {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "\"{self}\"")
     }
 }
 

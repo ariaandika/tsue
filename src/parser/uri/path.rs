@@ -1,6 +1,6 @@
 use tcio::bytes::{ByteStr, Bytes};
 
-use super::{error::InvalidUri, simd};
+use super::{error::UriError, simd};
 
 #[derive(Debug, Clone)]
 pub struct Path {
@@ -35,9 +35,9 @@ impl Path {
     ///
     /// Returns `Err` if `value` contains invalid character.
     #[inline]
-    pub fn try_from_bytes(value: Bytes) -> Result<Self, InvalidUri> {
+    pub fn try_from_bytes(value: Bytes) -> Result<Self, UriError> {
         match value.as_slice() {
-            [] => Err(InvalidUri::Incomplete),
+            [] => Err(UriError::Incomplete),
             [b'*'] => Ok(Self::asterisk()),
             [b'/'] => Ok(Path::slash()),
             _ => parse(value)
@@ -77,7 +77,7 @@ impl Path {
 }
 
 /// Does not check for common cases or empty string.
-pub(crate) fn parse(mut bytes: Bytes) -> Result<Path, InvalidUri> {
+pub(crate) fn parse(mut bytes: Bytes) -> Result<Path, UriError> {
     let mut cursor = bytes.cursor_mut();
 
     simd::match_path!(cursor);
@@ -90,7 +90,7 @@ pub(crate) fn parse(mut bytes: Bytes) -> Result<Path, InvalidUri> {
             simd::match_fragment!(cursor);
 
             if !matches!(cursor.peek(), Some(b'#') | None) {
-                return Err(InvalidUri::Char);
+                return Err(UriError::Char);
             }
             cursor.truncate_buf();
 
@@ -100,11 +100,11 @@ pub(crate) fn parse(mut bytes: Bytes) -> Result<Path, InvalidUri> {
             cursor.truncate_buf();
             (bytes.len(), bytes)
         }
-        Some(_) => return Err(InvalidUri::Char),
+        Some(_) => return Err(UriError::Char),
     };
 
     let Ok(query) = query.try_into() else {
-        return Err(InvalidUri::TooLong);
+        return Err(UriError::TooLong);
     };
 
     Ok(Path {

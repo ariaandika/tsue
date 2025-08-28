@@ -45,12 +45,12 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl From<crate::parser::uri::InvalidUri> for Error {
-    fn from(value: crate::parser::uri::InvalidUri) -> Self {
+impl From<crate::parser::uri::UriError> for Error {
+    fn from(value: crate::parser::uri::UriError) -> Self {
         match value {
-            crate::parser::uri::InvalidUri::Incomplete => Self::from(ErrorKind::TooShort),
-            crate::parser::uri::InvalidUri::TooLong => Self::from(ErrorKind::TooLong),
-            crate::parser::uri::InvalidUri::Char => Self::from(ErrorKind::InvalidChar),
+            crate::parser::uri::UriError::Incomplete => Self::from(ErrorKind::TooShort),
+            crate::parser::uri::UriError::TooLong => Self::from(ErrorKind::TooLong),
+            crate::parser::uri::UriError::Char => Self::from(ErrorKind::InvalidChar),
         }
     }
 }

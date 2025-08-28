@@ -1,6 +1,6 @@
 use tcio::bytes::{ByteStr, Bytes};
 
-use super::{simd, InvalidUri};
+use super::{simd, UriError};
 
 #[derive(Debug, Clone)]
 pub struct Authority {
@@ -33,14 +33,14 @@ impl Authority {
     /// # Errors
     ///
     /// Returns `Err` if `value` contains invalid character.
-    pub fn try_from_bytes(bytes: Bytes) -> Result<Self, InvalidUri> {
+    pub fn try_from_bytes(bytes: Bytes) -> Result<Self, UriError> {
         let mut cursor = bytes.cursor();
         let col = simd::validate_authority!(cursor);
 
         match cursor.peek() {
             // TODO: dedicated userinfo error
-            Some(b'@') => return Err(InvalidUri::Char),
-            Some(_) => return Err(InvalidUri::Char),
+            Some(b'@') => return Err(UriError::Char),
+            Some(_) => return Err(UriError::Char),
             None => {},
         }
 
@@ -49,12 +49,12 @@ impl Authority {
             cursor.advance(col);
 
             if cursor.remaining() > 5 {
-                return Err(InvalidUri::TooLong);
+                return Err(UriError::TooLong);
             }
 
             while let Some(byte) = cursor.next() {
                 if !simd::is_digit(byte) {
-                    return Err(InvalidUri::Char)
+                    return Err(UriError::Char)
                 }
             }
         }

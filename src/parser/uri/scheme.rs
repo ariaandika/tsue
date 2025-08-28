@@ -1,6 +1,6 @@
 use tcio::bytes::{ByteStr, Bytes};
 
-use super::{simd, InvalidUri};
+use super::{simd, UriError};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scheme {
@@ -76,9 +76,9 @@ impl Scheme {
     /// # Errors
     ///
     /// Returns `Err` if `value` contains invalid character.
-    pub fn try_from_bytes(value: Bytes) -> Result<Self, InvalidUri> {
+    pub fn try_from_bytes(value: Bytes) -> Result<Self, UriError> {
         simd::validate_scheme!(value else {
-            return Err(InvalidUri::Char)
+            return Err(UriError::Char)
         });
         Ok(Self {
             // SAFETY: `simd::validate_scheme` checks for valid ASCII
