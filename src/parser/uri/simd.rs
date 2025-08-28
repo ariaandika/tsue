@@ -12,21 +12,25 @@ macro_rules! byte_map {
             $(
                 byte = 0;
                 loop {
-                    byte += 1;
-                    bytes[byte as usize] = !matches!(byte, $nepat);
+                    if matches!(byte, $nepat) {
+                        bytes[byte as usize] = false;
+                    }
                     if byte == 255 {
                         break;
                     }
+                    byte += 1;
                 }
             )?
             $(
                 byte = 0;
                 loop {
-                    byte += 1;
-                    bytes[byte as usize] = matches!(byte, $pat);
+                    if matches!(byte, $pat) {
+                        bytes[byte as usize] = true;
+                    }
                     if byte == 255 {
                         break;
                     }
+                    byte += 1;
                 }
             )?
             bytes
