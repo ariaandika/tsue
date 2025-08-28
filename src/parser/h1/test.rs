@@ -15,7 +15,6 @@ macro_rules! ready {
 #[test]
 fn test_parse_reqline() {
     use super::request::parse_reqline;
-    use crate::parser::uri::Target;
 
     macro_rules! test {
         (#[pending] $input:literal) => {

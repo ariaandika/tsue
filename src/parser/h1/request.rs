@@ -6,8 +6,8 @@ use super::{
     simd,
 };
 use crate::{
-    parser::uri::{self, Target},
     http::{Method, Version},
+    parser::uri::{self, Uri},
 };
 
 macro_rules! err {
@@ -21,7 +21,7 @@ const VERSION_SIZE: usize = b"HTTP/1.1".len();
 #[derive(Debug)]
 pub struct Reqline {
     pub method: Method,
-    pub target: Target,
+    pub target: Uri,
     pub version: Version,
 }
 
@@ -109,7 +109,7 @@ pub fn parse_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
     match uri::parse(reqline.freeze()) {
         Ok(target) => Poll::Ready(Ok(Reqline {
             method,
-            target: todo!(),
+            target,
             version,
         })),
         Err(err) => Poll::Ready(Err(err.into())),

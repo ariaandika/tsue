@@ -2,23 +2,6 @@ use tcio::{ByteStr, bytes::Bytes};
 
 use super::{Uri, error::UriError, simd, uri};
 
-/// Request Target.
-#[derive(Debug, PartialEq)]
-pub enum Target {
-    // /// `/users/all?page=4&filter=available`
-    // Origin(Path),
-    // /// `http://example.com/users/all?page=4&filter=available`
-    // Absolute {
-    //     scheme: Scheme,
-    //     authority: Authority,
-    //     path: Path,
-    // },
-    // /// `example.com:443`
-    // Authority(Authority),
-    /// `*`
-    Asterisk,
-}
-
 macro_rules! u16 {
     ($val:expr, $max:expr) => {
         match $val {

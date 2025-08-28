@@ -72,16 +72,6 @@ macro_rules! byte_map {
     };
 }
 
-macro_rules! eq_block {
-    ($block:ident, $byte:literal) => {
-        (
-            $block ^
-            usize::from_ne_bytes([$byte; size_of::<usize>()])
-        )
-            .wrapping_sub(usize::from_ne_bytes([0b0000_0001; size_of::<usize>()]))
-    };
-}
-
 // ===== General =====
 
 /// `cursor.next()` returns ':', invalid character or `None`.
@@ -359,45 +349,5 @@ macro_rules! validate_authority {
     }};
 }
 
-macro_rules! match_port_rev {
-    ($cursor:ident else { $expr:expr }) => {
-        'swar: {
-            const BLOCK: usize = size_of::<usize>();
-            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
-            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-            const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
-
-            while let Some(chunk) = $cursor.peek_prev_chunk::<BLOCK>() {
-                let block = usize::from_ne_bytes(*chunk);
-
-                // ':'
-                let result = (block ^ COL).wrapping_sub(LSB) & MSB;
-
-                if result != 0 {
-                    $cursor.step_back(8 - (result.trailing_zeros() / 8) as usize);
-                    break 'swar;
-                }
-
-                $cursor.step_back(BLOCK);
-            }
-
-            while let Some(byte) = $cursor.prev() {
-                if byte == b':' {
-                    break 'swar;
-                }
-            }
-
-            $expr
-        }
-    };
-}
-
-byte_map! {
-    pub const fn is_digit(b'0'..=b'9')
-}
-
-pub(crate) use {
-    byte_map, eq_block, /* inverted_byte_map, */ match_query, match_path, match_scheme,
-    validate_authority, validate_scheme, match_port_rev, match_authority
-};
+pub(crate) use {byte_map, match_authority, match_path, match_query, match_scheme};
 

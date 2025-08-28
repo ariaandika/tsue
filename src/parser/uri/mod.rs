@@ -5,7 +5,7 @@ mod uri;
 mod parser;
 mod error;
 
-pub use parser::{parse, Target};
+pub use parser::parse;
 pub use error::UriError;
 
 /// HTTP [URI][rfc].
