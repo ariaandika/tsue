@@ -2,7 +2,7 @@ use tcio::bytes::Bytes;
 
 #[test]
 fn test_match_uri_leader() {
-    use super::simd::match_uri_leader;
+    use super::simd::{self, match_scheme};
 
     macro_rules! test {
         {
@@ -13,7 +13,7 @@ fn test_match_uri_leader() {
             {
                 let bytes = Bytes::from_static($i);
                 let mut cursor = bytes.cursor();
-                match_uri_leader!(cursor else { unreachable!() });
+                match_scheme!(cursor else { unreachable!() });
                 assert_eq!(cursor.next(), $n);
                 assert_eq!(cursor.as_slice(), $r);
             }
@@ -101,7 +101,7 @@ fn test_parse_uri_origin() {
 
 #[test]
 fn test_uri_parse() {
-    use super::uri::{parse, Target};
+    use super::{parse, Target};
 
     macro_rules! test_origin {
         (#[error] input: $i:expr) => {
@@ -112,11 +112,12 @@ fn test_uri_parse() {
             path: $p:expr,
             query: $q:expr,
         } => {
-            let Target::Origin(origin) = parse(Bytes::copy_from_slice($i.as_bytes())).unwrap() else {
-                unreachable!("parse uri is not an origin form")
-            };
-            assert_eq!(origin.path(), $p);
-            assert_eq!(origin.query(), $q);
+            todo!()
+            // let Target::Origin(origin) = parse(Bytes::copy_from_slice($i.as_bytes())).unwrap() else {
+            //     unreachable!("parse uri is not an origin form")
+            // };
+            // assert_eq!(origin.path(), $p);
+            // assert_eq!(origin.query(), $q);
         };
     }
 

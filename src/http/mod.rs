@@ -5,11 +5,10 @@ mod version;
 mod extensions;
 mod date;
 
-pub mod uri;
+#[doc(inline)]
+pub use super::parser::uri::{Uri, UriError};
 
 pub use method::Method;
-#[doc(inline)]
-pub use uri::Uri;
 pub use version::Version;
 pub use status::StatusCode;
 pub use extensions::Extensions;

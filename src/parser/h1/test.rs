@@ -35,15 +35,16 @@ fn test_parse_reqline() {
             $m:ident, $u:expr, $v:ident;
             $rest:expr
         } => {
-            let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-
-            let reqline = ready!(parse_reqline(&mut bytes)).unwrap();
-
-            assert_eq!(reqline.method, Method::$m);
-            let Target::Origin(target) = reqline.target else { unreachable!() };
-            assert_eq!(target.path_and_query().as_bytes(), $u);
-            assert_eq!(reqline.version, Version::$v);
-            assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");
+            todo!()
+            // let mut bytes = BytesMut::copy_from_slice(&$input[..]);
+            //
+            // let reqline = ready!(parse_reqline(&mut bytes)).unwrap();
+            //
+            // assert_eq!(reqline.method, Method::$m);
+            // let Target::Origin(target) = reqline.target else { unreachable!() };
+            // assert_eq!(target.path_and_query().as_bytes(), $u);
+            // assert_eq!(reqline.version, Version::$v);
+            // assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");
         };
     }
 

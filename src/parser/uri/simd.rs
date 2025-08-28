@@ -80,16 +80,23 @@ macro_rules! eq_block {
 
 // ===== General =====
 
-macro_rules! match_uri_leader {
+/// `cursor.next()` returns ':', invalid character or `None`.
+///
+/// note that currently this does not comply with rfc, the following bytes will be passed:
+///
+/// - ",", ":", ";", "<", "=", ">", "\[", "\\", "]", "^", "_", "`"
+macro_rules! match_scheme {
     ($cursor:ident else { $err:expr }) => {
         'swar: {
             const BLOCK: usize = size_of::<usize>();
             const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
             const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-            const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
             const COLON: usize = usize::from_ne_bytes([b':'; BLOCK]);
             const SLASH: usize = usize::from_ne_bytes([b'/'; BLOCK]);
-            const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
+            const PLUS: usize = usize::from_ne_bytes([b'+'; BLOCK]);
+            const QS: usize = usize::from_ne_bytes([b'?'; BLOCK]);
+            const AT: usize = usize::from_ne_bytes([b'@'; BLOCK]);
+            const FIVE: usize = usize::from_ne_bytes([5; BLOCK]);
 
             while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
                 let block = usize::from_ne_bytes(*chunk);
@@ -101,12 +108,16 @@ macro_rules! match_uri_leader {
                 let is_cl = (block ^ COLON).wrapping_sub(LSB);
                 // "/"
                 let is_sl = (block ^ SLASH).wrapping_sub(LSB);
-                // 33(b'!') <= byte
-                let lt_33 = block.wrapping_sub(BANG);
-                // 127(DEL)
-                let is_del = (block ^ DEL).wrapping_sub(LSB);
+                // "?"
+                let is_qs = (block ^ QS).wrapping_sub(LSB);
+                // "@"
+                let is_at = (block ^ AT).wrapping_sub(LSB);
+                // 43(b'+') < byte
+                let lt_pl = block.wrapping_sub(PLUS);
+                // 122(b'z') > byte
+                let gt_z = block.saturating_add(FIVE);
 
-                let result = (is_cl | is_sl | lt_33 | is_del | block) & MSB;
+                let result = (is_cl | is_sl | is_qs | is_at | lt_pl | gt_z | block) & MSB;
                 if result != 0 {
                     $cursor.advance((result.trailing_zeros() / 8) as usize);
                     break 'swar;
@@ -116,7 +127,14 @@ macro_rules! match_uri_leader {
             }
 
             while let Some(byte) = $cursor.next() {
-                if matches!(byte, b':' | b'/') || !matches!(byte, b'!'..=b'~') {
+                simd::byte_map! {
+                    const PAT =
+                        #[default(true)]
+                        #[false](b'+'..=b'z')
+                        #[true](b':' | b'/' | b'?' | b'@')
+                }
+
+                if PAT[byte as usize] {
                     $cursor.step_back(1);
                     break 'swar;
                 }
@@ -127,9 +145,62 @@ macro_rules! match_uri_leader {
     }
 }
 
+/// `cursor.next()` returns '/', '?', '#', invalid character or `None`.
+macro_rules! match_authority {
+    ($cursor:ident) => {
+        'swar: {
+            const BLOCK: usize = size_of::<usize>();
+            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+            const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
+            const QS: usize = usize::from_ne_bytes([b'?'; BLOCK]);
+            const HASH: usize = usize::from_ne_bytes([b'#'; BLOCK]);
+            const SLASH: usize = usize::from_ne_bytes([b'/'; BLOCK]);
+            const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
+
+            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
+                let block = usize::from_ne_bytes(*chunk);
+
+                // '/'
+                let is_sl = (block ^ SLASH).wrapping_sub(LSB);
+                // '?'
+                let is_qs = (block ^ QS).wrapping_sub(LSB);
+                // '#'
+                let is_hs = (block ^ HASH).wrapping_sub(LSB);
+                // 33('!') < byte
+                let lt_33 = block.wrapping_sub(BANG);
+                // 127(DEL)
+                let is_del = (block ^ DEL).wrapping_sub(LSB);
+
+                let result = (is_sl | is_qs | is_hs | lt_33 | is_del | block) & MSB;
+                if result != 0 {
+                    $cursor.advance((result.trailing_zeros() / 8) as usize);
+                    break 'swar;
+                }
+
+                $cursor.advance(BLOCK);
+            }
+
+            while let Some(byte) = $cursor.next() {
+                simd::byte_map! {
+                    const PAT =
+                        #[default(true)]
+                        #[false](b'!'..=b'~')
+                        #[true](b'/' | b'?' | b'#')
+                }
+
+                if PAT[byte as usize] {
+                    $cursor.step_back(1);
+                    break 'swar;
+                }
+            }
+        }
+    };
+}
+
 /// `cursor.next()` returns '?', '#', invalid character or `None`.
 ///
-/// invalid character is not any of: `b'!'..=b'~'`.
+/// Postcondition: advanced bytes is valid ASCII.
 macro_rules! match_path {
     ($cursor:ident) => {
         'swar: {
@@ -185,8 +256,8 @@ macro_rules! match_path {
 
 /// `cursor.next()` returns '#', invalid character or `None`.
 ///
-/// invalid character is not any of: `b'!'..=b'~'`.
-macro_rules! match_fragment {
+/// Postcondition: advanced bytes is valid ASCII.
+macro_rules! match_query {
     ($cursor:ident) => {
         'swar: {
             const BLOCK: usize = size_of::<usize>();
@@ -322,7 +393,7 @@ byte_map! {
 }
 
 pub(crate) use {
-    byte_map, eq_block, /* inverted_byte_map, */ match_fragment, match_path, match_uri_leader,
-    validate_authority, validate_scheme, match_port_rev
+    byte_map, eq_block, /* inverted_byte_map, */ match_query, match_path, match_scheme,
+    validate_authority, validate_scheme, match_port_rev, match_authority
 };
 

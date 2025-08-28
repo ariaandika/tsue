@@ -109,7 +109,7 @@ pub fn parse_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
     match uri::parse(reqline.freeze()) {
         Ok(target) => Poll::Ready(Ok(Reqline {
             method,
-            target,
+            target: todo!(),
             version,
         })),
         Err(err) => Poll::Ready(Err(err.into())),
