@@ -26,16 +26,19 @@ macro_rules! u16 {
             val => val as u16,
         }
     };
-    ($val:expr) => {
-        match u16::try_from($val) {
-            Ok(ok) => ok,
-            Err(_) => return Err(UriError::TooLong),
+    ($val:expr) => {{
+        let val = $val;
+        if val > u16::MAX as usize {
+            return Err(UriError::TooLong)
+        } else {
+            val as u16
         }
-    };
+    }};
 }
 
 impl Uri {
     /// `*`.
+    #[inline]
     pub const fn asterisk() -> Self {
         Self {
             value: ByteStr::from_static("*"),
@@ -47,6 +50,7 @@ impl Uri {
     }
 
     /// `/`.
+    #[inline]
     pub const fn root() -> Self {
         Self {
             value: ByteStr::from_static("/"),
@@ -58,6 +62,7 @@ impl Uri {
     }
 
     /// Construct an empty [`Uri`].
+    #[inline]
     pub const fn empty() -> Self {
         Self {
             value: ByteStr::new(),
@@ -66,6 +71,11 @@ impl Uri {
             path: 0,
             query: 0,
         }
+    }
+
+    #[inline]
+    pub fn try_from_shared(value: Bytes) -> Result<Self, UriError> {
+        parse(value)
     }
 
     /// Copy and try parse uri from `str`.
@@ -184,3 +194,133 @@ pub fn parse(mut bytes: Bytes) -> Result<Uri, UriError> {
     })
 }
 
+// ===== Static Parsing =====
+
+impl Uri {
+    /// Construct [`Uri`] from static string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`Uri::try_from_shared`] returns [`Err`].
+    #[inline]
+    pub const fn from_static(value: &'static str) -> Self {
+        match parse_const(value.as_bytes()) {
+            Ok(idx) => idx.uri(ByteStr::from_static(value)),
+            Err(err) => err.panic_const(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UriIndex {
+    fragment: u16,
+    scheme: u16,
+    authority: u16,
+    path: u16,
+    query: u16,
+}
+
+impl UriIndex {
+    const fn uri(self, value: ByteStr) -> Uri {
+        let Self { fragment, scheme, authority, path, query } = self;
+        if fragment != u16::MAX {
+            panic!("cannot contain fragment")
+        }
+        Uri { value, scheme, authority, path, query  }
+    }
+}
+
+const MAX_FRAG: u16 = u16::MAX;
+
+pub const fn parse_const(bytes: &[u8]) -> Result<UriIndex, UriError> {
+    use self::UriIndex as Uri;
+
+    let len = u16!(bytes.len());
+    let Some(&prefix) = bytes.first() else {
+        return Err(UriError::Incomplete)
+    };
+
+    let mut cursor = tcio::bytes::Cursor::new(bytes);
+    let mut fragment = MAX_FRAG;
+    let mut scheme = uri::SCHEME_NONE;
+    let mut authority = uri::AUTH_NONE;
+
+    if prefix != b'/' {
+        simd::match_scheme!(cursor else {
+            return Err(UriError::Incomplete)
+        });
+
+        scheme = u16!(cursor.steps(), uri::MAX_SCHEME as usize);
+
+        match cursor.next() {
+            Some(b':') => {},
+            Some(_) => return Err(UriError::Char),
+            None => return Err(UriError::Incomplete),
+        }
+
+        match cursor.peek_chunk() {
+            Some(b"//") => {
+                // authority
+                cursor.advance(2);
+
+                simd::match_authority!(cursor);
+
+                authority = u16!(cursor.steps(), uri::MAX_AUTH as usize);
+
+                match cursor.peek() {
+                    Some(b'/' | b'?' | b'#') => {},
+                    Some(_) => return Err(UriError::Char),
+                    None => return Ok(Uri {
+                        fragment,
+                        scheme,
+                        authority,
+                        path: len,
+                        query: len,
+                    })
+                }
+            },
+            Some(_) => authority = uri::AUTH_NONE,
+            None => return Ok(Uri {
+                fragment,
+                scheme,
+                authority: len,
+                path: len,
+                query: len,
+            })
+        };
+    }
+
+    let path = u16!(cursor.steps());
+
+    simd::match_path!(cursor);
+
+    let query = match cursor.next() {
+        Some(b'?') => {
+            let query = u16!(cursor.steps());
+
+            simd::match_query!(cursor);
+
+            match cursor.peek() {
+                Some(b'#') => fragment = u16!(cursor.steps(), MAX_FRAG as usize),
+                Some(_) => return Err(UriError::Char),
+                None => {},
+            }
+
+            query
+        },
+        Some(b'#') => {
+            fragment = u16!(cursor.steps(), MAX_FRAG as usize);
+            len
+        },
+        Some(_) => return Err(UriError::Char),
+        None => len,
+    };
+
+    Ok(Uri {
+        fragment,
+        scheme,
+        authority,
+        path,
+        query,
+    })
+}

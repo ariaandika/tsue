@@ -8,6 +8,16 @@ pub enum UriError {
     Char,
 }
 
+impl UriError {
+    pub(crate) const fn panic_const(&self) -> ! {
+        match self {
+            UriError::Incomplete => panic!("data is incomplete"),
+            UriError::TooLong => panic!("data is too long"),
+            UriError::Char => panic!("invalid character"),
+        }
+    }
+}
+
 impl std::error::Error for UriError { }
 
 impl std::fmt::Display for UriError {
