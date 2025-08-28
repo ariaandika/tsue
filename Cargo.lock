@@ -166,7 +166,7 @@ dependencies = [
 [[package]]
 name = "tcio"
 version = "0.1.4"
-source = "git+https://github.com/ariaandika/tcio#968ea453f9fb0d6ce756fc5289f217a8735eb061"
+source = "git+https://github.com/ariaandika/tcio#0b866b0079d2bd4ffbb69a00980fab872c4998ac"
 dependencies = [
  "tokio",
 ]
