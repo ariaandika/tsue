@@ -111,21 +111,26 @@ fn parse(mut bytes: Bytes) -> Result<Uri, UriError> {
                 // authority
                 cursor.advance(2);
 
-                simd::match_authority!(cursor);
+                if cursor.peek() == Some(b'/') {
+                    authority = uri::AUTH_NONE
 
-                authority = u16!(cursor.steps(), uri::MAX_AUTH as usize);
+                } else {
+                    simd::match_authority!(cursor);
 
-                match cursor.peek() {
-                    Some(b'/' | b'?' | b'#') => {},
-                    Some(_) => return Err(UriError::Char),
-                    None => return Ok(Uri {
-                        // SAFETY: `match_*` also guarantee valid ASCII
-                        value: unsafe { ByteStr::from_utf8_unchecked(bytes) },
-                        scheme,
-                        authority,
-                        path: len,
-                        query: len,
-                    })
+                    authority = u16!(cursor.steps(), uri::MAX_AUTH as usize);
+
+                    match cursor.peek() {
+                        Some(b'/' | b'?' | b'#') => {},
+                        Some(_) => return Err(UriError::Char),
+                        None => return Ok(Uri {
+                            // SAFETY: `match_*` also guarantee valid ASCII
+                            value: unsafe { ByteStr::from_utf8_unchecked(bytes) },
+                            scheme,
+                            authority,
+                            path: len,
+                            query: len,
+                        })
+                    }
                 }
             },
             Some(_) => authority = uri::AUTH_NONE,
