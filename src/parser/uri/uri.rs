@@ -26,20 +26,50 @@ impl Uri {
     /// Returns the authority as `str`, e.g: `example.com:80`.
     #[inline]
     pub fn authority_str(&self) -> Option<&str> {
-        // TODO: handle special scheme bitflag
-        match (self.scheme, self.authority) {
-            (self::SCHEME_NONE, _) | (_, self::AUTH_NONE) => None,
-            (scheme, auth) => {
-                // // `3` here is '://' if there is scheme
-                // let sc = match scheme {
-                //     self::SCHEME_HTTP => 4 + 3,
-                //     self::SCHEME_HTTPS => 5 + 3,
-                //     len => len as usize + 3,
-                // };
-                let sc = scheme as usize + "://".len();
-                Some(&self.value[sc..auth as usize])
-            },
+        match self.authority {
+            self::AUTH_NONE => None,
+            _ => {
+                let offset = match self.scheme {
+                    self::SCHEME_HTTP |
+                    self::SCHEME_HTTPS => 0,
+                    len => len as usize + "://".len(),
+                };
+                Some(&self.value[offset..self.authority as usize])
+            }
         }
+    }
+
+    /// Returns the authority host.
+    #[inline]
+    pub fn host(&self) -> Option<&str> {
+        self.authority_str().map(|auth| match auth.find('@') {
+            Some(idx) => &auth[idx..],
+            None => auth,
+        })
+    }
+
+    /// Returns the authority hostname.
+    #[inline]
+    pub fn hostname(&self) -> Option<&str> {
+        self.host()
+            .and_then(|e| e.rfind(':'))
+            .map(|idx| &self.value[idx..])
+    }
+
+    /// Returns the authority host.
+    #[inline]
+    pub fn port(&self) -> Option<u16> {
+        self.host()
+            .and_then(|e| e.rfind(':'))
+            .and_then(|idx| self.value[..idx].parse().ok())
+    }
+
+    /// Returns the authority userinfo.
+    #[inline]
+    pub fn userinfo(&self) -> Option<&str> {
+        self.authority_str()
+            .and_then(|auth| auth.find('@'))
+            .map(|idx| &self.value[..idx])
     }
 
     /// Returns the path as `str`, e.g: `/over/there`.
@@ -54,7 +84,7 @@ impl Uri {
         if self.query as usize == self.value.len() {
             None
         } else {
-            Some(&self.value[(self.query + 1) as usize..])
+            Some(&self.value[self.query as usize..])
         }
     }
 
@@ -64,11 +94,13 @@ impl Uri {
         &self.value[self.path as usize..]
     }
 
-    /// Returns the str representation.
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        self.value.as_str()
-    }
+    // scheme can be a bitflag value, making the contained str incomplete
+    //
+    // /// Returns the str representation.
+    // #[inline]
+    // pub const fn as_str(&self) -> &str {
+    //     self.value.as_str()
+    // }
 }
 
 impl Default for Uri {
@@ -82,7 +114,13 @@ impl Default for Uri {
 
 impl std::fmt::Display for Uri {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        match self.scheme {
+            self::SCHEME_NONE => {},
+            self::SCHEME_HTTP => f.write_str("http:")?,
+            self::SCHEME_HTTPS => f.write_str("https:")?,
+            _ => {},
+        }
+        f.write_str(&self.value)
     }
 }
 
