@@ -42,34 +42,49 @@ impl Uri {
     /// Returns the authority host.
     #[inline]
     pub fn host(&self) -> Option<&str> {
-        self.authority_str().map(|auth| match auth.find('@') {
-            Some(idx) => &auth[idx..],
-            None => auth,
-        })
+        match self.authority_str() {
+            Some(auth) => match auth.find('@') {
+                Some(idx) => Some(&auth[idx + 1..]),
+                None => Some(auth),
+            },
+            None => None,
+        }
     }
 
     /// Returns the authority hostname.
     #[inline]
     pub fn hostname(&self) -> Option<&str> {
-        self.host()
-            .and_then(|e| e.rfind(':'))
-            .map(|idx| &self.value[idx..])
+        match self.host() {
+            Some(host) => match host.rfind(':') {
+                Some(idx) => Some(&host[..idx]),
+                None => Some(host),
+            },
+            None => None,
+        }
     }
 
-    /// Returns the authority host.
+    /// Returns the authority port.
     #[inline]
     pub fn port(&self) -> Option<u16> {
-        self.host()
-            .and_then(|e| e.rfind(':'))
-            .and_then(|idx| self.value[..idx].parse().ok())
+        match self.host() {
+            Some(host) => match host.rfind(':') {
+                Some(col) => host[col + 1..].parse().ok(),
+                None => None,
+            },
+            None => None,
+        }
     }
 
     /// Returns the authority userinfo.
     #[inline]
     pub fn userinfo(&self) -> Option<&str> {
-        self.authority_str()
-            .and_then(|auth| auth.find('@'))
-            .map(|idx| &self.value[..idx])
+        match self.authority_str() {
+            Some(auth) => match auth.find('@') {
+                Some(idx) => Some(&auth[..idx]),
+                None => None,
+            },
+            None => None,
+        }
     }
 
     /// Returns the path as `str`, e.g: `/over/there`.
@@ -84,7 +99,7 @@ impl Uri {
         if self.query as usize == self.value.len() {
             None
         } else {
-            Some(&self.value[self.query as usize..])
+            Some(&self.value[self.query as usize + 1..])
         }
     }
 

@@ -144,9 +144,10 @@ fn parse(mut bytes: Bytes) -> Result<Uri, UriError> {
 
     simd::match_path!(cursor);
 
-    let query = match cursor.next() {
+    let query = match cursor.peek() {
         Some(b'?') => {
             let query = u16!(cursor.steps());
+            cursor.advance(1);
 
             simd::match_query!(cursor);
 
@@ -159,7 +160,6 @@ fn parse(mut bytes: Bytes) -> Result<Uri, UriError> {
             query
         },
         Some(b'#') => {
-            cursor.step_back(1);
             cursor.truncate_buf();
             len
         },
