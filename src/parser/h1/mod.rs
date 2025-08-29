@@ -1,8 +1,12 @@
 mod simd;
 
-pub mod request;
-pub mod header;
-pub mod error;
+mod request;
+mod header;
+mod error;
+
+pub use request::Reqline;
+pub use header::Header;
+pub use error::Error;
 
 #[cfg(test)]
 mod test;

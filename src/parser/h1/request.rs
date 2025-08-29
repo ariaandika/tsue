@@ -25,6 +25,13 @@ pub struct Reqline {
     pub version: Version,
 }
 
+impl Reqline {
+    #[inline]
+    pub fn matches(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
+        match_reqline(bytes)
+    }
+}
+
 // ===== Parsing Request Line =====
 //
 // #1 SIMD Find CRLF, find Method, find backward Version
@@ -50,7 +57,7 @@ pub struct Reqline {
 // - parsing URI also check for separator
 // - merged logic code
 
-pub fn parse_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
+fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
     let mut cursor = bytes.cursor_mut();
 
     simd::match_crlf!(cursor);

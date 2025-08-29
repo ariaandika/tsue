@@ -1,7 +1,7 @@
 use std::task::Poll;
 use tcio::bytes::BytesMut;
 
-use crate::http::{Method, Version};
+// use crate::http::{Method, Version};
 
 macro_rules! ready {
     ($e:expr) => {
@@ -14,17 +14,17 @@ macro_rules! ready {
 
 #[test]
 fn test_parse_reqline() {
-    use super::request::parse_reqline;
+    use super::Reqline;
 
     macro_rules! test {
         (#[pending] $input:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            assert!(parse_reqline(&mut bytes).is_pending());
+            assert!(Reqline::matches(&mut bytes).is_pending());
             assert_eq!(bytes.as_slice(), $input);
         };
         (#[error] $input:expr) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            match parse_reqline(&mut bytes) {
+            match Reqline::matches(&mut bytes) {
                 Poll::Ready(result) => result.unwrap_err(),
                 Poll::Pending => panic!("line {}, unexpected Poll::Pending",line!()),
             }
@@ -101,12 +101,12 @@ fn test_parse_reqline() {
 
 #[test]
 fn test_parse_header() {
-    use super::header::parse_header;
+    use super::Header;
 
     macro_rules! test {
         (#[end] $input:literal, $remain:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            assert!(ready!(parse_header(&mut bytes)).unwrap().is_none());
+            assert!(ready!(Header::matches(&mut bytes)).unwrap().is_none());
             assert_eq!(bytes.as_slice(), $remain);
         };
         (#[pending] $input:literal) => {
@@ -128,7 +128,7 @@ fn test_parse_header() {
         } => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
 
-            let header = ready!(parse_header(&mut bytes)).unwrap().unwrap();
+            let header = ready!(Header::matches(&mut bytes)).unwrap().unwrap();
 
             assert_eq!(&header.name, &$name[..]);
             assert_eq!(&header.value, &$value[..]);

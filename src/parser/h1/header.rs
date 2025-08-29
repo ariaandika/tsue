@@ -18,7 +18,14 @@ pub struct Header {
     pub value: BytesMut,
 }
 
-pub fn parse_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
+impl Header {
+    #[inline]
+    pub fn matches(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
+        matches_header(bytes)
+    }
+}
+
+fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
     let mut cursor = bytes.cursor_mut();
 
     match cursor.next() {
