@@ -75,7 +75,7 @@ impl Uri {
 /// - cannot starts with authority, so `example.com:80/users/all` will treat `example.com` as
 ///   scheme
 /// - fragment will be trimmed
-pub fn parse(mut bytes: Bytes) -> Result<Uri, UriError> {
+fn parse(mut bytes: Bytes) -> Result<Uri, UriError> {
     let len = u16!(bytes.len());
     let Some(&prefix) = bytes.first() else {
         return Err(UriError::Incomplete)
@@ -186,9 +186,15 @@ impl Uri {
     ///
     /// Panics if [`Uri::try_from_shared`] returns [`Err`].
     #[inline]
-    pub const fn from_static(value: &'static str) -> Self {
+    pub const fn from_static(mut value: &'static str) -> Self {
         match parse_const(value.as_bytes()) {
-            Ok(idx) => idx.uri(ByteStr::from_static(value)),
+            Ok(idx) => {
+                let UriIndex { fragment, scheme, authority, path, query } = idx;
+                if fragment != MAX_FRAG {
+                    value = value.split_at(fragment as usize).0;
+                }
+                Self { value: ByteStr::from_static(value), scheme, authority, path, query  }
+            },
             Err(err) => err.panic_const(),
         }
     }
@@ -201,16 +207,6 @@ pub struct UriIndex {
     authority: u16,
     path: u16,
     query: u16,
-}
-
-impl UriIndex {
-    const fn uri(self, value: ByteStr) -> Uri {
-        let Self { fragment, scheme, authority, path, query } = self;
-        if fragment != u16::MAX {
-            panic!("cannot contain fragment")
-        }
-        Uri { value, scheme, authority, path, query  }
-    }
 }
 
 const MAX_FRAG: u16 = u16::MAX;

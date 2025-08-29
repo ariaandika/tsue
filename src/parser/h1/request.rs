@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     http::{Method, Version},
-    parser::uri::{self, Uri},
+    parser::uri::Uri,
 };
 
 macro_rules! err {
@@ -106,7 +106,7 @@ pub fn parse_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
         ok
     };
 
-    match uri::parse(reqline.freeze()) {
+    match Uri::try_from_shared(reqline.freeze()) {
         Ok(target) => Poll::Ready(Ok(Reqline {
             method,
             target,

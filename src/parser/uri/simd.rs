@@ -36,21 +36,6 @@ macro_rules! byte_map {
             bytes
         };
     };
-    ($byte:ident, $pat:pat) => {{
-        const LUT: [bool; 256] = {
-            let mut bytes = [false; 256];
-            let mut byte = 0;
-            loop {
-                byte += 1;
-                bytes[byte as usize] = matches!(byte, $pat);
-                if byte == 255 {
-                    break;
-                }
-            }
-            bytes
-        };
-        LUT[$byte as usize]
-    }};
     ($(#[$meta:meta])* pub const fn $fnid:ident($pat:pat)) => {
         $(#[$meta])*
         #[inline(always)]
@@ -59,11 +44,11 @@ macro_rules! byte_map {
                 let mut bytes = [false; 256];
                 let mut byte = 0;
                 loop {
-                    byte += 1;
                     bytes[byte as usize] = matches!(byte, $pat);
                     if byte == 255 {
                         break;
                     }
+                    byte += 1;
                 }
                 bytes
             };
@@ -301,53 +286,4 @@ macro_rules! match_query {
     };
 }
 
-/// `cursor.next()` returns invalid character or None.
-///
-/// invalid character is not any of: b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.'
-///
-/// no simd, scheme is generally short, and too complicated for simd logic.
-macro_rules! validate_scheme {
-    ($value:ident else { $err:expr }) => {
-        let mut cursor = $value.cursor();
-
-        while let Some(byte) = cursor.next() {
-            if !simd::byte_map!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'-' | b'.') {
-                cursor.step_back(1);
-                $err
-            }
-        }
-    };
-}
-
-/// `cursor.next()` returns '@', invalid character or None.
-///
-/// invalid character is: b'#' | b'/' | b'<' | b'>' | b'?' | b'\[' | b'\\' | b']' | b'^' |
-/// b'`' | b'{' | b'|' | b'}'
-macro_rules! validate_authority {
-    ($cursor:ident) => {{
-        let mut col = None;
-
-        while let Some(byte) = $cursor.next() {
-            simd::byte_map! {
-                const PAT =
-                    #[default(false)]
-                    #[true](
-                        b'#' | b'/' | b'<' | b'>' | b'?' | b'[' | b'\\' |
-                        b']' | b'^' | b'`' | b'{' | b'|' | b'}' | b'@'
-                    )
-            }
-
-            if PAT[byte as usize] {
-                $cursor.step_back(1);
-                break;
-            } else if byte == b':' {
-                col = Some($cursor.steps())
-            }
-        }
-
-        col
-    }};
-}
-
 pub(crate) use {byte_map, match_authority, match_path, match_query, match_scheme};
-
