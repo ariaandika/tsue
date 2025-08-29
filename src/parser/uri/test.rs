@@ -1,170 +1,112 @@
-use tcio::bytes::Bytes;
-
-#[test]
-fn test_match_uri_leader() {
-    use super::simd::{self, match_scheme};
-
-    macro_rules! test {
-        {
-            input: $i:expr,
-            next: $n:expr,
-            remain: $r:expr,
-        } => {
-            {
-                let bytes = Bytes::from_static($i);
-                let mut cursor = bytes.cursor();
-                match_scheme!(cursor else { unreachable!() });
-                assert_eq!(cursor.next(), $n);
-                assert_eq!(cursor.as_slice(), $r);
-            }
-        };
-    }
-
-    test! {
-        input: b"uri+scheme://example.com",
-        next: Some(b':'),
-        remain: b"//example.com",
-    }
-    test! {
-        input: b"not scheme://example.com",
-        next: Some(b' '),
-        remain: b"scheme://example.com",
-    }
-    test! {
-        input: b"scheme:\x7f//example.com",
-        next: Some(b':'),
-        remain: b"\x7f//example.com",
-    }
-    test! {
-        input: b"scheme\x7f://example.com",
-        next: Some(b'\x7f'),
-        remain: b"://example.com",
-    }
-}
-
-#[test]
-fn test_parse_uri_origin() {
-    use super::simd;
-
-    macro_rules! test {
-        {
-            input: $i:expr,
-            next: $n:expr,
-            remain: $r:expr,
-        } => {
-            {
-                let bytes = Bytes::from_static($i);
-                let mut cursor = bytes.cursor();
-                simd::match_path!(cursor);
-                assert_eq!(cursor.next(), $n);
-                assert_eq!(cursor.as_slice(), $r);
-            }
-        };
-    }
-
-    test! {
-        input: b"/users/all",
-        next: None,
-        remain: b"",
-    }
-    test! {
-        input: b"/users/all?filter=available",
-        next: Some(b'?'),
-        remain: b"filter=available",
-    }
-    test! {
-        input: b"/users/all#additional-section-4",
-        next: Some(b'#'),
-        remain: b"additional-section-4",
-    }
-    test! {
-        input: b"/users/all?filter=available#additional-section-4",
-        next: Some(b'?'),
-        remain: b"filter=available#additional-section-4",
-    }
-    test! {
-        input: b"/users/all#additional-section-4?filter=available",
-        next: Some(b'#'),
-        remain: b"additional-section-4?filter=available",
-    }
-    test! {
-        input: b"/users/one for?filter=available",
-        next: Some(b' '),
-        remain: b"for?filter=available",
-    }
-    test! {
-        input: b"/users/one\x1ffor?filter=available",
-        next: Some(0x1f),
-        remain: b"for?filter=available",
-    }
-}
 
 #[test]
 fn test_uri_parse() {
-    use super::{parse, Target};
+    use super::Uri;
 
-    macro_rules! test_origin {
-        (#[error] input: $i:expr) => {
-            assert!(parse(Bytes::copy_from_slice($i.as_bytes())).is_err());
+    macro_rules! test {
+        {
+            #[error]
+            $uri:literal
+        } => {
+            assert!(Uri::try_copy_from($uri).is_err());
         };
         {
-            input: $i:expr,
-            path: $p:expr,
-            query: $q:expr,
+            $uri:literal;
+            $scheme:literal;
+            $(#[$no:tt])?
+            $auth:expr => {
+                $uinfo:expr;
+                $host:expr;
+                $hostname:expr;
+                $port:expr;
+            };
+            $pq:literal;
+            $path:literal;
+            $query:expr;
         } => {
-            todo!()
-            // let Target::Origin(origin) = parse(Bytes::copy_from_slice($i.as_bytes())).unwrap() else {
-            //     unreachable!("parse uri is not an origin form")
-            // };
-            // assert_eq!(origin.path(), $p);
-            // assert_eq!(origin.query(), $q);
+            let uri = Uri::try_copy_from($uri).unwrap();
+            dbg!(&uri);
+            assert_eq!(uri.scheme(), $scheme, "scheme");
+            assert_eq!(uri.authority_str(), $auth, "authority");
+            assert_eq!(uri.userinfo(), $uinfo, "userinfo");
+            assert_eq!(uri.host(), $host, "host");
+            assert_eq!(uri.hostname(), $hostname, "hostname");
+            assert_eq!(uri.port(), $port, "port");
+            assert_eq!(uri.path_and_query(), $pq, "path and query");
+            assert_eq!(uri.path(), $path, "path");
+            assert_eq!(uri.query(), $query, "query");
         };
+        {
+            $uri:literal;
+            $scheme:literal;
+            $auth:expr => { };
+            $pq:literal;
+            $path:literal;
+            $query:expr;
+        } => {
+            test! {
+                $uri;
+                $scheme;
+                $auth => { None; None; None; None; };
+                $pq;
+                $path;
+                $query;
+            }
+        }
     }
 
-    test_origin! {
-        input: "/users/all",
-        path: "/users/all",
-        query: None,
-    }
-    test_origin! {
-        input: "/",
-        path: "/",
-        query: None,
-    }
-    test_origin! {
-        input: "/users/all?query=1&filter=available",
-        path: "/users/all",
-        query: Some("query=1&filter=available"),
-    }
-    test_origin! {
-        input: "/users/all?",
-        path: "/users/all",
-        query: None,
-    }
-    test_origin! {
-        input: "?query=1&filter=available",
-        path: "/",
-        query: Some("query=1&filter=available"),
-    }
-    test_origin! {
-        input: "/users/all#additional-section-4",
-        path: "/users/all",
-        query: None,
-    }
-    test_origin! {
-        input: "/users/all#",
-        path: "/users/all",
-        query: None,
-    }
-    test_origin! {
-        input: "/users/all?query=1&filter=available#additional-section-4",
-        path: "/users/all",
-        query: Some("query=1&filter=available"),
+    // path only
+
+    test! {
+        b"/users/all?filter=favorite&page=4#additional-section-4";
+        "";
+        None => { };
+        "/users/all?filter=favorite&page=4";
+        "/users/all";
+        Some("filter=favorite&page=4");
     }
 
-    test_origin! {
-        #[error]
-        input: ""
+    // general form
+
+    test! {
+        b"http://user:pass@example.com:443/users/all?filter=favorite&page=4#additional-section-4";
+        "http";
+        Some("user:pass@example.com:443") => {
+            Some("user:pass");
+            Some("example.com:443");
+            Some("example.com");
+            Some(443);
+        };
+        "/users/all?filter=favorite&page=4";
+        "/users/all";
+        Some("filter=favorite&page=4");
     }
+
+    test! {
+        b"file:///home/users/downloads";
+        "file";
+        None => { };
+        "/home/users/downloads";
+        "/home/users/downloads";
+        None;
+    }
+
+    test! {
+        b"/users/all?filter=favorite&page=4#additional-section-4";
+        "";
+        None => { };
+        "/users/all?filter=favorite&page=4";
+        "/users/all";
+        Some("filter=favorite&page=4");
+    }
+
+    // errors
+
+    test!(#[error] b"");
+
+    test!(#[error] b"http://exa mple.com/path");
+    // test!(#[error] b"http://example.com:80a/path");
+    // test!(#[error] b"http://user@pass:word@example.com");
+    // test!(#[error] b"http://example.com:999999/path");
 }
 
