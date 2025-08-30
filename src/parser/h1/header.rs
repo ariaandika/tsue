@@ -29,10 +29,6 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
     let mut cursor = bytes.cursor_mut();
 
     match cursor.next() {
-        Some(b'\n') => {
-            bytes.advance(1);
-            return Poll::Ready(Ok(None));
-        }
         Some(b'\r') => match cursor.next() {
             Some(b'\n') => {
                 bytes.advance(2);
@@ -41,6 +37,10 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
             Some(_) => return err!(InvalidSeparator),
             None => return Poll::Pending,
         },
+        Some(b'\n') => {
+            bytes.advance(1);
+            return Poll::Ready(Ok(None));
+        }
         Some(_) => {}
         None => return Poll::Pending,
     }
@@ -49,14 +49,15 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
 
     simd::match_crlf!(cursor);
 
-    let crlf = match cursor.next().unwrap() {
-        b'\n' => 1,
-        b'\r' => match cursor.next() {
+    let crlf = match cursor.next() {
+        Some(b'\r') => match cursor.next() {
             Some(b'\n') => 2,
             Some(_) => return err!(InvalidSeparator),
             None => return Poll::Pending,
         },
-        _ => return err!(InvalidChar),
+        Some(b'\n') => 1,
+        Some(_) => return err!(InvalidChar),
+        None => return Poll::Pending,
     };
 
     let mut header_line = cursor.split_to();

@@ -28,7 +28,7 @@ pub struct Target {
     pub kind: Kind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     Asterisk,
     Origin,
@@ -73,14 +73,15 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
 
     simd::match_crlf!(cursor);
 
-    let crlf = match cursor.next().unwrap() {
-        b'\n' => 1,
-        b'\r' => match cursor.next() {
+    let crlf = match cursor.next() {
+        Some(b'\r') => match cursor.next() {
             Some(b'\n') => 2,
             Some(_) => return err!(InvalidSeparator),
             None => return Poll::Pending,
         },
-        _ => return err!(InvalidSeparator),
+        Some(b'\n') => 1,
+        Some(_) => return err!(InvalidSeparator),
+        None => return Poll::Pending,
     };
 
     let mut reqline = cursor.split_to();
@@ -135,6 +136,10 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
             _ => Kind::Absolute,
         }
     };
+
+    simd::validate_target!(reqline else {
+        return err!(InvalidChar)
+    });
 
     let target = Target {
         value: reqline,
