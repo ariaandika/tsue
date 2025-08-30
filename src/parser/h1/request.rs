@@ -5,10 +5,7 @@ use super::{
     error::{Error, ErrorKind},
     simd,
 };
-use crate::{
-    http::{Method, Version},
-    parser::uri::Uri,
-};
+use crate::http::{Method, Version};
 
 macro_rules! err {
     ($variant:ident) => {
@@ -21,8 +18,22 @@ const VERSION_SIZE: usize = b"HTTP/1.1".len();
 #[derive(Debug)]
 pub struct Reqline {
     pub method: Method,
-    pub target: Uri,
+    pub target: Target,
     pub version: Version,
+}
+
+#[derive(Debug)]
+pub struct Target {
+    pub value: BytesMut,
+    pub kind: Kind,
+}
+
+#[derive(Debug)]
+pub enum Kind {
+    Asterisk,
+    Origin,
+    Absolute,
+    Authority,
 }
 
 impl Reqline {
@@ -81,7 +92,7 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
         loop {
             match cursor.next() {
                 Some(b' ') => break,
-                Some(_) => {},
+                Some(_) => {}
                 None => return err!(InvalidSeparator),
             }
         }
@@ -113,13 +124,27 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
         ok
     };
 
-    match Uri::try_from_shared(reqline.freeze()) {
-        Ok(target) => Poll::Ready(Ok(Reqline {
-            method,
-            target,
-            version,
-        })),
-        Err(err) => Poll::Ready(Err(err.into())),
-    }
+    // request target
+
+    let kind = if method == Method::CONNECT {
+        Kind::Authority
+    } else {
+        match reqline.as_slice() {
+            b"*" => Kind::Asterisk,
+            [b'/', ..] => Kind::Origin,
+            _ => Kind::Absolute,
+        }
+    };
+
+    let target = Target {
+        value: reqline,
+        kind,
+    };
+
+    Poll::Ready(Ok(Reqline {
+        method,
+        target,
+        version,
+    }))
 }
 

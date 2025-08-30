@@ -33,7 +33,7 @@ pub enum ErrorKind {
 impl std::error::Error for Error {}
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match &self.kind {
+        match self.kind {
             ErrorKind::UnknownMethod => f.write_str("unknown method"),
             ErrorKind::TooShort => f.write_str("request line too short"),
             ErrorKind::TooLong => f.write_str("request line too long"),
