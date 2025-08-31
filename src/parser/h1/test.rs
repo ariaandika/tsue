@@ -1,7 +1,8 @@
 use std::task::Poll;
 use tcio::bytes::BytesMut;
 
-// use crate::http::{Method, Version};
+use super::Kind;
+use crate::http::{Method, Version};
 
 macro_rules! ready {
     ($e:expr) => {
@@ -31,66 +32,94 @@ fn test_parse_reqline() {
         };
         {
             $input:expr;
-            $m:ident, $u:expr, $v:ident;
+            $m:ident, [$k:ident,$u:expr], $v:ident;
             $rest:expr
         } => {
-            todo!()
-            // let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            //
-            // let reqline = ready!(parse_reqline(&mut bytes)).unwrap();
-            //
-            // assert_eq!(reqline.method, Method::$m);
-            // let Target::Origin(target) = reqline.target else { unreachable!() };
-            // assert_eq!(target.path_and_query().as_bytes(), $u);
-            // assert_eq!(reqline.version, Version::$v);
-            // assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");
+            let mut bytes = BytesMut::copy_from_slice(&$input[..]);
+
+            let reqline = ready!(Reqline::matches(&mut bytes)).unwrap();
+
+            assert_eq!(reqline.method, Method::$m);
+            assert_eq!(reqline.target.kind, Kind::$k);
+            assert_eq!(reqline.target.value.as_slice(), $u);
+            assert_eq!(reqline.version, Version::$v);
+            assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");
         };
     }
 
     test! {
         b"GET / HTTP/1.1\r\n";
-        GET, b"/", HTTP_11;
+        GET, [Origin, b"/"], HTTP_11;
         b""
     };
     test! {
         b"GET / HTTP/1.1\n";
-        GET, b"/", HTTP_11;
+        GET, [Origin, b"/"], HTTP_11;
         b""
     };
     test! {
         b"GET / HTTP/1.1\r\nContent-Type: text/html\r\n";
-        GET, b"/", HTTP_11;
+        GET, [Origin, b"/"], HTTP_11;
         b"Content-Type: text/html\r\n"
     };
     test! {
         b"GET / HTTP/1.1\nContent-Type: text/html\r\n";
-        GET, b"/", HTTP_11;
+        GET, [Origin, b"/"], HTTP_11;
         b"Content-Type: text/html\r\n"
     };
     test! {
         b"GET /index.html HTTP/1.1\r\n";
-        GET, b"/index.html", HTTP_11;
+        GET, [Origin, b"/index.html"], HTTP_11;
         b""
     };
     test! {
         b"GET /search?search=adequate&filter=available HTTP/1.1\r\n";
-        GET, b"/search?search=adequate&filter=available", HTTP_11;
+        GET, [Origin, b"/search?search=adequate&filter=available"], HTTP_11;
         b""
     };
     test! {
+        b"GET /docs#section1 HTTP/1.1\r\nReferer: https://example.com\r\n";
+        GET, [Origin, b"/docs#section1"], HTTP_11;
+        b"Referer: https://example.com\r\n"
+    };
+    test! {
         b"OPTIONS * HTTP/2.0\r\nContent-Type: text/html\r\n";
-        OPTIONS, b"*", HTTP_2;
+        OPTIONS, [Asterisk, b"*"], HTTP_2;
         b"Content-Type: text/html\r\n"
     };
+    test! {
+        b"GET /old-page HTTP/1.0\r\nConnection: close\r\n";
+        GET, [Origin, b"/old-page"], HTTP_10;
+        b"Connection: close\r\n"
+    };
+    test! {
+        b"GET /path%20with%20spaces HTTP/1.1\r\nContent-Type: text/plain\r\n";
+        GET, [Origin, b"/path%20with%20spaces"], HTTP_11;
+        b"Content-Type: text/plain\r\n"
+    };
+    test! {
+        b"GET /user/john.doe@example.com HTTP/1.1\r\nAuth";
+        GET, [Origin, b"/user/john.doe@example.com"], HTTP_11;
+        b"Auth"
+    };
+    test! {
+        b"GET /very/long/path/that/goes/on/for/many/characters/and/should/be/parsed/correctly HTTP/1.1\r\nX-Custom: value\r\n";
+        GET, [Origin, b"/very/long/path/that/goes/on/for/many/characters/and/should/be/parsed/correctly"], HTTP_11;
+        b"X-Custom: value\r\n"
+    };
+
     // Error
     test!(#[error] b"GET / HTTP/1.1\rContent-Ty");
     test!(#[error] b"OPTIONS /users/all HTTP/1.1\rContent-Ty");
-    test!(#[error] b" / HTTP/1.1\r\nContent-Ty");
-    test!(#[error] b"GET /HTTP/1.1\n");
+
     test!(#[error] b"GET\n");
-    test!(#[error] b"HTTP/1.1\n");
-    test!(#[error] b"GETHTTP/1.1\n");
+    test!(#[error] b"GET /\n");
     test!(#[error] b"GET HTTP/1.1\n");
+    test!(#[error] b"GETHTTP/1.1\n");
+
+    test!(#[error] b"GET /users /all HTTP/1.1\n");
+    test!(#[error] b"GET /user\x7F/all HTTP/1.1\n");
+    test!(#[error] b"GET /user\x80/all HTTP/1.1\n");
     // Pending
     test!(#[pending] b"");
     test!(#[pending] b"GET/\x00");
@@ -116,8 +145,8 @@ fn test_parse_header() {
         };
         (#[error] $input:expr) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            match parse_reqline(&mut bytes) {
-                Poll::Ready(result) => result.unwrap_err(),
+            match Header::matches(&mut bytes) {
+                Poll::Ready(result) => assert!(result.is_err()),
                 Poll::Pending => panic!("line {}, unexpected Poll::Pending",line!()),
             }
         };
@@ -127,9 +156,7 @@ fn test_parse_header() {
             $rest:expr
         } => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-
             let header = ready!(Header::matches(&mut bytes)).unwrap().unwrap();
-
             assert_eq!(&header.name, &$name[..]);
             assert_eq!(&header.value, &$value[..]);
             assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");
@@ -142,23 +169,15 @@ fn test_parse_header() {
         b"Content-Type: text/html\r\n\r\n"
     }
 
-    test!(#[end] b"\r\nHello World!", b"Hello World!");
+    test! {
+        b"Content-Length: 1224\nContent-Type: text/html\n\r\n";
+        b"Content-Length", b"1224",
+        b"Content-Type: text/html\n\r\n"
+    }
 
-    // const HEADERS: &[u8] = b"Content-Length: 1224\r\nContent-Type: text/html\r\n\r\n";
-    //
-    // let mut bytes = BytesMut::copy_from_slice(b"Content-Length\r");
-    // assert!(parse_header(&mut bytes).is_pending());
-    //
-    // let mut bytes = BytesMut::copy_from_slice(HEADERS);
-    //
-    // let header = ready!(parse_header(&mut bytes)).unwrap().unwrap();
-    // assert_eq!(header.name.as_slice(), b"Content-Length");
-    // assert_eq!(header.value.as_slice(), b"1224");
-    //
-    // let header = ready!(parse_header(&mut bytes)).unwrap().unwrap();
-    // assert_eq!(header.name.as_slice(), b"Content-Type");
-    // assert_eq!(header.value.as_slice(), b"text/html");
-    //
-    // assert!(ready!(parse_header(&mut bytes)).unwrap().is_none());
+    // test!(#[error] b"Content\x7FLength: 1224\nContent-Type: text/html\n\r\n");
+    // test!(#[error] b"Content\x80Length: 1224\nContent-Type: text/html\n\r\n");
+
+    test!(#[end] b"\r\nHello World!", b"Hello World!");
 }
 
