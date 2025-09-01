@@ -1,11 +1,20 @@
 use std::task::Poll;
-use tcio::bytes::BytesMut;
+use tcio::bytes::{Buf, BytesMut};
 
 use super::{
     error::{Error, ErrorKind},
     simd,
 };
 use crate::http::{Method, Version};
+
+macro_rules! ready {
+    ($e:expr) => {
+        match $e {
+            Some(ok) => ok,
+            None => return Poll::Pending
+        }
+    };
+}
 
 macro_rules! err {
     ($variant:ident) => {
@@ -44,105 +53,78 @@ impl Reqline {
 }
 
 // ===== Parsing Request Line =====
-//
-// #1 SIMD Find CRLF, find Method, find backward Version
-//
-// - fast `Pending` case
-// - cannot check for valid URI char in SIMD
-//
-// #2 Find Method, SIMD find URI, find Version
-//
-// - slightly slower `Pending` case
-// - can check for valid URI char in SIMD
-//
-// #3 SIMD Find CRLF, find Method, find backward Version, parse URI (#CURRENT)
-//
-// - fast `Pending` case
-// - parsing while checking valid URI char
-// - merged logic code
-//
-// #4 Find Method, parse URI, find Version
-//
-// - slow `Pending` case
-// - parsing while checking valid URI char
-// - parsing URI also check for separator
-// - merged logic code
 
 fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
     let mut cursor = bytes.cursor_mut();
 
-    simd::match_crlf!(cursor);
-
-    let crlf = match cursor.next() {
-        Some(b'\r') => match cursor.next() {
-            Some(b'\n') => 2,
-            Some(_) => return err!(InvalidSeparator),
-            None => return Poll::Pending,
-        },
-        Some(b'\n') => 1,
-        Some(_) => return err!(InvalidSeparator),
-        None => return Poll::Pending,
-    };
-
-    let mut reqline = cursor.split_to();
-    reqline.truncate_off(crlf);
-
-    let method = {
-        let mut cursor = reqline.cursor_mut();
+    let (method, offset) = {
+        simd::byte_map! {
+            const PAT =
+                #[default(true)]
+                #[false](b'!'..=b'~')
+        }
 
         loop {
-            match cursor.next() {
-                Some(b' ') => break,
-                Some(_) => {}
-                None => return err!(InvalidSeparator),
+            let byte = ready!(cursor.next());
+            if PAT[byte as usize] {
+                if byte == b' ' {
+                    break
+                } else {
+                    return err!(InvalidChar);
+                }
             }
         }
-        cursor.step_back(1);
 
-        let Some(ok) = Method::from_bytes(cursor.advanced_slice()) else {
-            return err!(UnknownMethod);
-        };
-        cursor.advance(1);
-        cursor.advance_buf();
+        let method = cursor.advanced_slice().split_last().unwrap().1;
 
-        ok
-    };
-
-    let version = {
-        let Some((rest, version)) = reqline.split_last_chunk::<VERSION_SIZE>() else {
-            return err!(UnsupportedVersion);
-        };
-
-        let Some(ok) = Version::from_bytes(version) else {
-            return err!(UnsupportedVersion);
-        };
-
-        if !matches!(rest.last(), Some(b' ')) {
-            return err!(InvalidSeparator);
+        match Method::from_bytes(method) {
+            Some(ok) => (ok, cursor.steps()),
+            _ => return err!(UnknownMethod),
         }
-
-        reqline.truncate_off(VERSION_SIZE + 1);
-        ok
     };
 
-    // request target
+    simd::match_target! {
+        cursor;
+        |val| match val {
+            b' ' => { },
+            _ => return err!(InvalidChar),
+        };
+        else {
+            return Poll::Pending
+        }
+    }
+
+    let version = match Version::from_bytes(ready!(cursor.next_chunk::<VERSION_SIZE>())) {
+        Some(ok) => ok,
+        None => return err!(UnsupportedVersion),
+    };
+
+    let crlf = match ready!(cursor.next()) {
+        b'\r' => match ready!(cursor.next()) {
+            b'\n' => 2,
+            _ => return err!(InvalidSeparator),
+        },
+        b'\n' => 1,
+        _ => return err!(InvalidSeparator),
+    };
+
+    let len = cursor.steps();
+    let mut target = bytes.split_to(len);
+    target.advance(offset);
+    target.truncate_off(VERSION_SIZE + 1 + crlf);
 
     let kind = if method == Method::CONNECT {
         Kind::Authority
     } else {
-        match reqline.as_slice() {
+        match target.as_slice() {
             b"*" => Kind::Asterisk,
             [b'/', ..] => Kind::Origin,
             _ => Kind::Absolute,
         }
     };
 
-    simd::validate_target!(reqline else {
-        return err!(InvalidChar)
-    });
-
     let target = Target {
-        value: reqline,
+        value: target,
         kind,
     };
 
@@ -152,4 +134,3 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
         version,
     }))
 }
-

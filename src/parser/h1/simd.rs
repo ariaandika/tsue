@@ -1,4 +1,3 @@
-#[doc(hidden)]
 macro_rules! byte_map {
     {
         const $cnid:ident =
@@ -77,44 +76,50 @@ macro_rules! match_crlf {
     };
 }
 
-macro_rules! validate_target {
-    ($value:ident else { $err:expr }) => {
-        let mut cursor = $value.cursor();
+macro_rules! match_target {
+    ($cursor:expr; |$arg:ident|$matches:expr; else { $el:expr }) => {
+        'swar: {
+            const BLOCK: usize = size_of::<usize>();
+            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+            const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
+            const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
 
-        const BLOCK: usize = size_of::<usize>();
-        const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
-        const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-        const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
-        const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
+            while let Some(chunk) = $cursor.peek_chunk() {
+                let block = usize::from_ne_bytes(*chunk);
 
-        while let Some(chunk) = cursor.peek_chunk() {
-            let block = usize::from_ne_bytes(*chunk);
+                // <= '!'
+                let lt_33 = block.wrapping_sub(BANG);
+                // 127(DEL)
+                let is_del = (block ^ DEL).wrapping_sub(LSB);
 
-            // <= '!'
-            let lt_33 = block.wrapping_sub(BANG);
-            // 127(DEL)
-            let is_del = (block ^ DEL).wrapping_sub(LSB);
+                let result = (lt_33 | is_del | block) & MSB;
+                if result != 0 {
+                    let nth = (result.trailing_zeros() / 8) as usize;
+                    $cursor.advance(nth + 1);
+                    let $arg = chunk[nth];
+                    break 'swar $matches;
+                }
 
-            let result = (lt_33 | is_del | block) & MSB;
-            if result != 0 {
-                $err
+                $cursor.advance(BLOCK);
             }
 
-            cursor.advance(BLOCK);
-        }
+            while let Some($arg) = $cursor.next() {
+                simd::byte_map! {
+                    const PAT =
+                        #[default(true)]
+                        #[false](b'!'..=b'~')
+                }
 
-        while let Some(byte) = cursor.next() {
-            simd::byte_map! {
-                const PAT =
-                    #[default(true)]
-                    #[false](b'!'..=b'~')
+                dbg!($arg);
+                if PAT[$arg as usize] {
+                    break 'swar $matches;
+                }
             }
 
-            if PAT[byte as usize] {
-                $err
-            }
+            $el
         }
     };
 }
 
-pub(crate) use {match_crlf, validate_target, byte_map};
+pub(crate) use {match_crlf, match_target, byte_map};
