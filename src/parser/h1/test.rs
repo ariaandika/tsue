@@ -20,7 +20,10 @@ fn test_parse_reqline() {
     macro_rules! test {
         (#[pending] $input:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            assert!(Reqline::matches(&mut bytes).is_pending());
+            match Reqline::matches(&mut bytes) {
+                Poll::Pending => { }
+                Poll::Ready(val) => panic!("expected `Poll::Pending`, but its ready with: {val:?}"),
+            }
             assert_eq!(bytes.as_slice(), $input);
         };
         (#[error] $input:expr) => {
@@ -116,14 +119,15 @@ fn test_parse_reqline() {
     test!(#[error] b"GET /\n");
     test!(#[error] b"GET HTTP/1.1\n");
     test!(#[error] b"GETHTTP/1.1\n");
+    test!(#[error] b"GET/\x00");
+    test!(#[error] b"GET/\r");
 
     test!(#[error] b"GET /users /all HTTP/1.1\n");
     test!(#[error] b"GET /user\x7F/all HTTP/1.1\n");
     test!(#[error] b"GET /user\x80/all HTTP/1.1\n");
+
     // Pending
     test!(#[pending] b"");
-    test!(#[pending] b"GET/\x00");
-    test!(#[pending] b"GET/\r");
     test!(#[pending] b"GET / HTTP/1.1");
     test!(#[pending] b"GET / ");
 }
