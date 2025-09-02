@@ -99,19 +99,19 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
         None => return err!(UnsupportedVersion),
     };
 
-    let crlf = match ready!(cursor.next()) {
+    let tail = match ready!(cursor.next()) {
         b'\r' => match ready!(cursor.next()) {
-            b'\n' => 2,
+            b'\n' => VERSION_SIZE + 3,
             _ => return err!(InvalidSeparator),
         },
-        b'\n' => 1,
+        b'\n' => VERSION_SIZE + 2,
         _ => return err!(InvalidSeparator),
     };
 
     let len = cursor.steps();
     let mut target = bytes.split_to(len);
     target.advance(offset);
-    target.truncate_off(VERSION_SIZE + 1 + crlf);
+    target.truncate_off(tail);
 
     let kind = if method == Method::CONNECT {
         Kind::Authority
