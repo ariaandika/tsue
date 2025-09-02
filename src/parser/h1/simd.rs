@@ -111,7 +111,6 @@ macro_rules! match_target {
                         #[false](b'!'..=b'~')
                 }
 
-                dbg!($arg);
                 if PAT[$arg as usize] {
                     break 'swar $matches;
                 }
@@ -122,4 +121,56 @@ macro_rules! match_target {
     };
 }
 
-pub(crate) use {match_crlf, match_target, byte_map};
+macro_rules! match_header_name {
+    ($cursor:expr; |$arg:ident,$nth:ident|$matches:expr; else { $el:expr }) => {
+        'swar: {
+            const BLOCK: usize = size_of::<usize>();
+            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+            const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
+            const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
+            const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
+
+            while let Some(chunk) = $cursor.peek_chunk() {
+                let block = usize::from_ne_bytes(*chunk);
+
+                // ':'
+                let is_col = (block ^ COL).wrapping_sub(LSB);
+                // <= '!'
+                let lt_33 = block.wrapping_sub(BANG);
+                // 127(DEL)
+                let is_del = (block ^ DEL).wrapping_sub(LSB);
+
+                let result = (is_col | lt_33 | is_del | block) & MSB;
+                if result != 0 {
+                    let nth = (result.trailing_zeros() / 8) as usize;
+                    let $nth = $cursor.steps() + nth;
+                    $cursor.advance(nth + 1);
+                    let $arg = chunk[nth];
+                    break 'swar $matches;
+                }
+
+                $cursor.advance(BLOCK);
+            }
+
+            while let Some($arg) = $cursor.next() {
+                simd::byte_map! {
+                    const PAT =
+                        #[default(true)]
+                        #[false](b'!'..=b'~')
+                        #[true](b':')
+                }
+
+                if PAT[$arg as usize] {
+                    // SAFETY: `cursor.next()` returns some, thus advanced once
+                    let $nth = unsafe { $cursor.steps().unchecked_sub(1) };
+                    break 'swar $matches;
+                }
+            }
+
+            $el
+        }
+    };
+}
+
+pub(crate) use {match_crlf, match_target, byte_map, match_header_name};

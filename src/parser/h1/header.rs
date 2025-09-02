@@ -6,6 +6,15 @@ use super::{
     simd,
 };
 
+macro_rules! ready {
+    ($e:expr) => {
+        match $e {
+            Some(ok) => ok,
+            None => return Poll::Pending
+        }
+    };
+}
+
 macro_rules! err {
     ($variant:ident) => {
         Poll::Ready(Err(Error::from(ErrorKind::$variant)))
@@ -28,63 +37,59 @@ impl Header {
 fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
     let mut cursor = bytes.cursor_mut();
 
-    match cursor.next() {
-        Some(b'\r') => match cursor.next() {
-            Some(b'\n') => {
+    match ready!(cursor.next()) {
+        b'\r' => match ready!(cursor.next()) {
+            b'\n' => {
                 bytes.advance(2);
                 return Poll::Ready(Ok(None));
             }
-            Some(_) => return err!(InvalidSeparator),
-            None => return Poll::Pending,
+            _ => return err!(InvalidSeparator),
         },
-        Some(b'\n') => {
+        b'\n' => {
             bytes.advance(1);
             return Poll::Ready(Ok(None));
         }
-        Some(_) => {}
-        None => return Poll::Pending,
+        _ => {}
     }
 
     cursor = bytes.cursor_mut();
 
+    let offset = simd::match_header_name! {
+        cursor;
+        |val,nth| match val {
+            b':' => nth,
+            _ => return err!(InvalidChar),
+        };
+        else {
+            return Poll::Pending
+        }
+    };
+
+    match ready!(cursor.next()) {
+        b' ' => { }
+        _ => return err!(InvalidSeparator),
+    }
+
     simd::match_crlf!(cursor);
 
-    let crlf = match cursor.next() {
-        Some(b'\r') => match cursor.next() {
-            Some(b'\n') => 2,
-            Some(_) => return err!(InvalidSeparator),
-            None => return Poll::Pending,
+    let crlf = match ready!(cursor.next()) {
+        b'\r' => match ready!(cursor.next()) {
+            b'\n' => 2,
+            _ => return err!(InvalidSeparator),
         },
-        Some(b'\n') => 1,
-        Some(_) => return err!(InvalidChar),
-        None => return Poll::Pending,
+        b'\n' => 1,
+        _ => return err!(InvalidChar),
     };
 
-    let mut header_line = cursor.split_to();
-    header_line.truncate_off(crlf);
+    let mut line = cursor.split_to();
 
-    let name = {
-        let mut cursor = header_line.cursor_mut();
+    let name = line.split_to(offset);
 
-        loop {
-            match cursor.next() {
-                Some(b':') => break,
-                Some(_) => {}
-                None => return err!(InvalidSeparator),
-            }
-        }
-        cursor.step_back(1);
-
-        let name = cursor.split_to();
-        let Some(b": ") = cursor.next_chunk() else {
-            return err!(InvalidSeparator);
-        };
-        cursor.advance_buf();
-        name
-    };
+    line.advance(b": ".len());
+    line.truncate_off(crlf);
 
     Poll::Ready(Ok(Some(Header {
         name,
-        value: header_line,
+        value: line,
     })))
 }
