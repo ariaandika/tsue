@@ -34,25 +34,13 @@ impl Uri {
 
     /// `/`.
     #[inline]
-    pub const fn root() -> Self {
+    pub const fn http_root() -> Self {
         Self {
             value: ByteStr::from_static("/"),
-            scheme: 0,
+            scheme: uri::SCHEME_HTTP,
             authority: 0,
             path: 1,
             query: 1,
-        }
-    }
-
-    /// Construct an empty [`Uri`].
-    #[inline]
-    pub const fn empty() -> Self {
-        Self {
-            value: ByteStr::new(),
-            scheme: 0,
-            authority: 0,
-            path: 0,
-            query: 0,
         }
     }
 
@@ -70,79 +58,64 @@ impl Uri {
 
 /// Parse full uri.
 ///
-/// - uri cannot empty
-/// - scheme can be empty, using the '/' prefix, resulting in path only uri
-/// - cannot starts with authority, so `example.com:80/users/all` will treat `example.com` as
-///   scheme
+/// - cannot be empty
+/// - scheme is required
 /// - fragment will be trimmed
 fn parse(mut bytes: Bytes) -> Result<Uri, UriError> {
     let len = u16!(bytes.len());
-    let Some(&prefix) = bytes.first() else {
-        return Err(UriError::Incomplete)
-    };
-
-    if len == 1 {
-        return match prefix {
-            b'*' => Ok(Uri::asterisk()),
-            b'/' => Ok(Uri::root()),
-            _ => Err(UriError::Char)
-        }
-    }
 
     let mut cursor = bytes.cursor_mut();
-    let mut scheme = uri::SCHEME_NONE;
-    let mut authority = uri::AUTH_NONE;
 
-    if prefix != b'/' {
-        simd::match_scheme!(cursor else {
-            return Err(UriError::Incomplete)
-        });
+    simd::match_scheme!(cursor else {
+        return Err(UriError::Incomplete)
+    });
 
-        scheme = u16!(cursor.steps(), uri::MAX_SCHEME as usize);
+    let scheme = u16!(cursor.steps(), uri::MAX_SCHEME as usize);
 
-        match cursor.next() {
-            Some(b':') => {},
-            Some(_) => return Err(UriError::Char),
-            None => return Err(UriError::Incomplete),
-        }
+    match cursor.next() {
+        Some(b':') => {},
+        Some(_) => return Err(UriError::Char),
+        None => return Err(UriError::Incomplete),
+    }
 
-        match cursor.peek_chunk() {
-            Some(b"//") => {
-                // authority
-                cursor.advance(2);
+    let authority;
 
-                if cursor.peek() == Some(b'/') {
-                    authority = uri::AUTH_NONE
+    match cursor.peek_chunk() {
+        Some(b"//") => {
+            // authority
+            cursor.advance(2);
 
-                } else {
-                    simd::match_authority!(cursor);
+            if cursor.peek() == Some(b'/') {
+                authority = uri::AUTH_NONE
 
-                    authority = u16!(cursor.steps(), uri::MAX_AUTH as usize);
+            } else {
+                simd::match_authority!(cursor);
 
-                    match cursor.peek() {
-                        Some(b'/' | b'?' | b'#') => {},
-                        Some(_) => return Err(UriError::Char),
-                        None => return Ok(Uri {
-                            // SAFETY: `match_*` also guarantee valid ASCII
-                            value: unsafe { ByteStr::from_utf8_unchecked(bytes) },
-                            scheme,
-                            authority,
-                            path: len,
-                            query: len,
-                        })
-                    }
+                authority = u16!(cursor.steps(), uri::MAX_AUTH as usize);
+
+                match cursor.peek() {
+                    Some(b'/' | b'?' | b'#') => {},
+                    Some(_) => return Err(UriError::Char),
+                    None => return Ok(Uri {
+                        // SAFETY: `match_*` also guarantee valid ASCII
+                        value: unsafe { ByteStr::from_utf8_unchecked(bytes) },
+                        scheme,
+                        authority,
+                        path: len,
+                        query: len,
+                    })
                 }
-            },
-            Some(_) => authority = uri::AUTH_NONE,
-            None => return Ok(Uri {
-                // SAFETY: `match_*` also guarantee valid ASCII
-                value: unsafe { ByteStr::from_utf8_unchecked(bytes) },
-                scheme,
-                authority: len,
-                path: len,
-                query: len,
-            })
-        };
+            }
+        },
+        Some(_) => authority = uri::AUTH_NONE,
+        None => return Ok(Uri {
+            // SAFETY: `match_*` also guarantee valid ASCII
+            value: unsafe { ByteStr::from_utf8_unchecked(bytes) },
+            scheme,
+            authority: len,
+            path: len,
+            query: len,
+        })
     }
 
     let path = u16!(cursor.steps());
@@ -220,33 +193,33 @@ pub const fn parse_const(bytes: &[u8]) -> Result<UriIndex, UriError> {
     use self::UriIndex as Uri;
 
     let len = u16!(bytes.len());
-    let Some(&prefix) = bytes.first() else {
-        return Err(UriError::Incomplete)
-    };
 
     let mut cursor = tcio::bytes::Cursor::new(bytes);
     let mut fragment = MAX_FRAG;
-    let mut scheme = uri::SCHEME_NONE;
-    let mut authority = uri::AUTH_NONE;
 
-    if prefix != b'/' {
-        simd::match_scheme!(cursor else {
-            return Err(UriError::Incomplete)
-        });
+    simd::match_scheme!(cursor else {
+        return Err(UriError::Incomplete)
+    });
 
-        scheme = u16!(cursor.steps(), uri::MAX_SCHEME as usize);
+    let scheme = u16!(cursor.steps(), uri::MAX_SCHEME as usize);
 
-        match cursor.next() {
-            Some(b':') => {},
-            Some(_) => return Err(UriError::Char),
-            None => return Err(UriError::Incomplete),
-        }
+    match cursor.next() {
+        Some(b':') => {},
+        Some(_) => return Err(UriError::Char),
+        None => return Err(UriError::Incomplete),
+    }
 
-        match cursor.peek_chunk() {
-            Some(b"//") => {
-                // authority
-                cursor.advance(2);
+    let authority;
 
+    match cursor.peek_chunk() {
+        Some(b"//") => {
+            // authority
+            cursor.advance(2);
+
+            if let Some(b'/') = cursor.peek() {
+                authority = uri::AUTH_NONE
+
+            } else {
                 simd::match_authority!(cursor);
 
                 authority = u16!(cursor.steps(), uri::MAX_AUTH as usize);
@@ -262,17 +235,17 @@ pub const fn parse_const(bytes: &[u8]) -> Result<UriIndex, UriError> {
                         query: len,
                     })
                 }
-            },
-            Some(_) => authority = uri::AUTH_NONE,
-            None => return Ok(Uri {
-                fragment,
-                scheme,
-                authority: len,
-                path: len,
-                query: len,
-            })
-        };
-    }
+            }
+        },
+        Some(_) => authority = uri::AUTH_NONE,
+        None => return Ok(Uri {
+            fragment,
+            scheme,
+            authority: len,
+            path: len,
+            query: len,
+        })
+    };
 
     let path = u16!(cursor.steps());
 

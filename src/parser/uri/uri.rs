@@ -1,10 +1,8 @@
 use super::Uri;
 
 pub(crate) const MAX_SCHEME: u16    = 0b0111_1111_1111_1111;
-pub(crate) const SCHEME_NONE: u16   = 0b1000_0000_0000_0000;
-
-const SCHEME_HTTP: u16  = 0b1000_0000_0000_0001;
-const SCHEME_HTTPS: u16 = 0b1000_0000_0000_0010;
+pub(crate) const SCHEME_HTTP: u16  = 0b1000_0000_0000_0001;
+pub(crate) const SCHEME_HTTPS: u16 = 0b1000_0000_0000_0010;
 
 pub(crate) const MAX_AUTH: u16   = 0b0111_1111_1111_1111;
 pub(crate) const AUTH_NONE: u16  = 0b1000_0000_0000_0000;
@@ -16,7 +14,6 @@ impl Uri {
     #[inline]
     pub fn scheme(&self) -> &str {
         match self.scheme {
-            self::SCHEME_NONE => "",
             self::SCHEME_HTTP => "http",
             self::SCHEME_HTTPS => "https",
             _ => &self.value[..self.scheme as usize],
@@ -118,19 +115,11 @@ impl Uri {
     // }
 }
 
-impl Default for Uri {
-    #[inline]
-    fn default() -> Self {
-        Self::root()
-    }
-}
-
 // ===== Formatting =====
 
 impl std::fmt::Display for Uri {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self.scheme {
-            self::SCHEME_NONE => {},
             self::SCHEME_HTTP => f.write_str("http:")?,
             self::SCHEME_HTTPS => f.write_str("https:")?,
             _ => {},

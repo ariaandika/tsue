@@ -6,13 +6,25 @@ use crate::{
 };
 
 /// HTTP Request Parts.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Parts {
     pub method: Method,
     pub uri: Uri,
     pub version: Version,
     pub headers: HeaderMap,
     pub extensions: Extensions,
+}
+
+impl Default for Parts {
+    fn default() -> Self {
+        Self {
+            method: <_>::default(),
+            uri: Uri::http_root(),
+            version: <_>::default(),
+            headers: <_>::default(),
+            extensions: <_>::default(),
+        }
+    }
 }
 
 /// HTTP Request.
