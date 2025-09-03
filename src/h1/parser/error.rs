@@ -24,8 +24,6 @@ pub enum ErrorKind {
     UnknownMethod,
     /// HTTP Version is unsupported.
     UnsupportedVersion,
-    /// Headers exceed configured maximum count.
-    TooManyHeaders,
     /// Invalid Character
     InvalidChar,
 }
@@ -39,7 +37,6 @@ impl std::fmt::Display for Error {
             ErrorKind::TooLong => f.write_str("request line too long"),
             ErrorKind::UnsupportedVersion => f.write_str("unsupported HTTP version"),
             ErrorKind::InvalidSeparator => f.write_str("invalid separator"),
-            ErrorKind::TooManyHeaders => f.write_str("received headers count exceeded the configured maximum"),
             ErrorKind::InvalidChar => f.write_str("found invalid character"),
         }
     }
