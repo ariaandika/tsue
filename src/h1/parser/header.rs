@@ -73,7 +73,7 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
         _ => return err!(InvalidSeparator),
     }
 
-    simd::match_crlf!(cursor);
+    simd::match_header_value!(cursor);
 
     let crlf = match ready!(cursor.next()) {
         b'\r' => match ready!(cursor.next()) {

@@ -37,7 +37,7 @@ macro_rules! byte_map {
     };
 }
 
-macro_rules! match_crlf {
+macro_rules! match_header_value {
     ($cursor:ident) => {
         'swar: {
             const BLOCK: usize = size_of::<usize>();
@@ -45,19 +45,19 @@ macro_rules! match_crlf {
             const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
             const CR: usize = usize::from_ne_bytes([b'\r'; BLOCK]);
             const LF: usize = usize::from_ne_bytes([b'\n'; BLOCK]);
+            const ONE: usize = usize::from_ne_bytes([1; BLOCK]);
 
             while let Some(chunk) = $cursor.peek_chunk() {
                 let block = usize::from_ne_bytes(*chunk);
-
-                // most checks does not handle `byte >= 128`,
-                // because its already checked with `.. | block) & ..`
 
                 // '\r'
                 let is_cr = (block ^ CR).wrapping_sub(LSB);
                 // '\n'
                 let is_lf = (block ^ LF).wrapping_sub(LSB);
+                // NUL
+                let is_nul = block.wrapping_sub(ONE);
 
-                let result = (is_cr | is_lf | block) & MSB;
+                let result = (is_nul | is_cr | is_lf | block) & MSB;
                 if result != 0 {
                     $cursor.advance((result.trailing_zeros() / 8) as usize);
                     break 'swar;
@@ -174,4 +174,4 @@ macro_rules! match_header_name {
     };
 }
 
-pub(crate) use {match_crlf, match_target, byte_map, match_header_name};
+pub(crate) use {match_header_value, match_target, byte_map, match_header_name};
