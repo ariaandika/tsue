@@ -7,10 +7,11 @@ pub mod body;
 pub mod request;
 pub mod response;
 
-pub mod parser; // temporary public to silent unused warning
+mod h1;
+mod parser;
+mod proto;
 pub mod driver;
 
-mod proto;
 
 pub mod service;
 pub mod server;

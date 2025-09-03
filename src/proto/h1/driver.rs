@@ -13,7 +13,7 @@ use crate::{
     body::Body,
     headers::{HeaderMap, HeaderName, HeaderValue},
     http::{Extensions, Uri, httpdate_now},
-    parser::h1::{Header, Reqline},
+    h1::parser::{Header, Reqline},
     proto::h1::io::BodyWrite,
     request::{Parts, Request},
     response::Response,
