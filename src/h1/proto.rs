@@ -1,10 +1,13 @@
-use tcio::{ByteStr, bytes::Bytes};
+use tcio::{
+    ByteStr,
+    bytes::{Bytes, BytesMut},
+};
 
 use super::parser::{Header, Reqline};
 use crate::{
     headers::{HeaderMap, HeaderName, HeaderValue},
-    http::{Extensions, Uri},
-    request::Parts,
+    http::{Extensions, Uri, httpdate_now},
+    request, response,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -68,11 +71,11 @@ impl HttpState {
         self.content_len
     }
 
-    pub fn build_parts(self) -> Result<Parts, BoxError> {
+    pub fn build_parts(self) -> Result<request::Parts, BoxError> {
         // TODO: reconstruct URI from a complete Request
         // https://httpwg.org/specs/rfc9112.html#reconstructing.target.uri
 
-        Ok(Parts {
+        Ok(request::Parts {
             method: self.reqline.method,
             uri: Uri::http_root(), // TODO: URI path only parsing
             version: self.reqline.version,
@@ -80,4 +83,24 @@ impl HttpState {
             extensions: Extensions::new(),
         })
     }
+}
+
+pub fn write_response(res: &response::Parts, buf: &mut BytesMut, content_len: u64) {
+    buf.extend_from_slice(res.version.as_str().as_bytes());
+    buf.extend_from_slice(b" ");
+    buf.extend_from_slice(res.status.as_str().as_bytes());
+    buf.extend_from_slice(b"\r\nDate: ");
+    buf.extend_from_slice(&httpdate_now()[..]);
+    buf.extend_from_slice(b"\r\nContent-Length: ");
+    buf.extend_from_slice(itoa::Buffer::new().format(content_len).as_bytes());
+    buf.extend_from_slice(b"\r\n");
+
+    for (key, val) in &res.headers {
+        buf.extend_from_slice(key.as_str().as_bytes());
+        buf.extend_from_slice(b": ");
+        buf.extend_from_slice(val.as_bytes());
+        buf.extend_from_slice(b"\r\n");
+    }
+
+    buf.extend_from_slice(b"\r\n");
 }

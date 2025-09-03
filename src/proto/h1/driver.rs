@@ -10,10 +10,9 @@ use crate::{
     body::Body,
     h1::{
         parser::{Header, Reqline},
-        proto::HttpState,
+        proto::{self, HttpState},
     },
     headers::HeaderMap,
-    http::httpdate_now,
     proto::h1::io::BodyWrite,
     request::Request,
     response::Response,
@@ -148,49 +147,32 @@ where
                     let f = service.call(request);
                     phase.set(Phase::Service(f));
                 }
-                PhaseProject::Service(f) => {
-                    let Poll::Ready(res) = f.poll(cx).map_err(<_>::into)? else {
+                PhaseProject::Service(f) => match f.poll(cx) {
+                    Poll::Ready(Ok(ok)) => {
+                        phase.set(Phase::Drain(Some(ok)));
+                    }
+                    Poll::Ready(Err(err)) => {
+                        return Poll::Ready(Err(err.into()));
+                    }
+                    Poll::Pending => {
                         if ready!(io.poll_io_wants(cx))? {
                             continue;
                         } else {
                             return Poll::Pending;
                         }
-                    };
-
-                    phase.set(Phase::Drain(Some(res)));
-                }
+                    }
+                },
                 PhaseProject::Drain(response) => {
                     ready!(io.poll_drain(cx)?);
 
-                    let mut res = response.take().unwrap();
+                    let (mut parts, body) = response.take().unwrap().into_parts();
 
-                    io.write(res.version().as_str().as_bytes());
-                    io.write(b" ");
-                    io.write(res.status().as_str().as_bytes());
-                    io.write(b"\r\nDate: ");
-                    io.write(&httpdate_now()[..]);
-                    io.write(b"\r\nContent-Length: ");
-                    io.write(
-                        itoa::Buffer::new()
-                            .format(res.body().remaining())
-                            .as_bytes(),
-                    );
-                    io.write(b"\r\n");
+                    proto::write_response(&parts, io.write_buffer_mut(), body.remaining() as _);
 
-                    for (key, val) in res.headers() {
-                        io.write(key.as_str().as_bytes());
-                        io.write(b": ");
-                        io.write(val.as_bytes());
-                        io.write(b"\r\n");
-                    }
+                    parts.headers.clear();
+                    header_map.replace(parts.headers);
 
-                    io.write(b"\r\n");
-
-                    let mut map = std::mem::take(res.headers_mut());
-                    map.clear();
-                    header_map.replace(map);
-
-                    phase.set(Phase::Flush(io.write_body(res.into_body())));
+                    phase.set(Phase::Flush(io.write_body(body)));
                 }
                 PhaseProject::Flush(b) => {
                     ready!(io.poll_flush(cx))?;

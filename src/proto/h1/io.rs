@@ -39,9 +39,8 @@ impl<IO> IoBuffer<IO> {
         &mut self.read_buffer
     }
 
-    /// Write buffered
-    pub fn write(&mut self, buf: &[u8]) {
-        self.write_buffer.extend_from_slice(buf);
+    pub fn write_buffer_mut(&mut self) -> &mut BytesMut {
+        &mut self.write_buffer
     }
 
     pub fn set_remaining(&mut self, remaining: u64) {
