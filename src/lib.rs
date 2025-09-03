@@ -8,6 +8,8 @@ pub mod request;
 pub mod response;
 
 pub mod parser; // temporary public to silent unused warning
+pub mod driver;
+
 mod proto;
 
 pub mod service;

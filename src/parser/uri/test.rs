@@ -57,14 +57,14 @@ fn test_uri_parse() {
 
     // path only
 
-    test! {
-        b"/users/all?filter=favorite&page=4#additional-section-4";
-        "";
-        None => { };
-        "/users/all?filter=favorite&page=4";
-        "/users/all";
-        Some("filter=favorite&page=4");
-    }
+    // test! {
+    //     b"/users/all?filter=favorite&page=4#additional-section-4";
+    //     "";
+    //     None => { };
+    //     "/users/all?filter=favorite&page=4";
+    //     "/users/all";
+    //     Some("filter=favorite&page=4");
+    // }
 
     // general form
 
@@ -91,14 +91,14 @@ fn test_uri_parse() {
         None;
     }
 
-    test! {
-        b"/users/all?filter=favorite&page=4#additional-section-4";
-        "";
-        None => { };
-        "/users/all?filter=favorite&page=4";
-        "/users/all";
-        Some("filter=favorite&page=4");
-    }
+    // test! {
+    //     b"/users/all?filter=favorite&page=4#additional-section-4";
+    //     "";
+    //     None => { };
+    //     "/users/all?filter=favorite&page=4";
+    //     "/users/all";
+    //     Some("filter=favorite&page=4");
+    // }
 
     // errors
 

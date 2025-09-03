@@ -35,10 +35,6 @@ impl<IO> IoBuffer<IO> {
         }
     }
 
-    pub fn read_buffer(&self) -> &[u8] {
-        &self.read_buffer
-    }
-
     pub fn read_buffer_mut(&mut self) -> &mut BytesMut {
         &mut self.read_buffer
     }

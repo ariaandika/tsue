@@ -1,5 +1,4 @@
-use futures_core::ready;
-use std::{io, mem::MaybeUninit, pin::Pin, sync::Arc, task::Poll};
+use std::{io, pin::Pin, sync::Arc, task::{ready, Poll}};
 use tcio::{
     ByteStr,
     io::{AsyncIoRead, AsyncIoWrite},
@@ -7,23 +6,24 @@ use tcio::{
 
 use crate::{
     body::Body,
-    headers::{HeaderMap, HeaderValue},
-    http::{Extensions, Uri, httpdate_now},
+    headers::{HeaderMap, HeaderName, HeaderValue},
+    http::{httpdate_now, Extensions, Uri},
+    parser::h1::{Header, Reqline},
     proto::h1::io::BodyWrite,
     request::{Parts, Request},
     response::Response,
     service::HttpService,
-    // parser::h1,
 };
 
 use super::io::IoBuffer;
 
-macro_rules! retry_read {
+type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+macro_rules! try_ready {
     ($e:expr) => {
-        match $e {
-            Ok(Some(ok)) => ok,
-            Ok(None) => continue,
-            Err(err) => return Poll::Ready(Err(io_err(err))),
+        match ready!($e) {
+            Ok(ok) => ok,
+            Err(err) => return Poll::Ready(Err(err.into())),
         }
     };
 }
@@ -37,14 +37,22 @@ pub struct Connection<IO, S, F> {
 }
 
 enum Phase<F> {
-    Read,
+    Reqline,
+    Header(Reqline),
     Service(F),
     Drain(Option<Response>),
     Flush(BodyWrite),
     Cleanup,
 }
 
-const MAX_HEADERS: usize = 64;
+enum PhaseProject<'a, F> {
+    Reqline,
+    Header(&'a mut Reqline),
+    Service(Pin<&'a mut F>),
+    Drain(&'a mut Option<Response>),
+    Flush(&'a mut BodyWrite),
+    Cleanup,
+}
 
 impl<IO, S> Connection<IO, S, S::Future>
 where
@@ -55,7 +63,7 @@ where
             header_map: None,
             io: IoBuffer::new(io),
             service,
-            phase: Phase::Read,
+            phase: Phase::Reqline,
         }
     }
 }
@@ -88,20 +96,30 @@ where
     IO: AsyncIoRead + AsyncIoWrite,
     S: HttpService<Error: Into<Box<dyn std::error::Error + Send + Sync>>>,
 {
-    pub fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<io::Result<()>> {
+    pub fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<BoxResult<()>> {
         let (io, header_map, mut phase, service) = self.project();
 
         loop {
             match phase.as_mut().project() {
-                Project::Read => {
-                    // let read = ready!(io.poll_read(cx))?;
-                    // if read == 0 {
-                    //     return Poll::Ready(Ok(()));
-                    // }
-                    //
-                    // let mut chunk = io.read_buffer();
-                    // let offset = chunk.as_ptr() as usize;
-                    //
+                PhaseProject::Reqline => {
+                    let read = ready!(io.poll_read(cx)?);
+                    if read == 0 {
+                        return Poll::Ready(Ok(()));
+                    }
+
+                    let bytes = io.read_buffer_mut();
+
+                    // TODO: send error response before disconnect
+
+                    let reqline = match Reqline::matches(bytes)? {
+                        Poll::Ready(ok) => ok,
+                        Poll::Pending => {
+                            ready!(io.poll_read(cx)?);
+                            continue;
+                        },
+                    };
+                    phase.set(Phase::Header(reqline));
+
                     // let h1::RequestLine {
                     //     method,
                     //     uri,
@@ -182,9 +200,83 @@ where
                     //
                     // let f = service.call(request);
                     // phase.set(Phase::Service(f));
-                    todo!()
                 }
-                Project::Service(f) => {
+                PhaseProject::Header(reqline) => {
+                    // TODO: send error response before disconnect
+                    let mut headers = match header_map.take() {
+                        Some(map) => map,
+                        None => HeaderMap::with_capacity(8),
+                    };
+
+                    #[allow(unused, reason = "TODO")]
+                    let mut host = None;
+                    let mut content_len = None;
+
+                    loop {
+                        let bytes = io.read_buffer_mut();
+
+                        let header = match Header::matches(bytes)? {
+                            Poll::Ready(Some(ok)) => ok,
+                            Poll::Ready(None) => break,
+                            Poll::Pending => {
+                                try_ready!(io.poll_read(cx));
+                                continue;
+                            },
+                        };
+
+                        let name = HeaderName::new(ByteStr::from_utf8(header.name.freeze())?);
+                        let value = header.value.freeze();
+
+                        if name.as_str().eq_ignore_ascii_case("content-length") {
+                            match tcio::atou(&value) {
+                                Some(ok) => content_len = Some(ok),
+                                None => return Poll::Ready(Err(io_err("invalid content-length").into()))
+                            }
+                        }
+
+                        if name.as_str().eq_ignore_ascii_case("host") {
+                            #[allow(unused_assignments, reason = "TODO")]
+                            {
+                                host = Some(value.clone());
+                            }
+                        }
+
+                        if let Ok(value) = HeaderValue::try_from_slice(value) {
+                            headers.insert(name, value);
+                        }
+                    }
+
+                    // ===== Service =====
+
+                    let content_len = content_len.unwrap_or(0);
+                    let partial_body = io.read_buffer_mut().split();
+
+                    // at this point, buffer is empty, so reserve will not need to copy any data if
+                    // allocation required
+                    io.read_buffer_mut().reserve(content_len as _);
+
+                    // `IoBuffer` remaining is only calculated excluding the already read body
+                    let Some(remaining_body_len) = content_len.checked_sub(partial_body.len() as _) else {
+                        return Poll::Ready(Err(io_err("content-length is less than body").into()));
+                    };
+                    io.set_remaining(remaining_body_len);
+
+                    let parts = Parts {
+                        method: reqline.method,
+                        uri: Uri::http_root(), // TODO: URI path only parsing
+                        version: reqline.version,
+                        headers,
+                        extensions: Extensions::new(),
+                    };
+
+                    let body = Body::from_handle(io.get_handle(), content_len, partial_body);
+
+                    let request = Request::from_parts(parts, body);
+
+                    let f = service.call(request);
+                    phase.set(Phase::Service(f));
+                }
+                PhaseProject::Service(f) => {
                     let Poll::Ready(res) = f.poll(cx).map_err(io_err)? else {
                         if ready!(io.poll_io_wants(cx))? {
                             continue;
@@ -195,7 +287,7 @@ where
 
                     phase.set(Phase::Drain(Some(res)));
                 }
-                Project::Drain(response) => {
+                PhaseProject::Drain(response) => {
                     ready!(io.poll_drain(cx)?);
 
                     let mut res = response.take().unwrap();
@@ -228,16 +320,16 @@ where
 
                     phase.set(Phase::Flush(io.write_body(res.into_body())));
                 }
-                Project::Flush(b) => {
+                PhaseProject::Flush(b) => {
                     ready!(io.poll_flush(cx))?;
                     ready!(b.poll_write(io, cx))?;
                     phase.set(Phase::Cleanup);
                 }
-                Project::Cleanup => {
+                PhaseProject::Cleanup => {
                     // this phase exists to ensure all shared bytes is dropped, thus can be
                     // reclaimed
                     io.clear_reclaim();
-                    phase.set(Phase::Read);
+                    phase.set(Phase::Reqline);
                 }
             }
         }
@@ -273,24 +365,17 @@ where
 
 // ===== Projection =====
 
-enum Project<'a, F> {
-    Read,
-    Service(Pin<&'a mut F>),
-    Drain(&'a mut Option<Response>),
-    Flush(&'a mut BodyWrite),
-    Cleanup,
-}
-
 impl<F> Phase<F> {
-    fn project(self: Pin<&mut Self>) -> Project<'_, F> {
+    fn project(self: Pin<&mut Self>) -> PhaseProject<'_, F> {
         // SAFETY: self is pinned, no custom Drop and Unpin
         unsafe {
             match self.get_unchecked_mut() {
-                Self::Read => Project::Read,
-                Self::Service(f) => Project::Service(Pin::new_unchecked(f)),
-                Self::Drain(r) => Project::Drain(r),
-                Self::Flush(b) => Project::Flush(b),
-                Self::Cleanup => Project::Cleanup,
+                Self::Reqline => PhaseProject::Reqline,
+                Self::Header(h) => PhaseProject::Header(h),
+                Self::Service(f) => PhaseProject::Service(Pin::new_unchecked(f)),
+                Self::Drain(r) => PhaseProject::Drain(r),
+                Self::Flush(b) => PhaseProject::Flush(b),
+                Self::Cleanup => PhaseProject::Cleanup,
             }
         }
     }
