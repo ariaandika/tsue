@@ -121,6 +121,7 @@ macro_rules! match_target {
     };
 }
 
+/// Postcondition: matched bytes is a valid ASCII.
 macro_rules! match_header_name {
     ($cursor:expr; |$arg:ident,$nth:ident|$matches:expr; else { $el:expr }) => {
         'swar: {

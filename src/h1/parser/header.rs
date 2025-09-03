@@ -1,5 +1,8 @@
 use std::task::Poll;
-use tcio::bytes::{Buf, BytesMut};
+use tcio::{
+    ByteStr,
+    bytes::{Buf, BytesMut},
+};
 
 use super::{
     error::{Error, ErrorKind},
@@ -23,7 +26,7 @@ macro_rules! err {
 
 #[derive(Debug)]
 pub struct Header {
-    pub name: BytesMut,
+    pub name: ByteStr,
     pub value: BytesMut,
 }
 
@@ -83,7 +86,8 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
 
     let mut line = cursor.split_to();
 
-    let name = line.split_to(offset);
+    // SAFETY: `match_header_name!` checks for valid ASCII
+    let name = unsafe { ByteStr::from_utf8_unchecked(line.split_to(offset).freeze()) };
 
     line.advance(b": ".len());
     line.truncate_off(crlf);

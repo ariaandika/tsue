@@ -169,13 +169,13 @@ fn test_parse_header() {
 
     test! {
         b"Content-Length: 1224\r\nContent-Type: text/html\r\n\r\n";
-        b"Content-Length", b"1224",
+        "Content-Length", b"1224",
         b"Content-Type: text/html\r\n\r\n"
     }
 
     test! {
         b"Content-Length: 1224\nContent-Type: text/html\n\r\n";
-        b"Content-Length", b"1224",
+        "Content-Length", b"1224",
         b"Content-Type: text/html\n\r\n"
     }
 

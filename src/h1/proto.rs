@@ -1,7 +1,4 @@
-use tcio::{
-    ByteStr,
-    bytes::{Bytes, BytesMut},
-};
+use tcio::bytes::{Bytes, BytesMut};
 
 use super::parser::{Header, Reqline};
 use crate::{
@@ -47,7 +44,7 @@ impl HttpState {
             return Err("too many headers".into());
         }
 
-        let name = HeaderName::new(ByteStr::from_utf8(header.name.freeze())?);
+        let name = HeaderName::new(header.name);
         let value = header.value.freeze();
 
         if name.as_str().eq_ignore_ascii_case("content-length") {
