@@ -39,23 +39,27 @@ impl HttpState {
         }
     }
 
-    pub fn add_header(&mut self, header: Header) -> Result<(), BoxError> {
+    pub fn add_header(&mut self, mut header: Header) -> Result<(), BoxError> {
         if self.headers.len() > MAX_HEADERS {
             return Err("too many headers".into());
         }
 
         let name = HeaderName::new(header.name);
+
+        header.value.make_ascii_lowercase();
         let value = header.value.freeze();
 
-        if name.as_str().eq_ignore_ascii_case("content-length") {
-            match tcio::atou(&value) {
-                Some(ok) => self.content_len = Some(ok),
-                None => return Err("invalid content-length".into()),
-            }
-        }
-
-        if name.as_str().eq_ignore_ascii_case("host") {
-            self.host = Some(value.clone());
+        match name.as_str() {
+            "content-length" => {
+                match tcio::atou(&value) {
+                    Some(ok) => self.content_len = Some(ok),
+                    None => return Err("invalid content-length".into()),
+                }
+            },
+            "host" => {
+                self.host = Some(value.clone());
+            },
+            _ => {},
         }
 
         self.headers
@@ -72,6 +76,10 @@ impl HttpState {
         // TODO: reconstruct URI from a complete Request
         // https://httpwg.org/specs/rfc9112.html#reconstructing.target.uri
 
+        if self.host.is_none() {
+            return Err("missing host header".into());
+        }
+
         Ok(request::Parts {
             method: self.reqline.method,
             uri: Uri::http_root(), // TODO: URI path only parsing
@@ -83,6 +91,8 @@ impl HttpState {
 }
 
 pub fn write_response(res: &response::Parts, buf: &mut BytesMut, content_len: u64) {
+    buf.reserve(128);
+
     buf.extend_from_slice(res.version.as_str().as_bytes());
     buf.extend_from_slice(b" ");
     buf.extend_from_slice(res.status.as_str().as_bytes());
