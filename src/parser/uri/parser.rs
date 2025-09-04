@@ -1,6 +1,6 @@
 use tcio::{ByteStr, bytes::Bytes};
 
-use super::{Uri, error::UriError, simd, uri};
+use super::{Uri, Path, error::UriError, simd, uri};
 
 macro_rules! u16 {
     ($val:expr, $max:expr) => {
@@ -155,7 +155,50 @@ fn parse(mut bytes: Bytes) -> Result<Uri, UriError> {
     })
 }
 
-// ===== Static Parsing =====
+impl Path {
+    #[inline]
+    pub fn try_from_shared(bytes: Bytes) -> Result<Self, UriError> {
+        parse_path(bytes)
+    }
+}
+
+/// Validate path, returns query index, and trim fragment.
+///
+/// If returns `Ok`, `bytes` is guarantee to contains valid ASCII.
+fn parse_path(mut bytes: Bytes) -> Result<Path, UriError> {
+    let mut query = u16!(bytes.len());
+    let mut cursor = bytes.cursor_mut();
+
+    simd::match_path!(cursor);
+
+    match cursor.peek() {
+        Some(b'?') => {
+            query = u16!(cursor.steps());
+            cursor.advance(1);
+
+            simd::match_query!(cursor);
+
+            match cursor.peek() {
+                Some(b'#') => cursor.truncate_buf(),
+                Some(_) => return Err(UriError::Char),
+                None => {}
+            }
+        }
+        Some(b'#') => {
+            cursor.truncate_buf();
+        }
+        Some(_) => return Err(UriError::Char),
+        None => {}
+    }
+
+    Ok(Path {
+        // SAFETY: `parse_path` guarantee for valid ASCII
+        value: unsafe { ByteStr::from_utf8_unchecked(bytes) },
+        query,
+    })
+}
+
+// ===== Const Parsing =====
 
 impl Uri {
     /// Construct [`Uri`] from static string.

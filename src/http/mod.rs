@@ -6,7 +6,7 @@ mod extensions;
 mod date;
 
 #[doc(inline)]
-pub use super::parser::uri::{Uri, UriError};
+pub use super::parser::uri::{Uri, Path, UriError};
 
 pub use method::Method;
 pub use version::Version;

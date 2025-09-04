@@ -2,8 +2,11 @@ mod simd;
 
 #[allow(clippy::module_inception)]
 mod uri;
+mod path;
 mod parser;
 mod error;
+
+use tcio::bytes::ByteStr;
 
 pub use error::UriError;
 
@@ -54,10 +57,17 @@ pub use error::UriError;
 // ```
 #[derive(Debug, Clone)]
 pub struct Uri {
-    value: tcio::ByteStr,
+    value: ByteStr,
     scheme: u16,
     authority: u16,
     path: u16,
+    query: u16,
+}
+
+/// Path only URI.
+#[derive(Debug, Clone)]
+pub struct Path {
+    value: ByteStr,
     query: u16,
 }
 
