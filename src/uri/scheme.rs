@@ -1,5 +1,7 @@
 use tcio::bytes::Bytes;
 
+use super::{simd, UriError};
+
 #[derive(Clone)]
 pub struct Scheme {
     /// is valid ASCII
@@ -7,8 +9,34 @@ pub struct Scheme {
 }
 
 impl Scheme {
-    pub fn from_shared(value: Bytes) -> Self {
-        todo!()
+    #[inline]
+    pub const fn from_static(string: &'static str) -> Self {
+        Self::from_shared(Bytes::from_static(string.as_bytes()))
+    }
+
+    pub const fn from_shared(value: Bytes) -> Self {
+        simd::validate_scheme! {
+            value;
+            else {
+                UriError::Char.panic_const()
+            }
+        }
+        Self { value }
+    }
+
+    #[inline]
+    pub fn try_from(value: impl Into<Bytes>) -> Result<Self, UriError> {
+        Self::try_from_shared(value.into())
+    }
+
+    fn try_from_shared(value: Bytes) -> Result<Self, UriError> {
+        simd::validate_scheme! {
+            value;
+            else {
+                return Err(UriError::Char)
+            }
+        };
+        Ok(Self { value })
     }
 
     #[inline]
