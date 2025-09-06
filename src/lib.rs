@@ -7,7 +7,7 @@ pub mod body;
 pub mod request;
 pub mod response;
 
-mod h1;
+pub mod h1;
 pub mod uri;
 
 mod parser;

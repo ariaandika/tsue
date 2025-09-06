@@ -2,6 +2,7 @@ use std::task::Poll;
 use tcio::bytes::{Buf, BytesMut};
 
 use super::{
+    Target,
     error::{Error, ErrorKind},
     simd,
 };
@@ -29,20 +30,6 @@ pub struct Reqline {
     pub method: Method,
     pub target: Target,
     pub version: Version,
-}
-
-#[derive(Debug)]
-pub struct Target {
-    pub value: BytesMut,
-    pub kind: Kind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Kind {
-    Asterisk,
-    Origin,
-    Absolute,
-    Authority,
 }
 
 impl Reqline {
@@ -113,20 +100,7 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
     target.advance(offset);
     target.truncate_off(tail);
 
-    let kind = if method == Method::CONNECT {
-        Kind::Authority
-    } else {
-        match target.as_slice() {
-            b"*" => Kind::Asterisk,
-            [b'/', ..] => Kind::Origin,
-            _ => Kind::Absolute,
-        }
-    };
-
-    let target = Target {
-        value: target,
-        kind,
-    };
+    let target = Target::new(&method, target);
 
     Poll::Ready(Ok(Reqline {
         method,

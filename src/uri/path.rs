@@ -10,7 +10,30 @@ pub struct Path {
 }
 
 impl Path {
-    pub fn from_shared(mut value: Bytes) -> Self {
+    #[inline]
+    pub const fn asterisk() -> Self {
+        Self {
+            value: Bytes::from_static(b"*"),
+            query: 1,
+        }
+    }
+
+    #[inline]
+    pub const fn empty() -> Self {
+        Self {
+            value: Bytes::new(),
+            query: 0,
+        }
+    }
+
+    pub fn from_shared(value: Bytes) -> Self {
+        match Self::try_from_shared(value) {
+            Ok(ok) => ok,
+            Err(err) => err.panic_const(),
+        }
+    }
+
+    pub fn try_from_shared(mut value: Bytes) -> Result<Self, UriError> {
         let query = simd::match_query! {
             value;
             |val, cursor| match val {
@@ -20,7 +43,7 @@ impl Path {
                         cursor;
                         |val| match val {
                             b'#' => cursor.truncate_buf(),
-                            _ => UriError::Char.panic_const()
+                            _ => return Err(UriError::Char)
                         };
                     }
                     query
@@ -29,16 +52,16 @@ impl Path {
                     cursor.truncate_buf();
                     value.len()
                 }
-                _ => UriError::Char.panic_const()
+                _ => return Err(UriError::Char)
             };
             else {
                 value.len()
             }
         };
-        Self {
+        Ok(Self {
             value,
             query: query as u16,
-        }
+        })
     }
 
     /// Returns the path as `str`, e.g: `/over/there`.
