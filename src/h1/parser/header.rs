@@ -5,7 +5,7 @@ use tcio::{
 };
 
 use super::{
-    error::{Error, ErrorKind},
+    error::{HttpError, ErrorKind},
     simd,
 };
 
@@ -20,7 +20,7 @@ macro_rules! ready {
 
 macro_rules! err {
     ($variant:ident) => {
-        Poll::Ready(Err(Error::from(ErrorKind::$variant)))
+        Poll::Ready(Err(HttpError::from(ErrorKind::$variant)))
     };
 }
 
@@ -32,24 +32,24 @@ pub struct Header {
 
 impl Header {
     #[inline]
-    pub fn matches(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
+    pub fn matches(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError>> {
         matches_header(bytes)
     }
 }
 
-fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
+fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError>> {
     let mut cursor = bytes.cursor_mut();
 
     match ready!(cursor.next()) {
         b'\r' => match ready!(cursor.next()) {
             b'\n' => {
-                bytes.advance(2);
+                cursor.advance_buf();
                 return Poll::Ready(Ok(None));
             }
             _ => return err!(InvalidSeparator),
         },
         b'\n' => {
-            bytes.advance(1);
+            cursor.advance_buf();
             return Poll::Ready(Ok(None));
         }
         _ => {}
@@ -61,7 +61,7 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
         cursor;
         |val,nth| match val {
             b':' => nth,
-            _ => return err!(InvalidChar),
+            _ => return err!(InvalidHeader),
         };
         else {
             return Poll::Pending
@@ -81,7 +81,7 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, Error>> {
             _ => return err!(InvalidSeparator),
         },
         b'\n' => 1,
-        _ => return err!(InvalidChar),
+        _ => return err!(InvalidHeader),
     };
 
     let mut line = cursor.split_to();

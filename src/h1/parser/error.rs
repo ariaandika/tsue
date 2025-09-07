@@ -1,11 +1,11 @@
 
 /// HTTP Parsing error.
 #[derive(Debug)]
-pub struct Error {
+pub struct HttpError {
     kind: ErrorKind,
 }
 
-impl From<ErrorKind> for Error {
+impl From<ErrorKind> for HttpError {
     #[inline]
     fn from(kind: ErrorKind) -> Self {
         Self { kind }
@@ -20,34 +20,43 @@ pub enum ErrorKind {
     TooLong,
     /// Request line have invalid separator
     InvalidSeparator,
-    /// HTTP Method is unknown.
+    /// Unknown Method.
     UnknownMethod,
-    /// HTTP Version is unsupported.
+    /// Invalid character in method.
+    InvalidMethod,
+    /// Invalid character in request target.
+    InvalidTarget,
+    /// Unsupported version.
     UnsupportedVersion,
-    /// Invalid Character
-    InvalidChar,
+    /// Invalid header name.
+    InvalidHeader,
+    /// Host header and absolute/authority request target is missmatch.
+    MissmatchHost,
 }
 
-impl std::error::Error for Error {}
-impl std::fmt::Display for Error {
+impl std::error::Error for HttpError {}
+impl std::fmt::Display for HttpError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self.kind {
-            ErrorKind::UnknownMethod => f.write_str("unknown method"),
             ErrorKind::TooShort => f.write_str("request line too short"),
             ErrorKind::TooLong => f.write_str("request line too long"),
-            ErrorKind::UnsupportedVersion => f.write_str("unsupported HTTP version"),
             ErrorKind::InvalidSeparator => f.write_str("invalid separator"),
-            ErrorKind::InvalidChar => f.write_str("found invalid character"),
+            ErrorKind::UnknownMethod => f.write_str("unknown method"),
+            ErrorKind::InvalidMethod => f.write_str("invalid method"),
+            ErrorKind::InvalidTarget => f.write_str("invalid request target"),
+            ErrorKind::UnsupportedVersion => f.write_str("unsupported version"),
+            ErrorKind::InvalidHeader => f.write_str("invalid header"),
+            ErrorKind::MissmatchHost => f.write_str("missmatch host"),
         }
     }
 }
 
-impl From<crate::parser::uri::UriError> for Error {
-    fn from(value: crate::parser::uri::UriError) -> Self {
+impl From<crate::uri::UriError> for HttpError {
+    fn from(value: crate::uri::UriError) -> Self {
         match value {
-            crate::parser::uri::UriError::Incomplete => Self::from(ErrorKind::TooShort),
-            crate::parser::uri::UriError::TooLong => Self::from(ErrorKind::TooLong),
-            crate::parser::uri::UriError::Char => Self::from(ErrorKind::InvalidChar),
+            crate::uri::UriError::Incomplete => Self::from(ErrorKind::TooShort),
+            crate::uri::UriError::TooLong => Self::from(ErrorKind::TooLong),
+            crate::uri::UriError::Char => Self::from(ErrorKind::InvalidTarget),
         }
     }
 }

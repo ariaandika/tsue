@@ -1,8 +1,9 @@
-use tcio::{ByteStr, bytes::BytesMut};
+use tcio::bytes::{ByteStr, BytesMut};
 
 use crate::{
+    h1::parser::{HttpError, error::ErrorKind},
     http::Method,
-    uri::{Authority, Path, UriError},
+    uri::{Authority, Path},
 };
 
 #[derive(Debug)]
@@ -13,13 +14,15 @@ pub struct Target {
 
 impl Target {
     pub(crate) fn new(method: &Method, target: BytesMut) -> Self {
-        let kind = if method == &Method::CONNECT {
-            Kind::Authority
-        } else {
-            match target.as_slice() {
-                b"*" => Kind::Asterisk,
-                [b'/', ..] => Kind::Origin,
-                _ => Kind::Absolute,
+        let kind = match target.as_slice() {
+            [b'/', ..] => Kind::Origin,
+            b"*" => Kind::Asterisk,
+            _ => {
+                if method != &Method::CONNECT {
+                    Kind::Absolute
+                } else {
+                    Kind::Authority
+                }
             }
         };
 
@@ -29,21 +32,23 @@ impl Target {
         }
     }
 
-    pub fn build_origin(self, host: ByteStr, is_https: bool) -> Result<HttpUri, UriError> {
+    pub fn build_origin(self, host: ByteStr, is_https: bool) -> Result<HttpUri, HttpError> {
         match self.kind {
+            Kind::Origin => Ok(HttpUri {
+                is_https,
+                authority: Authority::try_from(host)?,
+                path: Path::try_from(self.value)?,
+            }),
+            Kind::Absolute => Ok(todo!()),
             Kind::Asterisk => Ok(HttpUri {
                 is_https,
                 authority: Authority::try_from(host)?,
                 path: Path::asterisk(),
             }),
-            Kind::Origin => Ok(HttpUri {
-                is_https,
-                authority: Authority::try_from(host)?,
-                path: Path::try_from(self.value.freeze())?,
-            }),
-            Kind::Absolute => Ok(todo!()),
             Kind::Authority => {
-                // TODO: checks `host` with uri target
+                if self.value.as_slice() != host.as_bytes() {
+                    return Err(ErrorKind::MissmatchHost.into());
+                }
                 Ok(HttpUri {
                     is_https,
                     authority: Authority::try_from(self.value)?,

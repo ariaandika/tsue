@@ -8,7 +8,7 @@ mod error;
 pub use request::Reqline;
 pub use target::{Target, Kind, HttpUri};
 pub use header::Header;
-pub use error::Error;
+pub use error::HttpError;
 
 #[cfg(test)]
 mod test;

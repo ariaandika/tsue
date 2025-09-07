@@ -3,7 +3,7 @@ use tcio::bytes::{Buf, BytesMut};
 
 use super::{
     Target,
-    error::{Error, ErrorKind},
+    error::{HttpError, ErrorKind},
     simd,
 };
 use crate::http::{Method, Version};
@@ -19,7 +19,7 @@ macro_rules! ready {
 
 macro_rules! err {
     ($variant:ident) => {
-        Poll::Ready(Err(Error::from(ErrorKind::$variant)))
+        Poll::Ready(Err(HttpError::from(ErrorKind::$variant)))
     };
 }
 
@@ -34,14 +34,14 @@ pub struct Reqline {
 
 impl Reqline {
     #[inline]
-    pub fn matches(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
+    pub fn matches(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
         match_reqline(bytes)
     }
 }
 
 // ===== Parsing Request Line =====
 
-fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
+fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
     let mut cursor = bytes.cursor_mut();
 
     let (method, offset) = {
@@ -57,7 +57,7 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
                 if byte == b' ' {
                     break
                 } else {
-                    return err!(InvalidChar);
+                    return err!(InvalidMethod);
                 }
             }
         }
@@ -74,7 +74,7 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, Error>> {
         cursor;
         |val| match val {
             b' ' => { },
-            _ => return err!(InvalidChar),
+            _ => return err!(InvalidTarget),
         };
         else {
             return Poll::Pending
