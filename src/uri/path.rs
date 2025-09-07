@@ -26,14 +26,12 @@ impl Path {
         }
     }
 
-    pub fn from_shared(value: Bytes) -> Self {
-        match Self::try_from_shared(value) {
-            Ok(ok) => ok,
-            Err(err) => err.panic_const(),
-        }
+    #[inline]
+    pub fn try_from(value: impl Into<Bytes>) -> Result<Self, UriError> {
+        Self::try_from_shared(value.into())
     }
 
-    pub fn try_from_shared(mut value: Bytes) -> Result<Self, UriError> {
+    fn try_from_shared(mut value: Bytes) -> Result<Self, UriError> {
         let query = simd::match_query! {
             value;
             |val, cursor| match val {

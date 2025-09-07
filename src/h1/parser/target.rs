@@ -39,7 +39,7 @@ impl Target {
             Kind::Origin => Ok(HttpUri {
                 is_https,
                 authority: Authority::try_from(host)?,
-                path: Path::try_from_shared(self.value.freeze())?,
+                path: Path::try_from(self.value.freeze())?,
             }),
             Kind::Absolute => Ok(todo!()),
             Kind::Authority => {
