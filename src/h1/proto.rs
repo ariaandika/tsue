@@ -1,3 +1,4 @@
+//! HTTP/1.1 Logic.
 use tcio::bytes::{Bytes, BytesMut};
 
 use super::parser::{Header, Reqline};
