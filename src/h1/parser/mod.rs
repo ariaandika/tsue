@@ -16,7 +16,7 @@ mod header;
 mod error;
 
 pub use request::Reqline;
-pub use target::{Target, Kind, HttpUri};
+pub use target::{Target, Kind};
 pub use header::Header;
 pub use error::HttpError;
 

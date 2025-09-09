@@ -1,9 +1,9 @@
 use tcio::bytes::{ByteStr, BytesMut};
 
 use crate::{
-    h1::parser::{HttpError, error::ErrorKind},
+    h1::parser::{error::ErrorKind, HttpError},
     http::Method,
-    uri::{Authority, Path},
+    uri::{Authority, Path, Scheme, Uri},
 };
 
 #[derive(Debug)]
@@ -32,30 +32,32 @@ impl Target {
         }
     }
 
-    pub fn build_origin(self, host: ByteStr, is_https: bool) -> Result<HttpUri, HttpError> {
+    pub fn build_origin(self, host: ByteStr, scheme: Scheme) -> Result<Uri, HttpError> {
+        let authority;
+        let path;
+
         match self.kind {
-            Kind::Origin => Ok(HttpUri {
-                is_https,
-                authority: Authority::try_from(host)?,
-                path: Path::try_from(self.value)?,
-            }),
-            Kind::Absolute => Ok(todo!()),
-            Kind::Asterisk => Ok(HttpUri {
-                is_https,
-                authority: Authority::try_from(host)?,
-                path: Path::asterisk(),
-            }),
+            Kind::Origin => {
+                authority = Authority::try_from(host)?;
+                path = Path::try_from(self.value)?;
+            },
+            Kind::Absolute => {
+                todo!()
+            },
+            Kind::Asterisk => {
+                authority = Authority::try_from(host)?;
+                path = Path::asterisk();
+            },
             Kind::Authority => {
                 if self.value.as_slice() != host.as_bytes() {
                     return Err(ErrorKind::MissmatchHost.into());
                 }
-                Ok(HttpUri {
-                    is_https,
-                    authority: Authority::try_from(self.value)?,
-                    path: Path::empty(),
-                })
+                authority = Authority::try_from(self.value)?;
+                path = Path::empty();
             },
         }
+
+        Ok(Uri::from_parts(scheme, Some(authority), path))
     }
 }
 
@@ -65,14 +67,5 @@ pub enum Kind {
     Origin,
     Absolute,
     Authority,
-}
-
-// ===== URI =====
-
-#[derive(Debug)]
-pub struct HttpUri {
-    is_https: bool,
-    authority: Authority,
-    path: Path,
 }
 
