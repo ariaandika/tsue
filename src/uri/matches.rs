@@ -1,11 +1,13 @@
 macro_rules! byte_map {
     {
-        const $cnid:ident =
+        $(#[$meta:meta])*
+        $vis:vis const $cnid:ident =
             #[default($def:literal)]
             $(#[false]($nepat:pat))?
             $(#[true]($pat:pat))?
     } => {
-        const $cnid: [bool; 256] = {
+        $(#[$meta])*
+        $vis const $cnid: [bool; 256] = {
             let mut bytes = [$def; 256];
             let mut byte;
             $(
@@ -35,31 +37,78 @@ macro_rules! byte_map {
             bytes
         };
     };
+    // =====
+    {
+        $(#[$meta:meta])*
+        $vis:vis const fn $fn_id:ident(
+            default: $def:literal,
+            $(false: $nepat:pat,)?
+            $(true: $pat:pat,)?
+        );
+    } => {
+        $(#[$meta])*
+        $vis const fn $fn_id(byte: u8) -> bool {
+            static PAT: [bool; 256] = {
+                let mut bytes = [$def; 256];
+                let mut byte;
+                $(
+                    byte = 0;
+                    loop {
+                        if matches!(byte, $nepat) {
+                            bytes[byte as usize] = false;
+                        }
+                        if byte == 255 {
+                            break;
+                        }
+                        byte += 1;
+                    }
+                )?
+                $(
+                    byte = 0;
+                    loop {
+                        if matches!(byte, $pat) {
+                            bytes[byte as usize] = true;
+                        }
+                        if byte == 255 {
+                            break;
+                        }
+                        byte += 1;
+                    }
+                )?
+                bytes
+            };
+            const PTR: *const bool = PAT.as_ptr();
+            // SAFETY: the pattern size is equal to u8::MAX
+            unsafe { *PTR.add(byte as usize) }
+        }
+    };
 }
+
+byte_map! {
+    /// scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+    #[inline(always)]
+    pub const fn scheme(
+        default: true,
+        false:
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' |
+            b'+' | b'-' | b'.',
+    );
+}
+
 
 macro_rules! validate_scheme {
     (
         $bytes:expr;
         else { $err:expr }
-    ) => {
-        {
-            let mut cursor = $bytes.cursor();
-            while let Some(byte) = cursor.next() {
-                matches::byte_map! {
-                    const PAT =
-                        #[default(true)]
-                        #[false](
-                            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' |
-                            b'+' | b'-' | b'.'
-                        )
-                }
-
-                if PAT[byte as usize] {
-                    $err
-                }
+    ) => {{
+        let mut cursor = $bytes.cursor();
+        while let Some(byte) = cursor.next() {
+            match matches::scheme(byte) {
+                false => {},
+                true => { $err },
             }
         }
-    }
+    }}
 }
 
 macro_rules! validate_authority {
