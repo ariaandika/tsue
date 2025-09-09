@@ -5,7 +5,7 @@
 //! [rfc3986]: <https://datatracker.ietf.org/doc/html/rfc3986>
 use tcio::bytes::Bytes;
 
-mod simd;
+mod matches;
 mod impls;
 mod parser;
 mod error;

@@ -1,6 +1,6 @@
 use tcio::bytes::Bytes;
 
-use super::{Authority, Path, Scheme, UriError, simd};
+use super::{Authority, Path, Scheme, UriError, matches};
 
 impl Scheme {
     #[inline]
@@ -9,7 +9,7 @@ impl Scheme {
     }
 
     pub const fn from_shared(value: Bytes) -> Self {
-        simd::validate_scheme! {
+        matches::validate_scheme! {
             value;
             else {
                 UriError::Char.panic_const()
@@ -24,7 +24,7 @@ impl Scheme {
     }
 
     fn try_from_shared(value: Bytes) -> Result<Self, UriError> {
-        simd::validate_scheme! {
+        matches::validate_scheme! {
             value;
             else {
                 return Err(UriError::Char)
@@ -41,7 +41,7 @@ impl Authority {
     }
 
     pub const fn from_shared(value: Bytes) -> Self {
-        simd::validate_authority! {
+        matches::validate_authority! {
             value;
             else {
                 UriError::Char.panic_const()
@@ -56,7 +56,7 @@ impl Authority {
     }
 
     fn try_from_shared(value: Bytes) -> Result<Self, UriError> {
-        simd::validate_authority! {
+        matches::validate_authority! {
             value;
             else {
                 return Err(UriError::Char)
@@ -89,12 +89,12 @@ impl Path {
     }
 
     fn try_from_shared(mut value: Bytes) -> Result<Self, UriError> {
-        let query = simd::match_query! {
+        let query = matches::match_query! {
             value;
             |val, cursor| match val {
                 b'?' => {
                     let query = cursor.steps();
-                    simd::match_fragment! {
+                    matches::match_fragment! {
                         cursor;
                         |val| match val {
                             b'#' => cursor.truncate_buf(),

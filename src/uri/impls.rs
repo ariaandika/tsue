@@ -1,6 +1,6 @@
 use std::slice::from_raw_parts;
 
-use super::{Authority, Path, Scheme, Uri, simd};
+use super::{Authority, Path, Scheme, Uri, matches};
 
 impl Scheme {
     #[inline]
@@ -12,7 +12,7 @@ impl Scheme {
 
 impl Authority {
     const fn find_at(&self) -> Option<tcio::bytes::Cursor<'_>> {
-        simd::find_at!(
+        matches::find_at!(
             self.value;
             match {
                 Some(cursor) => Some(cursor),
@@ -22,14 +22,14 @@ impl Authority {
     }
 
     const fn find_col(&self) -> Option<tcio::bytes::Cursor<'_>> {
-        let mut cursor = simd::find_at!(
+        let mut cursor = matches::find_at!(
             self.value;
             match {
                 Some(cursor) => cursor,
                 None => self.value.cursor(),
             }
         );
-        simd::find_col! {
+        matches::find_col! {
             match {
                 Some(cursor) => Some(cursor),
                 None => None,

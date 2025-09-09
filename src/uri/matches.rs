@@ -45,7 +45,7 @@ macro_rules! validate_scheme {
         {
             let mut cursor = $bytes.cursor();
             while let Some(byte) = cursor.next() {
-                simd::byte_map! {
+                matches::byte_map! {
                     const PAT =
                         #[default(true)]
                         #[false](
@@ -103,7 +103,7 @@ macro_rules! validate_authority {
             }
 
             while let Some(byte) = cursor.next() {
-                simd::byte_map! {
+                matches::byte_map! {
                     const PAT =
                         #[default(true)]
                         #[false](b'!'..=b'~')
@@ -160,7 +160,7 @@ macro_rules! match_query {
             }
 
             while let Some($val) = $cursor.next() {
-                simd::byte_map! {
+                matches::byte_map! {
                     const PAT =
                         #[default(true)]
                         #[false](b'!'..=b'~')
@@ -214,7 +214,7 @@ macro_rules! match_fragment {
             }
 
             while let Some($val) = $cursor.next() {
-                simd::byte_map! {
+                matches::byte_map! {
                     const PAT =
                         #[default(true)]
                         #[false](b'!'..=b'~')
