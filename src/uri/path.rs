@@ -1,6 +1,7 @@
+use std::slice::from_raw_parts;
 use tcio::bytes::Bytes;
 
-use super::{simd, UriError};
+use super::{UriError, simd};
 
 #[derive(Clone)]
 pub struct Path {
@@ -64,19 +65,29 @@ impl Path {
 
     /// Returns the path as `str`, e.g: `/over/there`.
     #[inline]
-    pub fn path(&self) -> &str {
-        // SAFETY: precondition `value` is valid ASCII
-        unsafe { str::from_utf8_unchecked(&self.value[..self.query as usize]) }
+    pub const fn path(&self) -> &str {
+        // SAFETY: precondition `value` is valid ASCII, `query` is less than or equal to `value`
+        // length
+        unsafe {
+            str::from_utf8_unchecked(from_raw_parts(self.value.as_ptr(), self.query as usize))
+        }
     }
 
     /// Returns the query as `str`, e.g: `name=joe&query=4`.
     #[inline]
-    pub fn query(&self) -> Option<&str> {
+    pub const fn query(&self) -> Option<&str> {
         if self.query as usize == self.value.len() {
             None
         } else {
             // SAFETY: precondition `value` is valid ASCII
-            unsafe { Some(str::from_utf8_unchecked(&self.value[self.query as usize + 1..])) }
+            // unsafe { Some(str::from_utf8_unchecked(&self.value[self.query as usize + 1..])) }
+            unsafe {
+                let query = self.query as usize;
+                Some(str::from_utf8_unchecked(from_raw_parts(
+                    self.value.as_ptr().add(query.unchecked_add(1)),
+                    self.value.len().unchecked_sub(query),
+                )))
+            }
         }
     }
 
