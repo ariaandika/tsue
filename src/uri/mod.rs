@@ -53,7 +53,7 @@ pub struct Path {
 #[derive(Debug, Clone)]
 pub struct Uri {
     scheme: Scheme,
-    authority: Authority,
+    authority: Option<Authority>,
     path: Path,
 }
 

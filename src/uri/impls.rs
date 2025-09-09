@@ -1,6 +1,6 @@
 use std::slice::from_raw_parts;
 
-use super::{Authority, Path, Scheme, Uri};
+use super::{Authority, Path, Scheme, Uri, simd};
 
 impl Scheme {
     #[inline]
@@ -11,6 +11,79 @@ impl Scheme {
 }
 
 impl Authority {
+    const fn find_at(&self) -> Option<tcio::bytes::Cursor<'_>> {
+        simd::find_at!(
+            self.value;
+            match {
+                Some(cursor) => Some(cursor),
+                None => None,
+            }
+        )
+    }
+
+    const fn find_col(&self) -> Option<tcio::bytes::Cursor<'_>> {
+        let mut cursor = simd::find_at!(
+            self.value;
+            match {
+                Some(cursor) => cursor,
+                None => self.value.cursor(),
+            }
+        );
+        simd::find_col! {
+            match {
+                Some(cursor) => Some(cursor),
+                None => None,
+            }
+        }
+    }
+
+    /// Returns the authority host.
+    #[inline]
+    pub const fn host(&self) -> Option<&str> {
+        match self.find_at() {
+            Some(cursor) => unsafe { Some(str::from_utf8_unchecked(cursor.as_slice())) },
+            None => None,
+        }
+    }
+
+    /// Returns the authority hostname.
+    #[inline]
+    pub const fn hostname(&self) -> &str {
+        let hostname = match self.find_col() {
+            Some(cursor) => cursor.advanced_slice(),
+            None => self.value.as_slice(),
+        };
+        unsafe { str::from_utf8_unchecked(hostname) }
+    }
+
+    /// Returns the authority port.
+    #[inline]
+    pub const fn port(&self) -> Option<u16> {
+        match self.find_col() {
+            Some(mut cursor) => {
+                // with port validation in constructor, should we do unsafe calculation ?
+                cursor.advance(1);
+                match tcio::atou(cursor.as_slice()) {
+                    Some(ok) => Some(ok as u16),
+                    None => None,
+                }
+            }
+            None => None,
+        }
+    }
+
+    /// Returns the authority userinfo.
+    #[inline]
+    pub const fn userinfo(&self) -> Option<&str> {
+        match self.find_at() {
+            Some(mut cursor) => unsafe {
+                cursor.step_back(1);
+                Some(str::from_utf8_unchecked(cursor.as_slice()))
+            },
+            None => None,
+        }
+    }
+
     #[inline]
     pub const fn as_str(&self) -> &str {
         // SAFETY: precondition `value` is valid ASCII
@@ -61,7 +134,7 @@ impl Path {
 
 impl Uri {
     #[inline]
-    pub const fn from_parts(scheme: Scheme, authority: Authority, path: Path) -> Self {
+    pub const fn from_parts(scheme: Scheme, authority: Option<Authority>, path: Path) -> Self {
         Self {
             scheme,
             authority,
@@ -80,13 +153,16 @@ impl Uri {
     }
 
     #[inline]
-    pub const fn authority(&self) -> &str {
-        self.authority.as_str()
+    pub const fn authority(&self) -> Option<&str> {
+        match &self.authority {
+            Some(auth) => Some(auth.as_str()),
+            None => None,
+        }
     }
 
     #[inline]
-    pub const fn as_authority(&self) -> &Authority {
-        &self.authority
+    pub const fn as_authority(&self) -> Option<&Authority> {
+        self.authority.as_ref()
     }
 
     #[inline]

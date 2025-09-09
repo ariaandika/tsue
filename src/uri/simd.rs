@@ -230,4 +230,97 @@ macro_rules! match_fragment {
     };
 }
 
-pub(crate) use {byte_map, validate_scheme, validate_authority, match_query, match_fragment};
+/// Does not check for invalid ASCII.
+///
+/// inclusive, `cursor.next()` will not returns '@'
+macro_rules! find_at {
+    (
+        $value:expr;
+        match {
+            Some($cursor:ident) => $matches:expr,
+            None => $none:expr $(,)?
+        }
+    ) => {
+        'swar: {
+            const BLOCK: usize = size_of::<usize>();
+            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+
+            const AT: usize = usize::from_ne_bytes([b'@'; BLOCK]);
+
+            let mut $cursor = $value.cursor();
+
+            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
+                let block = usize::from_ne_bytes(*chunk);
+
+                // '@'
+                let is_at = (block ^ AT).wrapping_sub(LSB);
+
+                let result = is_at & MSB;
+                if result != 0 {
+                    let nth = (result.trailing_zeros() / 8) + 1;
+                    $cursor.advance(nth as usize);
+                    break 'swar $matches;
+                }
+
+                $cursor.advance(BLOCK);
+            }
+
+            while let Some(byte) = $cursor.next() {
+                if byte == b'@' {
+                    break 'swar $matches;
+                }
+            }
+
+            $none
+        }
+    };
+}
+
+/// Does not check for invalid ASCII.
+///
+/// exclusive, `cursor.next()` will returns ':'
+macro_rules! find_col {
+    (
+        match {
+            Some($cursor:ident) => $matches:expr,
+            None => $none:expr $(,)?
+        }
+    ) => {
+        'swar: {
+            const BLOCK: usize = size_of::<usize>();
+            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+
+            const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
+
+            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
+                let block = usize::from_ne_bytes(*chunk);
+
+                // ':'
+                let is_col = (block ^ COL).wrapping_sub(LSB);
+
+                let result = is_col & MSB;
+                if result != 0 {
+                    $cursor.advance((result.trailing_zeros() / 8) as usize);
+                    break 'swar $matches;
+                }
+
+                $cursor.advance(BLOCK);
+            }
+
+            while let Some(byte) = $cursor.next() {
+                if byte == b':' {
+                    $cursor.step_back(1);
+                    break 'swar $matches;
+                }
+            }
+
+            $none
+        }
+    };
+}
+
+pub(crate) use {
+    byte_map, find_at, find_col, match_fragment, match_query, validate_authority, validate_scheme,
+};
