@@ -84,87 +84,42 @@ macro_rules! byte_map {
     };
 }
 
+// ===== lookup table =====
+
 byte_map! {
     /// scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
     #[inline(always)]
-    pub const fn scheme(
-        default: true,
-        false:
+    pub const fn is_scheme(
+        default: false,
+        true:
             b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' |
             b'+' | b'-' | b'.',
     );
 }
 
-
-macro_rules! validate_scheme {
-    (
-        $bytes:expr;
-        else { $err:expr }
-    ) => {{
-        let mut cursor = $bytes.cursor();
-        while let Some(byte) = cursor.next() {
-            match matches::scheme(byte) {
-                false => {},
-                true => { $err },
-            }
-        }
-    }}
+byte_map! {
+    /// userinfo = *( unreserved / pct-encoded / sub-delims / ":" )
+    #[inline(always)]
+    pub const fn is_userinfo(
+        default: false,
+        true:
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' |
+            b'%' |
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' |
+            b':',
+    );
 }
 
-macro_rules! validate_authority {
-    (
-        $bytes:expr;
-        else { $err:expr }
-    ) => {
-        {
-            const BLOCK: usize = size_of::<usize>();
-            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
-            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-
-            const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
-            const QS: usize = usize::from_ne_bytes([b'?'; BLOCK]);
-            const HASH: usize = usize::from_ne_bytes([b'#'; BLOCK]);
-            const SLASH: usize = usize::from_ne_bytes([b'/'; BLOCK]);
-            const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
-
-            let mut cursor = $bytes.cursor();
-
-            while let Some(chunk) = cursor.peek_chunk::<BLOCK>() {
-                let block = usize::from_ne_bytes(*chunk);
-
-                // '/'
-                let is_sl = (block ^ SLASH).wrapping_sub(LSB);
-                // '?'
-                let is_qs = (block ^ QS).wrapping_sub(LSB);
-                // '#'
-                let is_hs = (block ^ HASH).wrapping_sub(LSB);
-                // 33('!') < byte
-                let lt_33 = block.wrapping_sub(BANG);
-                // 127(DEL)
-                let is_del = (block ^ DEL).wrapping_sub(LSB);
-
-                let result = (is_sl | is_qs | is_hs | lt_33 | is_del | block) & MSB;
-                if result != 0 {
-                    $err
-                }
-
-                cursor.advance(BLOCK);
-            }
-
-            while let Some(byte) = cursor.next() {
-                matches::byte_map! {
-                    const PAT =
-                        #[default(true)]
-                        #[false](b'!'..=b'~')
-                        #[true](b'/' | b'?' | b'#')
-                }
-
-                if PAT[byte as usize] {
-                    $err
-                }
-            }
-        }
-    };
+byte_map! {
+    /// reg-name = *( unreserved / pct-encoded / sub-delims )
+    #[inline(always)]
+    pub const fn is_regname(
+        default: false,
+        true:
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' |
+            b'%' |
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=',
+    );
 }
 
 macro_rules! match_query {
@@ -284,20 +239,14 @@ macro_rules! match_fragment {
 /// inclusive, `cursor.next()` will not returns '@'
 macro_rules! find_at {
     (
-        $value:expr;
-        match {
-            Some($cursor:ident) => $matches:expr,
-            None => $none:expr $(,)?
-        }
+        Some($cursor:ident) => $matches:expr,
+        None => $none:expr $(,)?
     ) => {
         'swar: {
             const BLOCK: usize = size_of::<usize>();
             const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
             const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-
             const AT: usize = usize::from_ne_bytes([b'@'; BLOCK]);
-
-            let mut $cursor = $value.cursor();
 
             while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
                 let block = usize::from_ne_bytes(*chunk);
@@ -324,18 +273,35 @@ macro_rules! find_at {
             $none
         }
     };
+    ($value:expr; match {
+        Some($cursor:ident) => $matches:expr,
+        None => $none:expr $(,)?
+    }) => {{
+        let mut $cursor = tcio::bytes::Cursor::new($value);
+        matches::find_at! {
+            Some($cursor) => $matches,
+            None => $none
+        }
+    }};
 }
 
-/// Does not check for invalid ASCII.
+/// SIMD Find colon.
 ///
-/// exclusive, `cursor.next()` will returns ':'
+/// Also check for valud ASCII, use `#[skip_ascii]` to skip ASCII check.
+///
+/// Exclusive, `cursor.next()` will returns ':'
 macro_rules! find_col {
-    (
+    {
+        #[block = $block:ident]
+        $(
+            #[ascii = $($ascii:tt)*]
+            #[ascii_iter = $($ascii_iter:tt)*]
+        )?
         match {
             Some($cursor:ident) => $matches:expr,
             None => $none:expr $(,)?
         }
-    ) => {
+    } => {
         'swar: {
             const BLOCK: usize = size_of::<usize>();
             const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
@@ -344,12 +310,12 @@ macro_rules! find_col {
             const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
 
             while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
-                let block = usize::from_ne_bytes(*chunk);
+                let $block = usize::from_ne_bytes(*chunk);
 
                 // ':'
-                let is_col = (block ^ COL).wrapping_sub(LSB);
+                let is_col = ($block ^ COL).wrapping_sub(LSB);
 
-                let result = is_col & MSB;
+                let result = is_col $($($ascii)*)? & MSB;
                 if result != 0 {
                     $cursor.advance((result.trailing_zeros() / 8) as usize);
                     break 'swar $matches;
@@ -358,8 +324,8 @@ macro_rules! find_col {
                 $cursor.advance(BLOCK);
             }
 
-            while let Some(byte) = $cursor.next() {
-                if byte == b':' {
+            while let Some($block) = $cursor.next() {
+                if $block == b':' $($($ascii_iter)*)? {
                     $cursor.step_back(1);
                     break 'swar $matches;
                 }
@@ -368,8 +334,19 @@ macro_rules! find_col {
             $none
         }
     };
+
+    // user input
+    (#[skip_ascii]$($tt:tt)*) => {
+        matches::find_col!(#[block = block] $($tt)*)
+    };
+    (match $($tt:tt)*) => {
+        matches::find_col! {
+            #[block = block]
+            #[ascii = & block]
+            #[ascii_iter = || !block.is_ascii()]
+            match $($tt)*
+        }
+    };
 }
 
-pub(crate) use {
-    byte_map, find_at, find_col, match_fragment, match_query, validate_authority, validate_scheme,
-};
+pub(crate) use {byte_map, find_at, find_col, match_fragment, match_query};

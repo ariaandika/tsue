@@ -13,7 +13,7 @@ impl Scheme {
 impl Authority {
     const fn find_at(&self) -> Option<tcio::bytes::Cursor<'_>> {
         matches::find_at!(
-            self.value;
+            self.value.as_slice();
             match {
                 Some(cursor) => Some(cursor),
                 None => None,
@@ -23,13 +23,14 @@ impl Authority {
 
     const fn find_col(&self) -> Option<tcio::bytes::Cursor<'_>> {
         let mut cursor = matches::find_at!(
-            self.value;
+            self.value.as_slice();
             match {
                 Some(cursor) => cursor,
                 None => self.value.cursor(),
             }
         );
         matches::find_col! {
+            #[skip_ascii]
             match {
                 Some(cursor) => Some(cursor),
                 None => None,
