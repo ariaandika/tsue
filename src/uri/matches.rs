@@ -154,123 +154,40 @@ byte_map! {
     );
 }
 
-macro_rules! match_query {
-    (
-        $bytes:expr;
-        |$val:ident,$cursor:ident|$matches:expr;
-        else { $el:expr }
-    ) => {
-        'swar: {
-            const BLOCK: usize = size_of::<usize>();
-            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
-            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-
-            const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
-            const QS: usize = usize::from_ne_bytes([b'?'; BLOCK]);
-            const HASH: usize = usize::from_ne_bytes([b'#'; BLOCK]);
-            const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
-
-            let mut $cursor = $bytes.cursor_mut();
-
-            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
-                let block = usize::from_ne_bytes(*chunk);
-
-                // '?'
-                let is_qs = (block ^ QS).wrapping_sub(LSB);
-                // '#'
-                let is_hs = (block ^ HASH).wrapping_sub(LSB);
-                // 33('!') < byte
-                let lt_33 = block.wrapping_sub(BANG);
-                // 127(DEL)
-                let is_del = (block ^ DEL).wrapping_sub(LSB);
-
-                let result = (is_qs | is_hs | lt_33 | is_del | block) & MSB;
-                if result != 0 {
-                    let nth = (result.trailing_zeros() / 8) as usize;
-                    // SAFETY: `cursor.peek_chunk::<BLOCK>()` returns `Some`,
-                    // `nth` is less than `BLOCK`
-                    let $val = unsafe {
-                        $cursor.advance_unchecked(nth);
-                        chunk.get_unchecked(nth)
-                    };
-                    break 'swar $matches;
-                }
-
-                $cursor.advance(BLOCK);
-            }
-
-            while let Some($val) = $cursor.next() {
-                matches::byte_map! {
-                    const PAT =
-                        #[default(true)]
-                        #[false](b'!'..=b'~')
-                        #[true](b'?' | b'#')
-                }
-
-                if PAT[$val as usize] {
-                    $cursor.step_back(1);
-                    break 'swar $matches;
-                }
-            }
-
-            $el
-        }
-    };
+byte_map! {
+    /// pchar           = unreserved / pct-encoded / sub-delims / ":" / "@"
+    /// segment         = *pchar
+    /// path-abempty    = *( "/" / segment )
+    #[inline(always)]
+    pub const fn is_path(
+        default: false,
+        true:
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' |
+            b'%' |
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' |
+            b':' |
+            b'@' |
+            b'/',
+    );
 }
 
-macro_rules! match_fragment {
-    (
-        $cursor:expr;
-        |$val:ident|$matches:expr;
-    ) => {
-        'swar: {
-            const BLOCK: usize = size_of::<usize>();
-            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
-            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-
-            const BANG: usize = usize::from_ne_bytes([b'!'; BLOCK]);
-            const HASH: usize = usize::from_ne_bytes([b'#'; BLOCK]);
-            const DEL: usize = usize::from_ne_bytes([127; BLOCK]);
-
-            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
-                let block = usize::from_ne_bytes(*chunk);
-
-                // '#'
-                let is_hs = (block ^ HASH).wrapping_sub(LSB);
-                // 33('!') < byte
-                let lt_33 = block.wrapping_sub(BANG);
-                // 127(DEL)
-                let is_del = (block ^ DEL).wrapping_sub(LSB);
-
-                let result = (is_hs | lt_33 | is_del | block) & MSB;
-                if result != 0 {
-                    let nth = (result.trailing_zeros() / 8) as usize;
-                    $cursor.advance(nth);
-                    let $val = chunk[nth];
-                    break 'swar $matches;
-                }
-
-                $cursor.advance(BLOCK);
-            }
-
-            while let Some($val) = $cursor.next() {
-                matches::byte_map! {
-                    const PAT =
-                        #[default(true)]
-                        #[false](b'!'..=b'~')
-                        #[true](b'#')
-                }
-
-                if PAT[$val as usize] {
-                    $cursor.step_back(1);
-                    break 'swar $matches;
-                }
-            }
-        }
-    };
+byte_map! {
+    /// query = *( pchar / "/" / "?" )
+    #[inline(always)]
+    pub const fn is_query(
+        default: false,
+        true:
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' |
+            b'%' |
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' |
+            b':' |
+            b'@' |
+            b'/' |
+            b'?',
+    );
 }
 
-pub(crate) use {byte_map, match_fragment, match_query};
+pub(crate) use {byte_map};
 
 macro_rules! split_at_sign {
     (

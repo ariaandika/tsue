@@ -81,43 +81,29 @@ impl Path {
     }
 
     #[inline]
+    pub const fn from_static(value: &'static str) -> Self {
+        match validate_path(value.as_bytes()) {
+            Ok((query, f)) => Self {
+                value: Bytes::from_static(unsafe { std::slice::from_raw_parts(value.as_ptr(), f) }),
+                query,
+            },
+            Err(err) => err.panic_const(),
+        }
+    }
+
+    #[inline]
     pub fn try_from(value: impl Into<Bytes>) -> Result<Self, UriError> {
         Self::try_from_shared(value.into())
     }
 
     fn try_from_shared(mut value: Bytes) -> Result<Self, UriError> {
-        let query = matches::match_query! {
-            value;
-            |val, cursor| match val {
-                b'?' => {
-                    let query = cursor.steps();
-                    matches::match_fragment! {
-                        cursor;
-                        |val| match val {
-                            b'#' => cursor.truncate_buf(),
-                            _ => return Err(UriError::Char)
-                        };
-                    }
-                    query
-                },
-                b'#' => {
-                    cursor.truncate_buf();
-                    value.len()
-                }
-                _ => return Err(UriError::Char)
-            };
-            else {
-                value.len()
-            }
-        };
-        Ok(Self {
-            value,
-            query: query as u16,
-        })
+        let (query, f) = validate_path(value.as_slice())?;
+        value.truncate(f);
+        Ok(Self { value, query })
     }
 }
 
-// ===== Logic =====
+// ===== Validation =====
 
 const fn validate_scheme(mut bytes: &[u8]) -> Result<(), UriError> {
     if bytes.is_empty() {
@@ -231,4 +217,47 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
     }
 
     Ok(())
+}
+
+const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
+    if bytes.is_empty() {
+        return Ok((0, 0));
+    }
+
+    if bytes.len() > u16::MAX as usize {
+        return Err(UriError::TooLong);
+    }
+
+    let mut query = bytes.len() as u16;
+    let mut frag = bytes.len();
+
+    while let [byte, rest @ ..] = bytes {
+        if matches::is_path(*byte) {
+            bytes = rest;
+        } else if *byte == b'?' {
+            bytes = rest;
+            query = query - rest.len() as u16 - 1;
+            break;
+        } else if *byte == b'#' {
+            frag = frag - rest.len() - 1;
+            query = frag as u16;
+            bytes = &[];
+            break;
+        } else {
+            return Err(UriError::Char);
+        }
+    }
+
+    while let [byte, rest @ ..] = bytes {
+        if matches::is_query(*byte) {
+            bytes = rest;
+        } else if *byte == b'#' {
+            frag = frag - rest.len() - 1;
+            break;
+        } else {
+            return Err(UriError::Char);
+        }
+    }
+
+    Ok((query, frag))
 }
