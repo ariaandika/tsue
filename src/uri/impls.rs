@@ -16,22 +16,24 @@ impl Authority {
     }
 
     const fn split_col(&self) -> Option<(&[u8], &[u8])> {
-        match self.split_at() {
-            Some((_, host)) => matches::split_col!(#[skip_ascii] host),
-            None => None,
-        }
+        let host = match self.split_at() {
+            Some((_, host)) => host,
+            None => self.value.as_slice(),
+        };
+        matches::split_col!(#[skip_ascii] host)
     }
 
     /// Returns the authority host.
     #[inline]
-    pub const fn host(&self) -> Option<&str> {
+    pub const fn host(&self) -> &str {
         match self.split_at() {
-            Some((_, host)) => unsafe {
+            Some((_, host)) => {
                 debug_assert!(matches!(host.first(), Some(&b'@')));
-                let split = from_raw_parts(host.as_ptr().add(1), host.len() - 1);
-                Some(str::from_utf8_unchecked(split))
-            },
-            None => None,
+                unsafe {
+                    str::from_utf8_unchecked(from_raw_parts(host.as_ptr().add(1), host.len() - 1))
+                }
+            }
+            None => self.as_str(),
         }
     }
 
@@ -62,7 +64,7 @@ impl Authority {
     #[inline]
     pub const fn userinfo(&self) -> Option<&str> {
         match self.split_at() {
-            Some((userinfo,_)) => unsafe {
+            Some((userinfo, _)) => unsafe {
                 Some(str::from_utf8_unchecked(userinfo))
             },
             None => None,
