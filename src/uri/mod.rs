@@ -6,8 +6,8 @@
 use tcio::bytes::Bytes;
 
 mod matches;
-mod impls;
 mod parser;
+mod impls;
 mod error;
 
 #[derive(Clone)]

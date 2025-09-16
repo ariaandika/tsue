@@ -87,6 +87,14 @@ macro_rules! byte_map {
 // ===== lookup table =====
 
 byte_map! {
+    #[inline(always)]
+    pub const fn is_hex(
+        default: false,
+        true: b'a'..=b'f' | b'A'..=b'F' | b'0'..=b'9',
+    );
+}
+
+byte_map! {
     /// scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
     #[inline(always)]
     pub const fn is_scheme(
@@ -105,6 +113,30 @@ byte_map! {
         true:
             b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' |
             b'%' |
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' |
+            b':',
+    );
+}
+
+byte_map! {
+    /// hex / ":" / "."
+    #[inline(always)]
+    pub const fn is_ipv6(
+        default: false,
+        true:
+            b'a'..=b'f' | b'A'..=b'F' | b'0'..=b'9' |
+            b':' |
+            b'.',
+    );
+}
+
+byte_map! {
+    /// reg-name = *( unreserved / sub-delims / ":" )
+    #[inline(always)]
+    pub const fn is_ipvfuture(
+        default: false,
+        true:
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' |
             b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' |
             b':',
     );
@@ -155,8 +187,12 @@ macro_rules! match_query {
                 let result = (is_qs | is_hs | lt_33 | is_del | block) & MSB;
                 if result != 0 {
                     let nth = (result.trailing_zeros() / 8) as usize;
-                    $cursor.advance(nth);
-                    let $val = chunk[nth];
+                    // SAFETY: `cursor.peek_chunk::<BLOCK>()` returns `Some`,
+                    // `nth` is less than `BLOCK`
+                    let $val = unsafe {
+                        $cursor.advance_unchecked(nth);
+                        chunk.get_unchecked(nth)
+                    };
                     break 'swar $matches;
                 }
 
@@ -234,119 +270,173 @@ macro_rules! match_fragment {
     };
 }
 
-/// Does not check for invalid ASCII.
-///
-/// inclusive, `cursor.next()` will not returns '@'
-macro_rules! find_at {
+pub(crate) use {byte_map, match_fragment, match_query};
+
+macro_rules! split_at_sign {
     (
-        Some($cursor:ident) => $matches:expr,
-        None => $none:expr $(,)?
+        #[private]
+        #[block = $block:ident]
+        #[ascii = $($ascii:tt)*]
+        #[ascii_iter = $($ascii_iter:tt)*]
+        $bytes:expr
     ) => {
         'swar: {
+            use std::slice::from_raw_parts;
             const BLOCK: usize = size_of::<usize>();
             const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
             const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
             const AT: usize = usize::from_ne_bytes([b'@'; BLOCK]);
 
-            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
-                let block = usize::from_ne_bytes(*chunk);
+            let original = $bytes;
+            let mut state: &[u8] = original;
+
+            while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
+                let $block = usize::from_ne_bytes(*chunk);
 
                 // '@'
-                let is_at = (block ^ AT).wrapping_sub(LSB);
+                let is_at = ($block ^ AT).wrapping_sub(LSB);
 
-                let result = is_at & MSB;
+                let result = (is_at $($ascii)*) & MSB;
                 if result != 0 {
-                    let nth = (result.trailing_zeros() / 8) + 1;
-                    $cursor.advance(nth as usize);
-                    break 'swar $matches;
+                    let nth = (result.trailing_zeros() / 8) as usize;
+                    break 'swar unsafe {
+                        let start = original.as_ptr();
+                        let mid_ptr = chunk.as_ptr().add(nth);
+                        let mid = mid_ptr.offset_from_unsigned(original.as_ptr());
+                        Some((
+                            from_raw_parts(start, mid),
+                            from_raw_parts(mid_ptr, original.len().unchecked_sub(mid)),
+                        ))
+                    };
                 }
 
-                $cursor.advance(BLOCK);
+                state = rest;
             }
 
-            while let Some(byte) = $cursor.next() {
-                if byte == b'@' {
-                    break 'swar $matches;
+            while let [$block, rest @ ..] = state {
+                if *$block == b'@' $($ascii_iter)* {
+                    break 'swar unsafe {
+                        let start = original.as_ptr();
+                        let mid_ptr = state.as_ptr();
+                        let mid = mid_ptr.offset_from_unsigned(original.as_ptr());
+                        Some((
+                            from_raw_parts(start, mid),
+                            from_raw_parts(mid_ptr, original.len().unchecked_sub(mid)),
+                        ))
+                    };
+                } else {
+                    state = rest;
                 }
             }
 
-            $none
+            None
         }
     };
-    ($value:expr; match {
-        Some($cursor:ident) => $matches:expr,
-        None => $none:expr $(,)?
-    }) => {{
-        let mut $cursor = tcio::bytes::Cursor::new($value);
-        matches::find_at! {
-            Some($cursor) => $matches,
-            None => $none
+
+    // user input
+    (#[skip_ascii]$bytes:expr) => {
+        matches::split_at_sign! {
+            #[private]
+            #[block = block]
+            #[ascii = ]
+            #[ascii_iter = ]
+            $bytes
         }
-    }};
+    };
+    ($bytes:expr) => {
+        matches::split_at_sign! {
+            #[private]
+            #[block = block]
+            #[ascii = | block]
+            #[ascii_iter = || !block.is_ascii()]
+            $bytes
+        }
+    };
 }
 
-/// SIMD Find colon.
-///
-/// Also check for valud ASCII, use `#[skip_ascii]` to skip ASCII check.
-///
-/// Exclusive, `cursor.next()` will returns ':'
-macro_rules! find_col {
-    {
+pub(crate) use {split_at_sign};
+
+macro_rules! split_col {
+    (
+        #[private]
         #[block = $block:ident]
-        $(
-            #[ascii = $($ascii:tt)*]
-            #[ascii_iter = $($ascii_iter:tt)*]
-        )?
-        match {
-            Some($cursor:ident) => $matches:expr,
-            None => $none:expr $(,)?
-        }
-    } => {
+        #[ascii = $($ascii:tt)*]
+        #[ascii_iter = $($ascii_iter:tt)*]
+        $bytes:expr
+    ) => {
         'swar: {
+            use std::slice::from_raw_parts;
             const BLOCK: usize = size_of::<usize>();
             const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
             const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-
             const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
 
-            while let Some(chunk) = $cursor.peek_chunk::<BLOCK>() {
+            let original = $bytes;
+            let mut state: &[u8] = original;
+
+            while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
                 let $block = usize::from_ne_bytes(*chunk);
 
                 // ':'
                 let is_col = ($block ^ COL).wrapping_sub(LSB);
 
-                let result = is_col $($($ascii)*)? & MSB;
+                let result = (is_col $($ascii)*) & MSB;
                 if result != 0 {
-                    $cursor.advance((result.trailing_zeros() / 8) as usize);
-                    break 'swar $matches;
+                    let nth = (result.trailing_zeros() / 8) as usize;
+                    break 'swar unsafe {
+                        let start = original.as_ptr();
+                        let mid_ptr = chunk.as_ptr().add(nth);
+                        let mid = mid_ptr.offset_from_unsigned(original.as_ptr());
+                        Some((
+                            from_raw_parts(start, mid),
+                            from_raw_parts(mid_ptr, original.len().unchecked_sub(mid)),
+                        ))
+                    };
                 }
 
-                $cursor.advance(BLOCK);
+                state = rest;
             }
 
-            while let Some($block) = $cursor.next() {
-                if $block == b':' $($($ascii_iter)*)? {
-                    $cursor.step_back(1);
-                    break 'swar $matches;
+            while let [$block, rest @ ..] = state {
+                if *$block == b':' $($ascii_iter)* {
+                    break 'swar unsafe {
+                        let start = original.as_ptr();
+                        let mid_ptr = state.as_ptr();
+                        let mid = mid_ptr.offset_from_unsigned(original.as_ptr());
+                        Some((
+                            from_raw_parts(start, mid),
+                            from_raw_parts(mid_ptr, original.len().unchecked_sub(mid)),
+                        ))
+                    };
+                } else {
+                    state = rest;
                 }
             }
 
-            $none
+            None
         }
     };
 
     // user input
-    (#[skip_ascii]$($tt:tt)*) => {
-        matches::find_col!(#[block = block] $($tt)*)
-    };
-    (match $($tt:tt)*) => {
-        matches::find_col! {
+    (#[skip_ascii]$bytes:expr) => {
+        matches::split_col! {
+            #[private]
             #[block = block]
-            #[ascii = & block]
+            #[ascii = ]
+            #[ascii_iter = ]
+            $bytes
+        }
+    };
+    ($bytes:expr) => {
+        matches::split_col! {
+            #[private]
+            #[block = block]
+            #[ascii = | block]
             #[ascii_iter = || !block.is_ascii()]
-            match $($tt)*
+            $bytes
         }
     };
 }
 
-pub(crate) use {byte_map, find_at, find_col, match_fragment, match_query};
+pub(crate) use {split_col};
+

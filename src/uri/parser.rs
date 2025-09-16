@@ -1,5 +1,3 @@
-use tcio::bytes::Cursor;
-
 use super::{Authority, Path, Scheme, UriError, matches, Bytes};
 
 impl Scheme {
@@ -135,71 +133,101 @@ const fn validate_scheme(mut bytes: &[u8]) -> Result<(), UriError> {
     Ok(())
 }
 
-const fn validate_authority(bytes: &[u8]) -> Result<(), UriError> {
+const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
     if bytes.is_empty() {
-        return Ok(())
+        return Ok(());
     }
-
-    let mut cursor = Cursor::new(bytes);
 
     // userinfo
-    matches::find_at! {
-        Some(cursor) => '_foo: {
-            let mut userinfo = Cursor::new(cursor.advanced_slice().split_last().unwrap().1);
-            while let Some(byte) = userinfo.next() {
-                if !matches::is_userinfo(byte) {
-                    return Err(UriError::Char)
-                }
-            }
-        },
-        None => {},
-    }
-
-    {
-        // port
-        let mut port = Cursor::new(cursor.as_slice());
-        matches::find_col! {
-            match {
-                Some(port) => '_foo: {
-                    cursor = Cursor::new(port.advanced_slice());
-
-                    if !matches!(port.next(), Some(b':')){
-                        return Err(UriError::Char)
-                    }
-
-                    if port.remaining() > 5 {
-                        // add specific error ?
-                        return Err(UriError::Char)
-                    }
-                    while let Some(byte) = port.next() {
-                        if !byte.is_ascii_digit() {
-                            return Err(UriError::Char)
-                        }
-                    }
-                },
-                None => cursor = Cursor::new(port.original()),
-            }
+    if let Some((mut userinfo, host)) = matches::split_at_sign!(bytes) {
+        let Some((b'@', host)) = host.split_first() else {
+            return Err(UriError::Char);
         };
+
+        bytes = host;
+
+        while let [byte, rest @ ..] = userinfo {
+            if matches::is_userinfo(*byte) {
+                userinfo = rest
+            } else {
+                return Err(UriError::Char);
+            }
+        }
     }
 
     // host
-    match cursor.peek() {
-        Some(b'[') => {
-            let [_, ip @ .., b']'] = cursor.as_slice() else {
-                return Err(UriError::Char)
-            };
-            if let [b'v', _ip] = ip {
-                todo!()// ip-future
+    if let Some((mut host, port)) = matches::split_col!(bytes) {
+        let Some((b':', port)) = port.split_first() else {
+            return Err(UriError::Char);
+        };
+
+        bytes = port;
+
+        match host {
+            [b'[', ip @ .., b']'] => {
+                if let [b'v' | b'V', lead, rest @ ..] = ip {
+                    if !matches::is_hex(*lead) || rest.is_empty() {
+                        return Err(UriError::Char)
+                    }
+
+                    let mut ip = rest;
+
+                    while let [byte, rest @ ..] = ip {
+                        if matches::is_hex(*byte) {
+                            ip = rest;
+                        } else if *byte == b'.' {
+                            ip = rest;
+                            break
+                        } else {
+                            return Err(UriError::Char);
+                        }
+                    }
+
+                    while let [byte, rest @ ..] = ip {
+                        if matches::is_ipvfuture(*byte) {
+                            ip = rest;
+                        } else {
+                            return Err(UriError::Char);
+                        }
+                    }
+                } else {
+                    // TODO: validate ipv6
+                    let mut ip = ip;
+                    while let [byte, rest @ ..] = ip {
+                        if matches::is_ipv6(*byte) {
+                            ip = rest;
+                        } else {
+                            return Err(UriError::Char);
+                        }
+                    }
+                }
+            }
+            [] => {}
+            _ => {
+                while let [byte, rest @ ..] = host {
+                    if matches::is_regname(*byte) {
+                        host = rest
+                    } else {
+                        return Err(UriError::Char);
+                    }
+                }
+            }
+        }
+    }
+
+    // port
+    if !bytes.is_empty() {
+        if bytes.len() > 5 {
+            // add specific error ?
+            return Err(UriError::Char);
+        }
+        while let [byte, rest @ ..] = bytes {
+            if !byte.is_ascii_digit() {
+                return Err(UriError::Char);
             } else {
-                todo!()// ipv6
+                bytes = rest;
             }
-        },
-        Some(_) => while let Some(byte) = cursor.next() {
-            if !matches::is_regname(byte) {
-                return Err(UriError::Char)
-            }
-        },
-        None => { },
+        }
     }
 
     Ok(())

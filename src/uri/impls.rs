@@ -11,38 +11,26 @@ impl Scheme {
 }
 
 impl Authority {
-    const fn find_at(&self) -> Option<tcio::bytes::Cursor<'_>> {
-        matches::find_at!(
-            self.value.as_slice();
-            match {
-                Some(cursor) => Some(cursor),
-                None => None,
-            }
-        )
+    const fn split_at(&self) -> Option<(&[u8], &[u8])> {
+        matches::split_at_sign!(#[skip_ascii]self.value.as_slice())
     }
 
-    const fn find_col(&self) -> Option<tcio::bytes::Cursor<'_>> {
-        let mut cursor = matches::find_at!(
-            self.value.as_slice();
-            match {
-                Some(cursor) => cursor,
-                None => self.value.cursor(),
-            }
-        );
-        matches::find_col! {
-            #[skip_ascii]
-            match {
-                Some(cursor) => Some(cursor),
-                None => None,
-            }
+    const fn split_col(&self) -> Option<(&[u8], &[u8])> {
+        match self.split_at() {
+            Some((_, host)) => matches::split_col!(#[skip_ascii] host),
+            None => None,
         }
     }
 
     /// Returns the authority host.
     #[inline]
     pub const fn host(&self) -> Option<&str> {
-        match self.find_at() {
-            Some(cursor) => unsafe { Some(str::from_utf8_unchecked(cursor.as_slice())) },
+        match self.split_at() {
+            Some((_, host)) => unsafe {
+                debug_assert!(matches!(host.first(), Some(&b'@')));
+                let split = from_raw_parts(host.as_ptr().add(1), host.len() - 1);
+                Some(str::from_utf8_unchecked(split))
+            },
             None => None,
         }
     }
@@ -50,8 +38,8 @@ impl Authority {
     /// Returns the authority hostname.
     #[inline]
     pub const fn hostname(&self) -> &str {
-        let hostname = match self.find_col() {
-            Some(cursor) => cursor.advanced_slice(),
+        let hostname = match self.split_col() {
+            Some((ok, _)) => ok,
             None => self.value.as_slice(),
         };
         unsafe { str::from_utf8_unchecked(hostname) }
@@ -60,14 +48,11 @@ impl Authority {
     /// Returns the authority port.
     #[inline]
     pub const fn port(&self) -> Option<u16> {
-        match self.find_col() {
-            Some(mut cursor) => {
-                // with port validation in constructor, should we do unsafe calculation ?
-                cursor.advance(1);
-                match tcio::atou(cursor.as_slice()) {
-                    Some(ok) => Some(ok as u16),
-                    None => None,
-                }
+        match self.split_col() {
+            // with port validation in constructor, should we do unsafe calculation ?
+            Some((_, port)) => match tcio::atou(port) {
+                Some(ok) => Some(ok as u16),
+                None => None,
             }
             None => None,
         }
@@ -76,10 +61,9 @@ impl Authority {
     /// Returns the authority userinfo.
     #[inline]
     pub const fn userinfo(&self) -> Option<&str> {
-        match self.find_at() {
-            Some(mut cursor) => unsafe {
-                cursor.step_back(1);
-                Some(str::from_utf8_unchecked(cursor.as_slice()))
+        match self.split_at() {
+            Some((userinfo,_)) => unsafe {
+                Some(str::from_utf8_unchecked(userinfo))
             },
             None => None,
         }
