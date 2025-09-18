@@ -1,6 +1,6 @@
 use std::slice::from_raw_parts;
 
-use super::{Authority, Path, Scheme, Uri, matches};
+use super::{Authority, Path, Scheme, Uri, HttpUri, matches};
 
 impl Scheme {
     #[inline]
@@ -150,6 +150,38 @@ impl Uri {
     #[inline]
     pub const fn as_authority(&self) -> Option<&Authority> {
         self.authority.as_ref()
+    }
+
+    #[inline]
+    pub const fn path(&self) -> &str {
+        self.path.path()
+    }
+
+    #[inline]
+    pub const fn query(&self) -> Option<&str> {
+        self.path.query()
+    }
+
+    #[inline]
+    pub const fn path_and_query(&self) -> &str {
+        self.path.as_str()
+    }
+}
+
+impl HttpUri {
+    #[inline]
+    pub const fn is_https(&self) -> bool {
+        self.is_https
+    }
+
+    #[inline]
+    pub const fn authority(&self) -> &str {
+        self.authority.as_str()
+    }
+
+    #[inline]
+    pub const fn as_authority(&self) -> &Authority {
+        &self.authority
     }
 
     #[inline]

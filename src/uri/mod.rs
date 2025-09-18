@@ -57,4 +57,11 @@ pub struct Uri {
     path: Path,
 }
 
+#[derive(Debug, Clone)]
+pub struct HttpUri {
+    is_https: bool,
+    authority: Authority,
+    path: Path,
+}
+
 pub use error::UriError;

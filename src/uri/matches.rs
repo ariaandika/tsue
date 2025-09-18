@@ -357,3 +357,55 @@ macro_rules! split_col {
 
 pub(crate) use {split_col};
 
+macro_rules! find_path_delim {
+    ($bytes:expr) => {
+        'swar: {
+            use std::slice::from_raw_parts;
+            const BLOCK: usize = size_of::<usize>();
+            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+            const SLASH: usize = usize::from_ne_bytes([b'/'; BLOCK]);
+            const QS: usize = usize::from_ne_bytes([b'?'; BLOCK]);
+            const HASH: usize = usize::from_ne_bytes([b'#'; BLOCK]);
+
+            let original = $bytes;
+            let mut state: &[u8] = original;
+
+            while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
+                let block = usize::from_ne_bytes(*chunk);
+
+                // '/'
+                let is_slash = (block ^ SLASH).wrapping_sub(LSB);
+                // '?'
+                let is_qs = (block ^ QS).wrapping_sub(LSB);
+                // '#'
+                let is_hash = (block ^ HASH).wrapping_sub(LSB);
+
+                let result = (is_slash | is_qs | is_hash | block) & MSB;
+                if result != 0 {
+                    let nth = (result.trailing_zeros() / 8) as usize;
+                    break 'swar unsafe {
+                        Some(from_raw_parts(original.as_ptr(), nth + 1))
+                    }
+                }
+
+                state = rest;
+            }
+
+            while let [byte, rest @ ..] = state {
+                if matches!(byte, b'/' | b'?' | b'#') || !byte.is_ascii() {
+                    break 'swar unsafe {
+                        Some(from_raw_parts(original.as_ptr(), rest.as_ptr().offset_from_unsigned(original.as_ptr())))
+                    }
+                } else {
+                    state = rest;
+                }
+            }
+
+            None
+        }
+    };
+}
+
+pub(crate) use {find_path_delim};
+
