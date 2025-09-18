@@ -8,7 +8,7 @@
 //! with crlf, it returns [`None`] denoting that its the end of header fields.
 //!
 //! [`Poll::Pending`]: std::task::Poll::Pending
-mod simd;
+mod matches;
 
 mod request;
 mod target;

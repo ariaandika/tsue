@@ -4,7 +4,7 @@ use tcio::bytes::{Buf, BytesMut};
 use super::{
     Target,
     error::{HttpError, ErrorKind},
-    simd,
+    matches,
 };
 use crate::http::{Method, Version};
 
@@ -45,7 +45,7 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
     let mut cursor = bytes.cursor_mut();
 
     let (method, offset) = {
-        simd::byte_map! {
+        matches::byte_map! {
             const PAT =
                 #[default(true)]
                 #[false](b'!'..=b'~')
@@ -70,7 +70,7 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
         }
     };
 
-    simd::match_target! {
+    matches::match_target! {
         cursor;
         |val| match val {
             b' ' => { },

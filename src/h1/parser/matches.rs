@@ -105,7 +105,7 @@ macro_rules! match_target {
             }
 
             while let Some($arg) = $cursor.next() {
-                simd::byte_map! {
+                matches::byte_map! {
                     const PAT =
                         #[default(true)]
                         #[false](b'!'..=b'~')
@@ -155,7 +155,7 @@ macro_rules! match_header_name {
             }
 
             while let Some($arg) = $cursor.next() {
-                simd::byte_map! {
+                matches::byte_map! {
                     const PAT =
                         #[default(true)]
                         #[false](b'!'..=b'~')

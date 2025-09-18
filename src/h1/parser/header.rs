@@ -6,7 +6,7 @@ use tcio::{
 
 use super::{
     error::{HttpError, ErrorKind},
-    simd,
+    matches,
 };
 
 macro_rules! ready {
@@ -57,7 +57,7 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError
 
     cursor = bytes.cursor_mut();
 
-    let offset = simd::match_header_name! {
+    let offset = matches::match_header_name! {
         cursor;
         |val,nth| match val {
             b':' => nth,
@@ -73,7 +73,7 @@ fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError
         _ => return err!(InvalidSeparator),
     }
 
-    simd::match_header_value!(cursor);
+    matches::match_header_value!(cursor);
 
     let crlf = match ready!(cursor.next()) {
         b'\r' => match ready!(cursor.next()) {
