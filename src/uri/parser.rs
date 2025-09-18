@@ -1,4 +1,7 @@
-use super::{Authority, Path, Scheme, UriError, matches, Bytes};
+use super::{Authority, Path, Scheme, HttpUri, UriError, matches, Bytes};
+
+const SCHEME_HTTP: bool = false;
+const SCHEME_HTTPS: bool = true;
 
 impl Scheme {
     #[inline]
@@ -103,7 +106,13 @@ impl Path {
     }
 }
 
-// ===== Validation =====
+impl HttpUri {
+    pub fn parse_http(value: Bytes) -> Result<Self, UriError> {
+        parse_http(value)
+    }
+}
+
+// ===== Logic =====
 
 const fn validate_scheme(mut bytes: &[u8]) -> Result<(), UriError> {
     if bytes.is_empty() {
@@ -261,3 +270,36 @@ const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
 
     Ok((query, frag))
 }
+
+fn parse_http(mut value: Bytes) -> Result<HttpUri, UriError> {
+    let (is_https, bytes) = match value.as_slice().split_first_chunk::<5>() {
+        Some((b"http:", rest)) => {
+            let Some((b"//", rest)) = rest.split_first_chunk() else {
+                return Err(UriError::Char)
+            };
+            (SCHEME_HTTP, rest)
+        },
+        Some((b"https", rest)) => {
+            let Some((b"://", rest)) = rest.split_first_chunk() else {
+                return Err(UriError::Char)
+            };
+            (SCHEME_HTTPS, rest)
+        },
+        _ => return Err(UriError::Char),
+    };
+
+    let authority = match matches::find_path_delim!(bytes) {
+        Some(ok) => value.slice_ref(ok),
+        None => std::mem::take(&mut value),
+    };
+    let authority = Authority::try_from(authority)?;
+
+    let path = Path::try_from_shared(value)?;
+
+    Ok(HttpUri {
+        is_https,
+        authority,
+        path,
+    })
+}
+
