@@ -45,15 +45,9 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
     let mut cursor = bytes.cursor_mut();
 
     let (method, offset) = {
-        matches::byte_map! {
-            const PAT =
-                #[default(true)]
-                #[false](b'!'..=b'~')
-        }
-
         loop {
             let byte = ready!(cursor.next());
-            if PAT[byte as usize] {
+            if !matches::is_method(byte) {
                 if byte == b' ' {
                     break
                 } else {

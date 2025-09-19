@@ -1,41 +1,4 @@
-macro_rules! byte_map {
-    {
-        const $cnid:ident =
-            #[default($def:literal)]
-            $(#[false]($nepat:pat))?
-            $(#[true]($pat:pat))?
-    } => {
-        const $cnid: [bool; 256] = {
-            let mut bytes = [$def; 256];
-            let mut byte;
-            $(
-                byte = 0;
-                loop {
-                    if matches!(byte, $nepat) {
-                        bytes[byte as usize] = false;
-                    }
-                    if byte == 255 {
-                        break;
-                    }
-                    byte += 1;
-                }
-            )?
-            $(
-                byte = 0;
-                loop {
-                    if matches!(byte, $pat) {
-                        bytes[byte as usize] = true;
-                    }
-                    if byte == 255 {
-                        break;
-                    }
-                    byte += 1;
-                }
-            )?
-            bytes
-        };
-    };
-}
+pub(crate) use crate::matches::*;
 
 macro_rules! match_header_value {
     ($cursor:ident) => {
@@ -174,4 +137,4 @@ macro_rules! match_header_name {
     };
 }
 
-pub(crate) use {match_header_value, match_target, byte_map, match_header_name};
+pub(crate) use {match_header_value, match_target, match_header_name};

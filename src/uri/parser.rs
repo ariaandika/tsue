@@ -161,14 +161,14 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
         match host {
             [b'[', ip @ .., b']'] => {
                 if let [b'v' | b'V', lead, rest @ ..] = ip {
-                    if !matches::is_hex(*lead) || rest.is_empty() {
+                    if !lead.is_ascii_hexdigit() || rest.is_empty() {
                         return Err(UriError::Char)
                     }
 
                     let mut ip = rest;
 
                     while let [byte, rest @ ..] = ip {
-                        if matches::is_hex(*byte) {
+                        if byte.is_ascii_hexdigit() {
                             ip = rest;
                         } else if *byte == b'.' {
                             ip = rest;
