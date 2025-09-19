@@ -37,7 +37,38 @@ macro_rules! byte_map {
             bytes
         };
     };
-    // =====
+    // ===== 128 lookup table, usefull for ASCII byte =====
+    {
+        #[table_128]
+        $(#[$meta:meta])*
+        $vis:vis const unsafe fn $fn_id:ident($byte:ident:$u8:ty) { $e:expr }
+    } => {
+        $(#[$meta])*
+        /// # Safety
+        ///
+        /// `byte` must be less than 128.
+        $vis const unsafe fn $fn_id($byte: $u8) -> bool {
+            static PAT: [bool; 128] = {
+                let mut bytes = [false; 128];
+                let mut $byte = 0u8;
+                const fn filter($byte: $u8) -> bool {
+                    $e
+                }
+                loop {
+                    bytes[$byte as usize] = filter($byte);
+                    if $byte == 127 {
+                        break;
+                    }
+                    $byte += 1;
+                }
+                bytes
+            };
+            debug_assert!(byte < 128);
+            // SAFETY: caller must ensure that `byte` is less than 128
+            unsafe { *PAT.as_ptr().add($byte as usize) }
+        }
+    };
+    // ===== 256 lookup table =====
     {
         $(#[$meta:meta])*
         $vis:vis const fn $fn_id:ident($byte:ident:$u8:ty) { $e:expr }
