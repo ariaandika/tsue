@@ -4,7 +4,7 @@ use std::{
     task::{Poll, ready},
 };
 
-pub use crate::proto::h1::IoHandle;
+pub use crate::h1::io::IoHandle;
 
 #[derive(Debug)]
 pub struct BodyHandle {

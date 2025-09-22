@@ -11,8 +11,6 @@ pub mod body;
 pub mod request;
 pub mod response;
 
-mod proto;
-
 pub mod service;
 pub mod server;
 

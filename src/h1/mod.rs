@@ -5,3 +5,5 @@
 //! [`proto`] contains HTTP/1.1 related logic.
 pub mod parser;
 pub mod proto;
+pub mod io;
+pub mod driver;

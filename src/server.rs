@@ -54,7 +54,7 @@ where
 pub mod driver {
     use std::sync::Arc;
 
-    use crate::{proto::h1::driver::Connection, service::HttpService};
+    use crate::{h1::driver::Connection, service::HttpService};
 
     pub trait Driver<IO, S> {
         type Future;

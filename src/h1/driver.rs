@@ -5,7 +5,7 @@ use std::{
 };
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
-use super::io::IoBuffer;
+use super::io::{IoBuffer, BodyWrite};
 use crate::{
     body::Body,
     h1::{
@@ -13,7 +13,6 @@ use crate::{
         proto::{self, HttpState},
     },
     headers::HeaderMap,
-    proto::h1::io::BodyWrite,
     request::Request,
     response::Response,
     service::HttpService,
