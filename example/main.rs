@@ -21,7 +21,7 @@ fn main() -> io::Result<()> {
 
 async fn handle(req: Request) -> Response {
     let parts = req.parts();
-    println!("> {} {} {}", parts.method, parts.uri, parts.version);
+    dbg!(parts);
 
     if parts.uri.path() != "/null" {
         let body = req.into_body().collect().await.unwrap();

@@ -11,10 +11,7 @@ pub mod body;
 pub mod request;
 pub mod response;
 
-mod parser;
 mod proto;
-pub mod driver;
-
 
 pub mod service;
 pub mod server;

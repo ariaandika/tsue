@@ -90,8 +90,6 @@ fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
     };
 
     let version = {
-        // dbg!(tcio::fmt::lossy(&target));
-
         let Some(([rest @ .., b' '], version)) = target.split_last_chunk::<VERSION_SIZE>() else {
             return err!(InvalidSeparator)
         };

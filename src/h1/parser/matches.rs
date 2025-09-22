@@ -8,7 +8,7 @@ pub(crate) use crate::matches::*;
 /// let mut state: &[u8];
 ///
 /// let (delimiter, leading) = matches::split_crlf!(state else {
-///     todo!("crlf not found")
+///     panic!("crlf not found")
 /// });
 ///
 /// assert!(matches!(delimiter, b'\r' | b'\n') || !delimiter.is_ascii());
