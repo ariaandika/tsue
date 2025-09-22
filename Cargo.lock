@@ -39,12 +39,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
 
 [[package]]
-name = "bytes"
-version = "1.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
-
-[[package]]
 name = "cfg-if"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -166,7 +160,7 @@ dependencies = [
 [[package]]
 name = "tcio"
 version = "0.1.4"
-source = "git+https://github.com/ariaandika/tcio#769a1e42b1be3d7845b013bc5e263d634ef4c28c"
+source = "git+https://github.com/ariaandika/tcio#43e4c52cb56082e6344c8cd33bfe075ab751afd4"
 dependencies = [
  "tokio",
 ]
@@ -191,7 +185,6 @@ dependencies = [
 name = "tsue"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "futures-core",
  "itoa",
  "log",
