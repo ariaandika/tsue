@@ -3,7 +3,7 @@ use tcio::bytes::{ByteStr, BytesMut};
 use crate::{
     h1::parser::{error::ErrorKind, HttpError},
     http::Method,
-    uri::{Authority, Path, Scheme, Uri},
+    uri::{Authority, HttpUri, Path, Scheme, Uri},
 };
 
 #[derive(Debug)]
@@ -42,6 +42,7 @@ impl Target {
                 path = Path::try_from(self.value)?;
             },
             Kind::Absolute => {
+                let _ = HttpUri::parse_http(self.value.freeze())?;
                 todo!()
             },
             Kind::Asterisk => {

@@ -133,22 +133,29 @@ byte_map! {
     }
 }
 
-// ===== lookup table =====
-
 byte_map! {
-    /// method  = token
     /// token   = 1*tchar
     /// tchar   = "!" / "#" / "$" / "%" / "&" / "'" / "*"
     ///         / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
     ///         / DIGIT / ALPHA
     #[inline(always)]
-    pub const fn is_method(byte: u8) {
+    const fn is_token(byte: u8) {
         matches!(
             byte,
             | b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*'
             | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
         )
         || byte.is_ascii_alphanumeric()
+    }
+}
+
+// ===== lookup table =====
+
+byte_map! {
+    /// method  = token
+    #[inline(always)]
+    pub const fn is_method(byte: u8) {
+        is_token(byte)
     }
 }
 
