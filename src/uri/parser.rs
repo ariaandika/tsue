@@ -28,6 +28,13 @@ impl Scheme {
 }
 
 impl Authority {
+    #[inline]
+    pub const fn asterisk() -> Self {
+        Self {
+            value: Bytes::new(),
+        }
+    }
+
     /// Parse authority from static str.
     ///
     /// # Panics
@@ -79,6 +86,14 @@ impl Path {
     pub const fn empty() -> Self {
         Self {
             value: Bytes::new(),
+            query: 0,
+        }
+    }
+
+    #[inline]
+    pub const fn root() -> Self {
+        Self {
+            value: Bytes::from_static(b"/"),
             query: 0,
         }
     }

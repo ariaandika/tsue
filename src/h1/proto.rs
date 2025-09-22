@@ -4,7 +4,7 @@ use tcio::bytes::{Bytes, BytesMut};
 use super::parser::{Header, Reqline};
 use crate::{
     headers::{HeaderMap, HeaderName, HeaderValue},
-    http::{Extensions, Uri, httpdate_now},
+    http::{Extensions, httpdate_now},
     request, response,
 };
 
@@ -74,16 +74,15 @@ impl HttpState {
     }
 
     pub fn build_parts(self) -> Result<request::Parts, BoxError> {
-        // TODO: reconstruct URI from a complete Request
-        // https://httpwg.org/specs/rfc9112.html#reconstructing.target.uri
-
-        if self.host.is_none() {
+        let Some(host) = self.host else {
             return Err("missing host header".into());
-        }
+        };
+
+        let uri = self.reqline.target.build_origin(host, false)?;
 
         Ok(request::Parts {
             method: self.reqline.method,
-            uri: Uri::http_root(), // TODO: URI path only parsing
+            uri,
             version: self.reqline.version,
             headers: self.headers,
             extensions: Extensions::new(),

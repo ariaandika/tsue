@@ -1,15 +1,23 @@
-use tcio::bytes::{ByteStr, BytesMut};
+use tcio::bytes::{Bytes, BytesMut};
 
 use crate::{
-    h1::parser::{error::ErrorKind, HttpError},
+    h1::parser::{HttpError, error::ErrorKind},
     http::Method,
-    uri::{Authority, HttpUri, Path, Scheme, Uri},
+    uri::{Authority, HttpUri, Path},
 };
 
 #[derive(Debug)]
 pub struct Target {
     pub value: BytesMut,
     pub kind: Kind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kind {
+    Asterisk,
+    Origin,
+    Absolute,
+    Authority,
 }
 
 impl Target {
@@ -32,7 +40,7 @@ impl Target {
         }
     }
 
-    pub fn build_origin(self, host: ByteStr, scheme: Scheme) -> Result<Uri, HttpError> {
+    pub fn build_origin(self, host: Bytes, is_https: bool) -> Result<HttpUri, HttpError> {
         let authority;
         let path;
 
@@ -42,15 +50,18 @@ impl Target {
                 path = Path::try_from(self.value)?;
             },
             Kind::Absolute => {
-                let _ = HttpUri::parse_http(self.value.freeze())?;
-                todo!()
+                let uri = HttpUri::parse_http(self.value.freeze())?;
+                if uri.authority().as_bytes() == host.as_slice() {
+                    return Err(ErrorKind::MissmatchHost.into());
+                }
+                return Ok(uri);
             },
             Kind::Asterisk => {
                 authority = Authority::try_from(host)?;
                 path = Path::asterisk();
             },
             Kind::Authority => {
-                if self.value.as_slice() != host.as_bytes() {
+                if self.value != host {
                     return Err(ErrorKind::MissmatchHost.into());
                 }
                 authority = Authority::try_from(self.value)?;
@@ -58,15 +69,7 @@ impl Target {
             },
         }
 
-        Ok(Uri::from_parts(scheme, Some(authority), path))
+        Ok(HttpUri::from_parts(is_https, authority, path))
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Kind {
-    Asterisk,
-    Origin,
-    Absolute,
-    Authority,
 }
 

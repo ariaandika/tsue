@@ -170,6 +170,15 @@ impl Uri {
 
 impl HttpUri {
     #[inline]
+    pub const fn from_parts(is_https: bool, authority: Authority, path: Path) -> Self {
+        Self {
+            is_https,
+            authority,
+            path,
+        }
+    }
+
+    #[inline]
     pub const fn is_https(&self) -> bool {
         self.is_https
     }
@@ -197,6 +206,11 @@ impl HttpUri {
     #[inline]
     pub const fn path_and_query(&self) -> &str {
         self.path.as_str()
+    }
+
+    #[inline]
+    pub fn into_parts(self) -> (bool, Authority, Path) {
+        (self.is_https, self.authority, self.path)
     }
 }
 

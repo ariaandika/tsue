@@ -2,14 +2,15 @@
 use crate::{
     body::Body,
     headers::HeaderMap,
-    http::{Extensions, Method, Uri, Version},
+    http::{Extensions, Method, Version},
+    uri::{Authority, HttpUri, Path},
 };
 
 /// HTTP Request Parts.
 #[derive(Debug, Clone)]
 pub struct Parts {
     pub method: Method,
-    pub uri: Uri,
+    pub uri: HttpUri,
     pub version: Version,
     pub headers: HeaderMap,
     pub extensions: Extensions,
@@ -19,7 +20,7 @@ impl Default for Parts {
     fn default() -> Self {
         Self {
             method: <_>::default(),
-            uri: Uri::http_root(),
+            uri: HttpUri::from_parts(false, Authority::from_static(""), Path::root()),
             version: <_>::default(),
             headers: <_>::default(),
             extensions: <_>::default(),
@@ -65,7 +66,7 @@ impl Request {
         /// Returns shared reference to [`Uri`].
         uri(),
         /// Returns mutable reference to [`Uri`].
-        uri_mut() -> Uri;
+        uri_mut() -> HttpUri;
 
         /// Returns shared reference to [`Version`].
         version(),
