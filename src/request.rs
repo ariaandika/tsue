@@ -63,9 +63,9 @@ impl Request {
         /// Returns mutable reference to [`Method`].
         method_mut() -> Method;
 
-        /// Returns shared reference to [`Uri`].
+        /// Returns shared reference to [`HttpUri`].
         uri(),
-        /// Returns mutable reference to [`Uri`].
+        /// Returns mutable reference to [`HttpUri`].
         uri_mut() -> HttpUri;
 
         /// Returns shared reference to [`Version`].

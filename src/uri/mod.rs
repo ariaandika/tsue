@@ -1,8 +1,15 @@
-//! Uniform Resource Identifier.
+//! Uniform Resource Identifier ([RFC3986])
 //!
-//! This API follows the [rfc3986] URI: General Syntax.
+//! [RFC3986]: <https://datatracker.ietf.org/doc/html/rfc3986>
 //!
-//! [rfc3986]: <https://datatracker.ietf.org/doc/html/rfc3986>
+//! # Generic Syntax
+//!
+//! [`Uri`] used to represent generic scheme independent URI.
+//!
+//! # Percent Encoding
+//!
+//! All API here does not Decode or Encode percent encoding by default. Use `decode`/`encode`
+//! method on correspnding API to decode or encode percent encoding respectively.
 use tcio::bytes::Bytes;
 
 mod matches;
@@ -10,12 +17,14 @@ mod parser;
 mod impls;
 mod error;
 
+/// URI Scheme.
 #[derive(Clone)]
 pub struct Scheme {
     /// is valid ASCII
     value: Bytes,
 }
 
+/// URI Authority.
 #[derive(Clone)]
 pub struct Authority {
     /// is valid ASCII
@@ -29,13 +38,11 @@ pub struct Path {
     query: u16,
 }
 
-/// HTTP [URI][rfc].
+/// URI Generic Syntax ([RFC3986])
 ///
-/// A Uniform Resource Identifier ([URI][rfc]) provides a simple and extensible means for identifying a
-/// resource.
+/// [RFC3986]: <https://datatracker.ietf.org/doc/html/rfc3986>
 ///
-/// The generic URI syntax consists of a hierarchical sequence of components referred to as the
-/// scheme, authority, path, and query.
+/// # Syntax Component
 ///
 /// The following are two example URIs and their component parts:
 ///
@@ -48,8 +55,6 @@ pub struct Path {
 ///   / \ /                        \
 ///   urn:example:animal:ferret:nose
 /// ```
-///
-/// [rfc]: <https://datatracker.ietf.org/doc/html/rfc7230#section-2.7>
 #[derive(Debug, Clone)]
 pub struct Uri {
     scheme: Scheme,
