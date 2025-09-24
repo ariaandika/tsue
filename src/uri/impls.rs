@@ -20,7 +20,7 @@ impl Authority {
             Some((_, host)) => host,
             None => self.value.as_slice(),
         };
-        matches::split_port!(host)
+        matches::split_port(host)
     }
 
     /// Returns the authority host.

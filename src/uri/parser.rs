@@ -204,7 +204,7 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
     }
 
     // port
-    if let Some((host, mut port)) = matches::split_port!(bytes) {
+    if let Some((host, mut port)) = matches::split_port(bytes) {
         bytes = host;
 
         // port
