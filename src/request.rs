@@ -20,7 +20,7 @@ impl Default for Parts {
     fn default() -> Self {
         Self {
             method: <_>::default(),
-            uri: HttpUri::from_parts(false, Authority::from_static(""), Path::root()),
+            uri: HttpUri::from_parts(false, Authority::from_static(b""), Path::from_static(b"/")),
             version: <_>::default(),
             headers: <_>::default(),
             extensions: <_>::default(),

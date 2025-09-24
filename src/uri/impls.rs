@@ -194,6 +194,11 @@ impl HttpUri {
     }
 
     #[inline]
+    pub const fn host(&self) -> &str {
+        self.authority.host()
+    }
+
+    #[inline]
     pub const fn path(&self) -> &str {
         self.path.path()
     }

@@ -1,59 +1,59 @@
 use super::{Authority, Path, Scheme, HttpUri, UriError, matches, Bytes};
 
-const SCHEME_HTTP: bool = false;
-const SCHEME_HTTPS: bool = true;
-
 impl Scheme {
+    /// Parse scheme from static slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input is not a valid scheme.
     #[inline]
-    pub const fn from_static(string: &'static str) -> Self {
-        Self::from_shared(Bytes::from_static(string.as_bytes()))
-    }
-
-    #[inline]
-    pub const fn from_shared(value: Bytes) -> Self {
-        match validate_scheme(value.as_slice()) {
-            Ok(()) => Self { value },
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
+        match validate_scheme(bytes) {
+            Ok(()) => Self { value: Bytes::from_static(bytes) },
             Err(err) => err.panic_const(),
         }
     }
 
+    /// Parse scheme from [`Bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid scheme.
     #[inline]
-    pub fn try_from(value: impl Into<Bytes>) -> Result<Self, UriError> {
-        let value = value.into();
+    pub fn parse_from<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+        let value = bytes.into();
         match validate_scheme(value.as_slice()) {
             Ok(()) => Ok(Self { value }),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Parse scheme by copying from slice reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid scheme.
+    #[inline]
+    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+        match validate_scheme(bytes.as_ref()) {
+            Ok(()) => Ok(Self {
+                value: Bytes::copy_from_slice(bytes.as_ref()),
+            }),
             Err(err) => Err(err),
         }
     }
 }
 
 impl Authority {
-    #[inline]
-    pub const fn asterisk() -> Self {
-        Self {
-            value: Bytes::new(),
-        }
-    }
-
-    /// Parse authority from static str.
+    /// Parse authority from static slice.
     ///
     /// # Panics
     ///
     /// Panics if the input is not a valid authority.
     #[inline]
-    pub const fn from_static(string: &'static str) -> Self {
-        Self::from_shared(Bytes::from_static(string.as_bytes()))
-    }
-
-    /// Parse authority from [`Bytes`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the input is not a valid authority.
-    #[inline]
-    pub const fn from_shared(value: Bytes) -> Self {
-        match validate_authority(value.as_slice()) {
-            Ok(()) => Self { value },
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
+        match validate_authority(bytes) {
+            Ok(()) => Self { value: Bytes::from_static(bytes) },
             Err(err) => err.panic_const(),
         }
     }
@@ -64,66 +64,108 @@ impl Authority {
     ///
     /// Returns [`Err`] if the input is not a valid authority.
     #[inline]
-    pub fn try_from(value: impl Into<Bytes>) -> Result<Self, UriError> {
-        let value = value.into();
+    pub fn parse_from<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+        let value = bytes.into();
         match validate_authority(value.as_slice()) {
             Ok(()) => Ok(Self { value }),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Parse authority by copying from slice reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid authority.
+    #[inline]
+    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+        match validate_authority(bytes.as_ref()) {
+            Ok(()) => Ok(Self { value: Bytes::copy_from_slice(bytes.as_ref()) }),
             Err(err) => Err(err),
         }
     }
 }
 
 impl Path {
+    /// Parse path from static slice.
+    ///
+    /// Path fragment is trimmed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input is not a valid path.
     #[inline]
-    pub const fn asterisk() -> Self {
-        Self {
-            value: Bytes::from_static(b"*"),
-            query: 1,
-        }
-    }
-
-    #[inline]
-    pub const fn empty() -> Self {
-        Self {
-            value: Bytes::new(),
-            query: 0,
-        }
-    }
-
-    #[inline]
-    pub const fn root() -> Self {
-        Self {
-            value: Bytes::from_static(b"/"),
-            query: 0,
-        }
-    }
-
-    #[inline]
-    pub const fn from_static(value: &'static str) -> Self {
-        match validate_path(value.as_bytes()) {
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
+        match validate_path(bytes) {
             Ok((query, f)) => Self {
-                value: Bytes::from_static(unsafe { std::slice::from_raw_parts(value.as_ptr(), f) }),
+                value: Bytes::from_static(unsafe { std::slice::from_raw_parts(bytes.as_ptr(), f) }),
                 query,
             },
             Err(err) => err.panic_const(),
         }
     }
 
+    /// Parse path from [`Bytes`].
+    ///
+    /// Path fragment is trimmed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid path.
     #[inline]
-    pub fn try_from(value: impl Into<Bytes>) -> Result<Self, UriError> {
-        Self::try_from_shared(value.into())
+    pub fn parse_from<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+        let mut bytes = bytes.into();
+        let (query, f) = validate_path(bytes.as_slice())?;
+        bytes.truncate(f);
+        Ok(Self {
+            value: bytes,
+            query,
+        })
     }
 
-    fn try_from_shared(mut value: Bytes) -> Result<Self, UriError> {
-        let (query, f) = validate_path(value.as_slice())?;
-        value.truncate(f);
-        Ok(Self { value, query })
+    /// Parse path by copying from slice reference.
+    ///
+    /// Path fragment is trimmed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid path.
+    #[inline]
+    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+        let (query, f) = validate_path(bytes.as_ref())?;
+        let mut bytes = Bytes::copy_from_slice(bytes.as_ref());
+        bytes.truncate(f);
+        Ok(Self {
+            value: bytes,
+            query,
+        })
     }
 }
 
 impl HttpUri {
-    pub fn parse_http(value: Bytes) -> Result<Self, UriError> {
-        parse_http(value)
+    // Parse HTTP URI from [`Bytes`].
+    //
+    // # Examples
+    //
+    // ```
+    // # use tsue::uri::HttpUri;
+    // # use tcio::bytes::Bytes;
+    // let bytes = Bytes::from_static(b"http://example.com/users/all");
+    // let http = HttpUri::parse_from(bytes).unwrap();
+    // assert_eq!(http.host(), "example.com");
+    // assert_eq!(http.path(), "/users/all");
+    // ```
+    #[inline]
+    pub fn parse_from(bytes: impl Into<Bytes>) -> Result<Self, UriError> {
+        parse_http(bytes.into())
+    }
+
+    /// Parse HTTP URI by copying from slice.
+    ///
+    /// If the input is owned [`Bytes`], consider using [`HttpUri::parse_from`].
+    #[inline]
+    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+        parse_http(Bytes::copy_from_slice(bytes.as_ref()))
     }
 }
 
@@ -287,6 +329,9 @@ const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
 }
 
 fn parse_http(mut value: Bytes) -> Result<HttpUri, UriError> {
+    const SCHEME_HTTP: bool = false;
+    const SCHEME_HTTPS: bool = true;
+
     let (is_https, bytes) = match value.as_slice().split_first_chunk::<5>() {
         Some((b"http:", rest)) => {
             let Some((b"//", rest)) = rest.split_first_chunk() else {
@@ -304,12 +349,15 @@ fn parse_http(mut value: Bytes) -> Result<HttpUri, UriError> {
     };
 
     let authority = match matches::find_path_delim!(bytes) {
-        Some(ok) => value.slice_ref(ok),
+        Some(ok) => {
+            dbg!(tcio::fmt::lossy(&ok));
+            value.slice_ref(ok)
+        },
         None => std::mem::take(&mut value),
     };
-    let authority = Authority::try_from(authority)?;
+    let authority = Authority::parse_from(authority)?;
 
-    let path = Path::try_from_shared(value)?;
+    let path = Path::parse(value)?;
 
     Ok(HttpUri {
         is_https,

@@ -46,26 +46,26 @@ impl Target {
 
         match self.kind {
             Kind::Origin => {
-                authority = Authority::try_from(host)?;
-                path = Path::try_from(self.value)?;
+                authority = Authority::parse_from(host)?;
+                path = Path::parse_from(self.value)?;
             },
             Kind::Absolute => {
-                let uri = HttpUri::parse_http(self.value.freeze())?;
+                let uri = HttpUri::parse_from(self.value)?;
                 if uri.authority().as_bytes() == host.as_slice() {
                     return Err(ErrorKind::MissmatchHost.into());
                 }
                 return Ok(uri);
             },
             Kind::Asterisk => {
-                authority = Authority::try_from(host)?;
-                path = Path::asterisk();
+                authority = Authority::parse_from(host)?;
+                path = Path::from_static(b"*");
             },
             Kind::Authority => {
                 if self.value != host {
                     return Err(ErrorKind::MissmatchHost.into());
                 }
-                authority = Authority::try_from(self.value)?;
-                path = Path::empty();
+                authority = Authority::parse_from(self.value)?;
+                path = Path::from_static(b"");
             },
         }
 

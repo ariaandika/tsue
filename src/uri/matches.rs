@@ -196,7 +196,9 @@ macro_rules! find_path_delim {
                 if result != 0 {
                     let nth = (result.trailing_zeros() / 8) as usize;
                     break 'swar unsafe {
-                        Some(from_raw_parts(original.as_ptr(), nth + 1))
+                        let start = original.as_ptr();
+                        let len = state.as_ptr().offset_from_unsigned(start);
+                        Some(from_raw_parts(start, len + nth))
                     }
                 }
 
@@ -206,7 +208,10 @@ macro_rules! find_path_delim {
             while let [byte, rest @ ..] = state {
                 if matches!(byte, b'/' | b'?' | b'#') || !byte.is_ascii() {
                     break 'swar unsafe {
-                        Some(from_raw_parts(original.as_ptr(), rest.as_ptr().offset_from_unsigned(original.as_ptr())))
+                        let start = original.as_ptr();
+                        let len = rest.as_ptr().offset_from_unsigned(start);
+                        Some(from_raw_parts(start, len))
+                        // Some(from_raw_parts(original.as_ptr(), rest.as_ptr().offset_from_unsigned(original.as_ptr())))
                     }
                 } else {
                     state = rest;
