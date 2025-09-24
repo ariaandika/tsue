@@ -1,88 +1,70 @@
 pub(crate) use crate::matches::*;
 
-macro_rules! split_at_sign {
-    (
-        #[private]
-        #[block = $block:ident]
-        #[ascii = $($ascii:tt)*]
-        #[ascii_iter = $($ascii_iter:tt)*]
-        $bytes:expr
-    ) => {
-        'swar: {
-            use std::slice::from_raw_parts;
-            const BLOCK: usize = size_of::<usize>();
-            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
-            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-            const AT: usize = usize::from_ne_bytes([b'@'; BLOCK]);
+/// Split '@'.
+pub const fn split_at_sign(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
+    use std::slice::from_raw_parts;
+    const BLOCK: usize = size_of::<usize>();
+    const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+    const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+    const AT: usize = usize::from_ne_bytes([b'@'; BLOCK]);
 
-            let original = $bytes;
-            let mut state: &[u8] = original;
+    let mut state: &[u8] = bytes;
 
-            while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
-                let $block = usize::from_ne_bytes(*chunk);
+    while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
+        let block = usize::from_ne_bytes(*chunk);
 
-                // '@'
-                let is_at = ($block ^ AT).wrapping_sub(LSB);
+        // '@'
+        let is_at = (block ^ AT).wrapping_sub(LSB);
 
-                let result = (is_at $($ascii)*) & MSB;
-                if result != 0 {
-                    let nth = (result.trailing_zeros() / 8) as usize;
-                    break 'swar unsafe {
-                        let start = original.as_ptr();
-                        let mid_ptr = chunk.as_ptr().add(nth);
-                        let mid = mid_ptr.offset_from_unsigned(original.as_ptr());
-                        Some((
-                            from_raw_parts(start, mid),
-                            from_raw_parts(mid_ptr, original.len().unchecked_sub(mid)),
-                        ))
-                    };
-                }
+        let result = is_at & MSB;
+        if result != 0 {
+            let nth = (result.trailing_zeros() / 8) as usize;
+            return unsafe {
+                let nth_ptr = chunk.as_ptr().add(nth);
+                let end_ptr = bytes.as_ptr().add(bytes.len());
 
-                state = rest;
-            }
+                let start = bytes.as_ptr();
+                let start_len = nth_ptr.offset_from_unsigned(start);
 
-            while let [$block, rest @ ..] = state {
-                if *$block == b'@' $($ascii_iter)* {
-                    break 'swar unsafe {
-                        let start = original.as_ptr();
-                        let mid_ptr = state.as_ptr();
-                        let mid = mid_ptr.offset_from_unsigned(original.as_ptr());
-                        Some((
-                            from_raw_parts(start, mid),
-                            from_raw_parts(mid_ptr, original.len().unchecked_sub(mid)),
-                        ))
-                    };
-                } else {
-                    state = rest;
-                }
-            }
-
-            None
+                let end = nth_ptr.add(1);
+                let end_len = end_ptr.offset_from_unsigned(end);
+                Some((
+                    from_raw_parts(start, start_len),
+                    from_raw_parts(end, end_len),
+                ))
+            };
         }
-    };
 
-    // user input
-    (#[skip_ascii]$bytes:expr) => {
-        matches::split_at_sign! {
-            #[private]
-            #[block = block]
-            #[ascii = ]
-            #[ascii_iter = ]
-            $bytes
+        state = rest;
+    }
+
+    while let [byte, rest @ ..] = state {
+        if *byte == b'@' {
+            let start = bytes.as_ptr();
+            let lead = unsafe { from_raw_parts(start, state.as_ptr().offset_from_unsigned(start)) };
+            return Some((lead, rest));
         }
-    };
-    ($bytes:expr) => {
-        matches::split_at_sign! {
-            #[private]
-            #[block = block]
-            #[ascii = | block]
-            #[ascii_iter = || !block.is_ascii()]
-            $bytes
-        }
-    };
+
+        state = rest;
+    }
+
+    None
 }
 
-pub(crate) use {split_at_sign};
+#[test]
+fn test_split_at_sign() {
+    let (left, right) = split_at_sign(b"user:passwd@example.com").unwrap();
+    assert_eq!(left, b"user:passwd");
+    assert_eq!(right, b"example.com");
+
+    let (left, right) = split_at_sign(b"a@b").unwrap();
+    assert_eq!(left, b"a");
+    assert_eq!(right, b"b");
+
+    let (left, right) = split_at_sign(b"user:passwd@b").unwrap();
+    assert_eq!(left, b"user:passwd");
+    assert_eq!(right, b"b");
+}
 
 /// Find colon from the end.
 ///

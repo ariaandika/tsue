@@ -12,7 +12,7 @@ impl Scheme {
 
 impl Authority {
     const fn split_at(&self) -> Option<(&[u8], &[u8])> {
-        matches::split_at_sign!(#[skip_ascii]self.value.as_slice())
+        matches::split_at_sign(self.value.as_slice())
     }
 
     const fn split_col(&self) -> Option<(&[u8], &[u8])> {
@@ -27,12 +27,7 @@ impl Authority {
     #[inline]
     pub const fn host(&self) -> &str {
         match self.split_at() {
-            Some((_, host)) => {
-                debug_assert!(matches!(host.first(), Some(&b'@')));
-                unsafe {
-                    str::from_utf8_unchecked(from_raw_parts(host.as_ptr().add(1), host.len() - 1))
-                }
-            }
+            Some((_, host)) => unsafe { str::from_utf8_unchecked(host) },
             None => self.as_str(),
         }
     }

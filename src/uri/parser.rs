@@ -191,11 +191,7 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
     }
 
     // userinfo
-    if let Some((mut userinfo, host)) = matches::split_at_sign!(bytes) {
-        let Some((b'@', host)) = host.split_first() else {
-            return Err(UriError::Char);
-        };
-
+    if let Some((mut userinfo, host)) = matches::split_at_sign(bytes) {
         bytes = host;
 
         while let [byte, rest @ ..] = userinfo {
