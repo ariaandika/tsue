@@ -207,82 +207,80 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
         }
     }
 
-    // host
-    if let Some((mut host, port)) = matches::split_col!(bytes) {
-        let Some((b':', port)) = port.split_first() else {
-            return Err(UriError::Char);
-        };
-
-        bytes = port;
-
-        match host {
-            [b'[', ip @ .., b']'] => {
-                if let [b'v' | b'V', lead, rest @ ..] = ip {
-                    if !lead.is_ascii_hexdigit() || rest.is_empty() {
-                        return Err(UriError::Char)
-                    }
-
-                    let mut ip = rest;
-
-                    while let [byte, rest @ ..] = ip {
-                        if byte.is_ascii_hexdigit() {
-                            ip = rest;
-                        } else if *byte == b'.' {
-                            ip = rest;
-                            break
-                        } else {
-                            return Err(UriError::Char);
-                        }
-                    }
-
-                    while let [byte, rest @ ..] = ip {
-                        if matches::is_ipvfuture(*byte) {
-                            ip = rest;
-                        } else {
-                            return Err(UriError::Char);
-                        }
-                    }
-                } else {
-                    // TODO: validate ipv6
-                    let mut ip = ip;
-                    while let [byte, rest @ ..] = ip {
-                        if matches::is_ipv6(*byte) {
-                            ip = rest;
-                        } else {
-                            return Err(UriError::Char);
-                        }
-                    }
-                }
-            }
-            [] => {}
-            _ => {
-                while let [byte, rest @ ..] = host {
-                    if matches::is_regname(*byte) {
-                        host = rest
-                    } else {
-                        return Err(UriError::Char);
-                    }
-                }
-            }
-        }
-    }
-
     // port
-    if !bytes.is_empty() {
-        if bytes.len() > 5 {
+    if let Some((host, mut port)) = matches::split_port!(bytes) {
+        bytes = host;
+
+        // port
+        if port.len() > 5 {
             // add specific error ?
             return Err(UriError::Char);
         }
-        while let [byte, rest @ ..] = bytes {
+        while let [byte, rest @ ..] = port {
             if !byte.is_ascii_digit() {
                 return Err(UriError::Char);
             } else {
-                bytes = rest;
+                port = rest;
             }
         }
     }
 
-    Ok(())
+    if bytes.is_empty() {
+        return Ok(());
+    }
+
+    if !matches!(bytes.first(), Some(b'[')) {
+        while let [byte, rest @ ..] = bytes {
+            if matches::is_regname(*byte) {
+                bytes = rest
+            } else {
+                return Err(UriError::Char);
+            }
+        }
+
+        Ok(())
+    } else if let [b'[', ip @ .., b']'] = bytes {
+        if let [b'v' | b'V', lead, rest @ ..] = ip {
+            if !lead.is_ascii_hexdigit() || rest.is_empty() {
+                return Err(UriError::Char);
+            }
+
+            let mut ip = rest;
+
+            while let [byte, rest @ ..] = ip {
+                if byte.is_ascii_hexdigit() {
+                    ip = rest;
+                } else if *byte == b'.' {
+                    ip = rest;
+                    break;
+                } else {
+                    return Err(UriError::Char);
+                }
+            }
+
+            while let [byte, rest @ ..] = ip {
+                if matches::is_ipvfuture(*byte) {
+                    ip = rest;
+                } else {
+                    return Err(UriError::Char);
+                }
+            }
+        } else {
+            // TODO: validate ipv6
+            let mut ip = ip;
+            while let [byte, rest @ ..] = ip {
+                if matches::is_ipv6(*byte) {
+                    ip = rest;
+                } else {
+                    return Err(UriError::Char);
+                }
+            }
+        }
+
+        Ok(())
+    } else {
+        Err(UriError::Char)
+    }
 }
 
 const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
@@ -350,7 +348,6 @@ fn parse_http(mut value: Bytes) -> Result<HttpUri, UriError> {
 
     let authority = match matches::find_path_delim!(bytes) {
         Some(ok) => {
-            dbg!(tcio::fmt::lossy(&ok));
             value.slice_ref(ok)
         },
         None => std::mem::take(&mut value),

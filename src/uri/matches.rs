@@ -84,89 +84,39 @@ macro_rules! split_at_sign {
 
 pub(crate) use {split_at_sign};
 
-macro_rules! split_col {
-    (
-        #[private]
-        #[block = $block:ident]
-        #[ascii = $($ascii:tt)*]
-        #[ascii_iter = $($ascii_iter:tt)*]
-        $bytes:expr
-    ) => {
+/// Find colon from the end.
+///
+/// Backwards finding is necessary to avoid conflict with ipv6.
+macro_rules! split_port {
+    ($bytes:expr) => {
         'swar: {
             use std::slice::from_raw_parts;
-            const BLOCK: usize = size_of::<usize>();
-            const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
-            const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-            const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
-
             let original = $bytes;
             let mut state: &[u8] = original;
 
-            while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
-                let $block = usize::from_ne_bytes(*chunk);
-
-                // ':'
-                let is_col = ($block ^ COL).wrapping_sub(LSB);
-
-                let result = (is_col $($ascii)*) & MSB;
-                if result != 0 {
-                    let nth = (result.trailing_zeros() / 8) as usize;
+            while let [rest @ .., byte] = state {
+                if byte.is_ascii_digit() {
+                    state = rest;
+                } else if *byte == b':' {
                     break 'swar unsafe {
-                        let start = original.as_ptr();
-                        let mid_ptr = chunk.as_ptr().add(nth);
-                        let mid = mid_ptr.offset_from_unsigned(original.as_ptr());
+                        let mid_ptr = state.as_ptr().add(state.len());
+                        let len = original.len() - state.len();
                         Some((
-                            from_raw_parts(start, mid),
-                            from_raw_parts(mid_ptr, original.len().unchecked_sub(mid)),
-                        ))
-                    };
-                }
-
-                state = rest;
-            }
-
-            while let [$block, rest @ ..] = state {
-                if *$block == b':' $($ascii_iter)* {
-                    break 'swar unsafe {
-                        let start = original.as_ptr();
-                        let mid_ptr = state.as_ptr();
-                        let mid = mid_ptr.offset_from_unsigned(original.as_ptr());
-                        Some((
-                            from_raw_parts(start, mid),
-                            from_raw_parts(mid_ptr, original.len().unchecked_sub(mid)),
+                            rest,
+                            from_raw_parts(mid_ptr, len),
                         ))
                     };
                 } else {
-                    state = rest;
+                    break 'swar None
                 }
             }
 
             None
         }
     };
-
-    // user input
-    (#[skip_ascii]$bytes:expr) => {
-        matches::split_col! {
-            #[private]
-            #[block = block]
-            #[ascii = ]
-            #[ascii_iter = ]
-            $bytes
-        }
-    };
-    ($bytes:expr) => {
-        matches::split_col! {
-            #[private]
-            #[block = block]
-            #[ascii = | block]
-            #[ascii_iter = || !block.is_ascii()]
-            $bytes
-        }
-    };
 }
 
-pub(crate) use {split_col};
+pub(crate) use {split_port};
 
 macro_rules! find_path_delim {
     ($bytes:expr) => {
