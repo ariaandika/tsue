@@ -94,8 +94,8 @@ impl Path {
             unsafe {
                 let query = self.query as usize;
                 Some(str::from_utf8_unchecked(from_raw_parts(
-                    self.value.as_ptr().add(query.unchecked_add(1)),
-                    self.value.len().unchecked_sub(query),
+                    self.value.as_ptr().add(query + 1),
+                    self.value.len() - query - 1,
                 )))
             }
         }
