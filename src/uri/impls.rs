@@ -11,12 +11,12 @@ impl Scheme {
 }
 
 impl Authority {
-    const fn split_at(&self) -> Option<(&[u8], &[u8])> {
+    const fn split_userinfo(&self) -> Option<(&[u8], &[u8])> {
         matches::split_at_sign(self.value.as_slice())
     }
 
-    const fn split_col(&self) -> Option<(&[u8], &[u8])> {
-        let host = match self.split_at() {
+    const fn split_port(&self) -> Option<(&[u8], &[u8])> {
+        let host = match self.split_userinfo() {
             Some((_, host)) => host,
             None => self.value.as_slice(),
         };
@@ -26,7 +26,7 @@ impl Authority {
     /// Returns the authority host.
     #[inline]
     pub const fn host(&self) -> &str {
-        match self.split_at() {
+        match self.split_userinfo() {
             Some((_, host)) => unsafe { str::from_utf8_unchecked(host) },
             None => self.as_str(),
         }
@@ -35,9 +35,13 @@ impl Authority {
     /// Returns the authority hostname.
     #[inline]
     pub const fn hostname(&self) -> &str {
-        let hostname = match self.split_col() {
-            Some((ok, _)) => ok,
+        let host = match self.split_userinfo() {
+            Some((_, host)) => host,
             None => self.value.as_slice(),
+        };
+        let hostname = match matches::split_port(host) {
+            Some((hostname, _)) => hostname,
+            None => host,
         };
         unsafe { str::from_utf8_unchecked(hostname) }
     }
@@ -45,7 +49,7 @@ impl Authority {
     /// Returns the authority port.
     #[inline]
     pub const fn port(&self) -> Option<u16> {
-        match self.split_col() {
+        match self.split_port() {
             // with port validation in constructor, should we do unsafe calculation ?
             Some((_, port)) => match tcio::atou(port) {
                 Some(ok) => Some(ok as u16),
@@ -58,7 +62,7 @@ impl Authority {
     /// Returns the authority userinfo.
     #[inline]
     pub const fn userinfo(&self) -> Option<&str> {
-        match self.split_at() {
+        match self.split_userinfo() {
             Some((userinfo, _)) => unsafe {
                 Some(str::from_utf8_unchecked(userinfo))
             },

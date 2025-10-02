@@ -17,6 +17,9 @@ mod parser;
 mod impls;
 mod error;
 
+#[cfg(test)]
+mod test;
+
 /// URI Scheme.
 #[derive(Clone)]
 pub struct Scheme {
