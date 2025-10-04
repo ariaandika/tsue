@@ -322,35 +322,24 @@ const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
     Ok((query, frag))
 }
 
-fn parse_http(mut value: Bytes) -> Result<HttpUri, UriError> {
-    const SCHEME_HTTP: bool = false;
-    const SCHEME_HTTPS: bool = true;
-
-    let (is_https, bytes) = match value.as_slice().split_first_chunk::<5>() {
-        Some((b"http:", rest)) => {
-            let Some((b"//", rest)) = rest.split_first_chunk() else {
-                return Err(UriError::Char)
-            };
-            (SCHEME_HTTP, rest)
-        },
-        Some((b"https", rest)) => {
-            let Some((b"://", rest)) = rest.split_first_chunk() else {
-                return Err(UriError::Char)
-            };
-            (SCHEME_HTTPS, rest)
-        },
-        _ => return Err(UriError::Char),
+fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
+    let is_https = if bytes.starts_with(b"http://") {
+        bytes.advance(5 + 2);
+        false
+    } else if bytes.starts_with(b"https://") {
+        bytes.advance(5 + 3);
+        true
+    } else {
+        return Err(UriError::Char);
     };
 
-    let authority = match matches::find_path_delim!(bytes) {
-        Some(ok) => {
-            value.slice_ref(ok)
-        },
-        None => std::mem::take(&mut value),
+    let authority = match matches::find_path_delim!(bytes.as_slice()) {
+        Some(at) => bytes.split_to(at),
+        None => std::mem::take(&mut bytes),
     };
     let authority = Authority::parse_from(authority)?;
 
-    let path = Path::parse(value)?;
+    let path = Path::parse(bytes)?;
 
     Ok(HttpUri {
         is_https,
