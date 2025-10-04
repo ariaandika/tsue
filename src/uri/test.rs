@@ -1,28 +1,4 @@
-use crate::uri::{Scheme, Authority, Path};
-
-macro_rules! assert_authority {
-    (#[rest($id:ident)] $($m:ident())*, $ok:expr; $($tt:tt)*) => {
-        $(assert_eq!($id.$m(), $ok, concat!("`",stringify!($m),"()`"));)*
-        assert_authority!(#[rest($id)]$($tt)*);
-    };
-    (#[rest($id:ident)]) => { };
-    ($parse:ident($input:expr); $($tt:tt)*) => {
-        let ok = Authority::$parse($input).unwrap();
-        assert_authority!(#[rest(ok)]$($tt)*);
-    };
-}
-
-macro_rules! assert_path {
-    (#[rest($id:ident)] $($m:ident())*, $ok:expr; $($tt:tt)*) => {
-        $(assert_eq!($id.$m(), $ok, concat!("`",stringify!($m),"()`"));)*
-        assert_path!(#[rest($id)]$($tt)*);
-    };
-    (#[rest($id:ident)]) => { };
-    ($parse:ident($input:expr); $($tt:tt)*) => {
-        let ok = Path::$parse($input).unwrap();
-        assert_path!(#[rest(ok)]$($tt)*);
-    };
-}
+use super::{Authority, HttpUri, Path, Scheme};
 
 #[test]
 pub fn test_scheme() {
@@ -37,109 +13,107 @@ pub fn test_scheme() {
 
 #[test]
 pub fn test_authority() {
-    assert_authority! {
-        parse("");
-        host() hostname(), "";
-        userinfo() port(), None;
-    }
-    assert_authority! {
-        parse("example.com");
-        host() hostname(), "example.com";
-        userinfo() port(), None;
-    }
-    assert_authority! {
-        parse("user:pass@example.com");
-        userinfo(), Some("user:pass");
-        host() hostname(), "example.com";
-        port(), None;
-    }
-    assert_authority! {
-        parse("example.com:443");
-        userinfo(), None;
-        host(), "example.com:443";
-        hostname(), "example.com";
-        port(), Some(443);
-    }
-    assert_authority! {
-        parse("user:pass@example.com:443");
-        userinfo(), Some("user:pass");
-        host(), "example.com:443";
-        hostname(), "example.com";
-        port(), Some(443);
-    }
+    let auth = Authority::parse("").unwrap();
+    assert_eq!(auth.host(), "");
+    assert_eq!(auth.hostname(), "",);
+    assert_eq!(auth.userinfo(), None);
+    assert_eq!(auth.port(), None);
+
+    let auth = Authority::parse("example.com").unwrap();
+    assert_eq!(auth.host(), "example.com");
+    assert_eq!(auth.hostname(), "example.com");
+    assert_eq!(auth.userinfo(), None);
+    assert_eq!(auth.port(), None);
+
+    let auth = Authority::parse("user:pass@example.com").unwrap();
+    assert_eq!(auth.userinfo(), Some("user:pass"));
+    assert_eq!(auth.host(), "example.com");
+    assert_eq!(auth.hostname(), "example.com");
+    assert_eq!(auth.port(), None);
+
+    let auth = Authority::parse("example.com:443").unwrap();
+    assert_eq!(auth.userinfo(), None);
+    assert_eq!(auth.host(), "example.com:443");
+    assert_eq!(auth.hostname(), "example.com");
+    assert_eq!(auth.port(), Some(443));
+
+    let auth = Authority::parse("user:pass@example.com:443").unwrap();
+    assert_eq!(auth.userinfo(), Some("user:pass"));
+    assert_eq!(auth.host(), "example.com:443");
+    assert_eq!(auth.hostname(), "example.com");
+    assert_eq!(auth.port(), Some(443));
 
     // note that currently the exact syntax of ipv6 is not validated
 
-    assert_authority! {
-        parse("[a2f::1]");
-        host() hostname(), "[a2f::1]";
-        userinfo() port(), None;
-    }
-    assert_authority! {
-        parse("user:pass@[a2f::1]");
-        userinfo(), Some("user:pass");
-        host() hostname(), "[a2f::1]";
-        port(), None;
-    }
-    assert_authority! {
-        parse("[a2f::1]:443");
-        userinfo(), None;
-        host(), "[a2f::1]:443";
-        hostname(), "[a2f::1]";
-        port(), Some(443);
-    }
-    assert_authority! {
-        parse("user:pass@[a2f::1]:443");
-        userinfo(), Some("user:pass");
-        host(), "[a2f::1]:443";
-        hostname(), "[a2f::1]";
-        port(), Some(443);
-    }
+    let auth = Authority::parse("[a2f::1]").unwrap();
+    assert_eq!(auth.host(), "[a2f::1]",);
+    assert_eq!(auth.hostname(), "[a2f::1]");
+    assert_eq!(auth.userinfo(), None);
+    assert_eq!(auth.port(), None);
+
+    let auth = Authority::parse("user:pass@[a2f::1]").unwrap();
+    assert_eq!(auth.userinfo(), Some("user:pass"));
+    assert_eq!(auth.host(), "[a2f::1]",);
+    assert_eq!(auth.hostname(), "[a2f::1]");
+    assert_eq!(auth.port(), None);
+
+    let auth = Authority::parse("[a2f::1]:443").unwrap();
+    assert_eq!(auth.userinfo(), None);
+    assert_eq!(auth.host(), "[a2f::1]:443");
+    assert_eq!(auth.hostname(), "[a2f::1]");
+    assert_eq!(auth.port(), Some(443));
+
+    let auth = Authority::parse("user:pass@[a2f::1]:443").unwrap();
+    assert_eq!(auth.userinfo(), Some("user:pass"));
+    assert_eq!(auth.host(), "[a2f::1]:443");
+    assert_eq!(auth.hostname(), "[a2f::1]");
+    assert_eq!(auth.port(), Some(443));
 }
 
 #[test]
 fn test_path() {
-    assert_path! {
-        parse("");
-        path_and_query() path(), "";
-        query(), None;
-    }
-    assert_path! {
-        parse("/users/all");
-        path_and_query() path(), "/users/all";
-        query(), None;
-    }
-    assert_path! {
-        parse("/users/all?");
-        path_and_query(), "/users/all?";
-        path(), "/users/all";
-        query(), Some("");
-    }
-    assert_path! {
-        parse("/users/all?page=420");
-        path_and_query(), "/users/all?page=420";
-        path(), "/users/all";
-        query(), Some("page=420");
-    }
+    let path = Path::parse("").unwrap();
+    assert_eq!(path.path_and_query(), "");
+    assert_eq!(path.path(), "");
+    assert_eq!(path.query(), None);
+
+    let path = Path::parse("/users/all").unwrap();
+    assert_eq!(path.path_and_query(), "/users/all");
+    assert_eq!(path.path(), "/users/all");
+    assert_eq!(path.query(), None);
+
+    let path = Path::parse("/users/all?").unwrap();
+    assert_eq!(path.path_and_query(), "/users/all?");
+    assert_eq!(path.path(), "/users/all");
+    assert_eq!(path.query(), Some(""));
+
+    let path = Path::parse("/users/all?page=420").unwrap();
+    assert_eq!(path.path_and_query(), "/users/all?page=420");
+    assert_eq!(path.path(), "/users/all");
+    assert_eq!(path.query(), Some("page=420"));
 
     // fragment are trimmed
 
-    assert_path! {
-        parse("/users/all#section-443");
-        path_and_query() path(), "/users/all";
-        query(), None;
-    }
-    assert_path! {
-        parse("/users/all?#section-443");
-        path_and_query(), "/users/all?";
-        path(), "/users/all";
-        query(), Some("");
-    }
-    assert_path! {
-        parse("/users/all?page=420#section-443");
-        path_and_query(), "/users/all?page=420";
-        path(), "/users/all";
-        query(), Some("page=420");
-    }
+    let path = Path::parse("/users/all#section-443").unwrap();
+    assert_eq!(path.path_and_query(), "/users/all");
+    assert_eq!(path.path(), "/users/all");
+    assert_eq!(path.query(), None);
+
+    let path = Path::parse("/users/all?#section-443").unwrap();
+    assert_eq!(path.path_and_query(), "/users/all?");
+    assert_eq!(path.path(), "/users/all");
+    assert_eq!(path.query(), Some(""));
+
+    let path = Path::parse("/users/all?page=420#section-443").unwrap();
+    assert_eq!(path.path_and_query(), "/users/all?page=420");
+    assert_eq!(path.path(), "/users/all");
+    assert_eq!(path.query(), Some("page=420"));
 }
 
+#[test]
+fn test_http_uri() {
+    let ok = HttpUri::parse("http://example.com/users/all?page=420#section-443").unwrap();
+    assert!(!ok.is_https());
+    assert_eq!(ok.authority(), "example.com");
+    assert_eq!(ok.path(), "/users/all");
+}
