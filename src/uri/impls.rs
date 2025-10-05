@@ -120,15 +120,6 @@ impl Path {
 
 impl Uri {
     #[inline]
-    pub const fn from_parts(scheme: Scheme, authority: Option<Authority>, path: Path) -> Self {
-        Self {
-            scheme,
-            authority,
-            path,
-        }
-    }
-
-    #[inline]
     pub const fn scheme(&self) -> &str {
         self.scheme.as_str()
     }

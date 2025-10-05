@@ -1,4 +1,4 @@
-use super::{Authority, Path, Scheme, HttpUri, Uri, UriError, matches, Bytes};
+use super::{Authority, Bytes, HttpUri, Path, Scheme, Uri, UriError, matches};
 
 impl Scheme {
     /// Parse scheme from static slice.
@@ -20,7 +20,7 @@ impl Scheme {
     ///
     /// Returns [`Err`] if the input is not a valid scheme.
     #[inline]
-    pub fn parse_from<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+    pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
         let value = bytes.into();
         match validate_scheme(value.as_slice()) {
             Ok(()) => Ok(Self { value }),
@@ -34,7 +34,7 @@ impl Scheme {
     ///
     /// Returns [`Err`] if the input is not a valid scheme.
     #[inline]
-    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+    pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         match validate_scheme(bytes.as_ref()) {
             Ok(()) => Ok(Self {
                 value: Bytes::copy_from_slice(bytes.as_ref()),
@@ -64,7 +64,7 @@ impl Authority {
     ///
     /// Returns [`Err`] if the input is not a valid authority.
     #[inline]
-    pub fn parse_from<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+    pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
         let value = bytes.into();
         match validate_authority(value.as_slice()) {
             Ok(()) => Ok(Self { value }),
@@ -78,7 +78,7 @@ impl Authority {
     ///
     /// Returns [`Err`] if the input is not a valid authority.
     #[inline]
-    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+    pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         match validate_authority(bytes.as_ref()) {
             Ok(()) => Ok(Self { value: Bytes::copy_from_slice(bytes.as_ref()) }),
             Err(err) => Err(err),
@@ -113,7 +113,7 @@ impl Path {
     ///
     /// Returns [`Err`] if the input is not a valid path.
     #[inline]
-    pub fn parse_from<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+    pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
         let mut bytes = bytes.into();
         let (query, f) = validate_path(bytes.as_slice())?;
         bytes.truncate(f);
@@ -131,7 +131,7 @@ impl Path {
     ///
     /// Returns [`Err`] if the input is not a valid path.
     #[inline]
-    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+    pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         let (query, f) = validate_path(bytes.as_ref())?;
         let mut bytes = Bytes::copy_from_slice(bytes.as_ref());
         bytes.truncate(f);
@@ -143,18 +143,28 @@ impl Path {
 }
 
 impl Uri {
+    /// Creates [`Uri`] from [`Scheme`], optionally [`Authority`], and [`Path`].
+    #[inline]
+    pub const fn from_parts(scheme: Scheme, authority: Option<Authority>, path: Path) -> Self {
+        Self {
+            scheme,
+            authority,
+            path,
+        }
+    }
+
     /// Parse URI from [`Bytes`].
     ///
     /// # Examples
     ///
     /// ```
     /// # use tsue::uri::Uri;
-    /// let http = Uri::parse("http://example.com/users/all").unwrap();
+    /// let http = Uri::from_bytes("http://example.com/users/all").unwrap();
     /// assert_eq!(http.host(), Some("example.com"));
     /// assert_eq!(http.path(), "/users/all");
     /// ```
     #[inline]
-    pub fn parse_from<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+    pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
         parse_uri(bytes.into())
     }
 
@@ -162,7 +172,7 @@ impl Uri {
     ///
     /// If the input is owned [`Bytes`], consider using [`Uri::parse_from`].
     #[inline]
-    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+    pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         parse_uri(Bytes::copy_from_slice(bytes.as_ref()))
     }
 }
@@ -181,7 +191,7 @@ impl HttpUri {
     // assert_eq!(http.path(), "/users/all");
     // ```
     #[inline]
-    pub fn parse_from(bytes: impl Into<Bytes>) -> Result<Self, UriError> {
+    pub fn from_bytes(bytes: impl Into<Bytes>) -> Result<Self, UriError> {
         parse_http(bytes.into())
     }
 
@@ -189,7 +199,7 @@ impl HttpUri {
     ///
     /// If the input is owned [`Bytes`], consider using [`HttpUri::parse_from`].
     #[inline]
-    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+    pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         parse_http(Bytes::copy_from_slice(bytes.as_ref()))
     }
 }
@@ -351,7 +361,7 @@ fn parse_uri(mut bytes: Bytes) -> Result<Uri, UriError> {
     let at = matches::match_scheme!(bytes.as_slice(); else {
         return Err(UriError::Char)
     });
-    let scheme = Scheme::parse_from(bytes.split_to(at))?;
+    let scheme = Scheme::from_bytes(bytes.split_to(at))?;
 
     bytes.advance(1);
 
@@ -363,12 +373,12 @@ fn parse_uri(mut bytes: Bytes) -> Result<Uri, UriError> {
             None => std::mem::take(&mut bytes),
         };
 
-        Some(Authority::parse_from(authority)?)
+        Some(Authority::from_bytes(authority)?)
     } else {
         None
     };
 
-    let path = Path::parse_from(bytes)?;
+    let path = Path::from_bytes(bytes)?;
 
     Ok(Uri {
         scheme,
@@ -392,9 +402,9 @@ fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
         Some(at) => bytes.split_to(at),
         None => std::mem::take(&mut bytes),
     };
-    let authority = Authority::parse_from(authority)?;
+    let authority = Authority::from_bytes(authority)?;
 
-    let path = Path::parse(bytes)?;
+    let path = Path::from_slice(bytes)?;
 
     Ok(HttpUri {
         is_https,
