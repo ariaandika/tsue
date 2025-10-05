@@ -116,6 +116,29 @@ fn test_split_port() {
     assert_eq!(right, b"443");
 }
 
+macro_rules! match_scheme {
+    ($bytes:expr; else { $err:expr }) => {
+        'swar: {
+            let original = $bytes;
+            let mut state: &[u8] = original;
+
+            while let [byte, rest @ ..] = state {
+                if matches::is_scheme(*byte) {
+                    state = rest;
+                } else if *byte == b':' {
+                    break 'swar unsafe {
+                        state.as_ptr().offset_from_unsigned(original.as_ptr())
+                    };
+                } else {
+                    break;
+                }
+            }
+
+            $err
+        }
+    };
+}
+
 macro_rules! find_path_delim {
     ($bytes:expr) => {
         'swar: {
@@ -165,5 +188,5 @@ macro_rules! find_path_delim {
     };
 }
 
-pub(crate) use {find_path_delim};
+pub(crate) use {find_path_delim, match_scheme};
 

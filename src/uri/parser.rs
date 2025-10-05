@@ -1,4 +1,4 @@
-use super::{Authority, Path, Scheme, HttpUri, UriError, matches, Bytes};
+use super::{Authority, Path, Scheme, HttpUri, Uri, UriError, matches, Bytes};
 
 impl Scheme {
     /// Parse scheme from static slice.
@@ -139,6 +139,31 @@ impl Path {
             value: bytes,
             query,
         })
+    }
+}
+
+impl Uri {
+    /// Parse URI from [`Bytes`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use tsue::uri::Uri;
+    /// let http = Uri::parse("http://example.com/users/all").unwrap();
+    /// assert_eq!(http.host(), Some("example.com"));
+    /// assert_eq!(http.path(), "/users/all");
+    /// ```
+    #[inline]
+    pub fn parse_from<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+        parse_uri(bytes.into())
+    }
+
+    /// Parse URI by copying from slice.
+    ///
+    /// If the input is owned [`Bytes`], consider using [`Uri::parse_from`].
+    #[inline]
+    pub fn parse<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+        parse_uri(Bytes::copy_from_slice(bytes.as_ref()))
     }
 }
 
@@ -322,16 +347,46 @@ const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
     Ok((query, frag))
 }
 
+fn parse_uri(mut bytes: Bytes) -> Result<Uri, UriError> {
+    let at = matches::match_scheme!(bytes.as_slice(); else {
+        return Err(UriError::Char)
+    });
+    let scheme = Scheme::parse_from(bytes.split_to(at))?;
+
+    bytes.advance(1);
+
+    let authority = if bytes.starts_with(b"//") {
+        bytes.advance(2);
+
+        let authority = match matches::find_path_delim!(bytes.as_slice()) {
+            Some(at) => bytes.split_to(at),
+            None => std::mem::take(&mut bytes),
+        };
+
+        Some(Authority::parse_from(authority)?)
+    } else {
+        None
+    };
+
+    let path = Path::parse_from(bytes)?;
+
+    Ok(Uri {
+        scheme,
+        authority,
+        path,
+    })
+}
+
 fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
     let is_https = if bytes.starts_with(b"http://") {
-        bytes.advance(5 + 2);
         false
     } else if bytes.starts_with(b"https://") {
-        bytes.advance(5 + 3);
         true
     } else {
         return Err(UriError::Char);
     };
+
+    bytes.advance(5 + 2 + is_https as usize);
 
     let authority = match matches::find_path_delim!(bytes.as_slice()) {
         Some(at) => bytes.split_to(at),
