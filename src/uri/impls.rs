@@ -3,6 +3,7 @@ use std::slice::from_raw_parts;
 use super::{Authority, Path, Scheme, Uri, HttpUri, matches};
 
 impl Scheme {
+    /// Extracts a string slice containing the scheme.
     #[inline]
     pub const fn as_str(&self) -> &str {
         // SAFETY: precondition `value` is valid ASCII
@@ -24,6 +25,13 @@ impl Authority {
     }
 
     /// Returns the authority host.
+    ///
+    /// ```not_rust
+    /// user:pass@example.com:8042
+    ///           \______________/
+    ///                  |
+    ///                 host
+    /// ```
     #[inline]
     pub const fn host(&self) -> &str {
         match self.split_userinfo() {
@@ -33,6 +41,13 @@ impl Authority {
     }
 
     /// Returns the authority hostname.
+    ///
+    /// ```not_rust
+    /// user:pass@example.com:8042
+    ///           \_________/
+    ///                |
+    ///             hostname
+    /// ```
     #[inline]
     pub const fn hostname(&self) -> &str {
         let host = match self.split_userinfo() {
@@ -47,6 +62,13 @@ impl Authority {
     }
 
     /// Returns the authority port.
+    ///
+    /// ```not_rust
+    /// user:pass@example.com:8042
+    ///                       \__/
+    ///                        |
+    ///                       port
+    /// ```
     #[inline]
     pub const fn port(&self) -> Option<u16> {
         match self.split_port() {
@@ -60,6 +82,13 @@ impl Authority {
     }
 
     /// Returns the authority userinfo.
+    ///
+    /// ```not_rust
+    /// user:pass@example.com:8042
+    /// \_______/
+    ///     |
+    ///  userinfo
+    /// ```
     #[inline]
     pub const fn userinfo(&self) -> Option<&str> {
         match self.split_userinfo() {
@@ -70,6 +99,7 @@ impl Authority {
         }
     }
 
+    /// Extracts a string slice containing the authority.
     #[inline]
     pub const fn as_str(&self) -> &str {
         // SAFETY: precondition `value` is valid ASCII
@@ -78,7 +108,14 @@ impl Authority {
 }
 
 impl Path {
-    /// Returns the path as `str`, e.g: `/over/there`.
+    /// Returns the path component.
+    ///
+    /// ```not_rust
+    /// /over/there?name=ferret
+    /// \_________/
+    ///      |
+    ///    path
+    /// ```
     #[inline]
     pub const fn path(&self) -> &str {
         // SAFETY: precondition `value` is valid ASCII, `query` is less than or equal to `value`
@@ -88,7 +125,14 @@ impl Path {
         }
     }
 
-    /// Returns the query as `str`, e.g: `name=joe&query=4`.
+    /// Returns the query component.
+    ///
+    /// ```not_rust
+    /// /over/there?name=ferret
+    ///             \_________/
+    ///                  |
+    ///                query
+    /// ```
     #[inline]
     pub const fn query(&self) -> Option<&str> {
         if self.query as usize == self.value.len() {
@@ -105,12 +149,13 @@ impl Path {
         }
     }
 
-    /// Returns the path and query as `str`, e.g: `/over/there?name=joe&query=4`.
+    /// Returns the entire path and query.
     #[inline]
     pub const fn path_and_query(&self) -> &str {
         self.as_str()
     }
 
+    /// Extracts a string slice containing the path and query.
     #[inline]
     pub const fn as_str(&self) -> &str {
         // SAFETY: precondition `value` is valid ASCII
@@ -119,16 +164,38 @@ impl Path {
 }
 
 impl Uri {
+    /// Returns the scheme component.
+    ///
+    /// ```not_rust
+    ///   foo://example.com:8042/over/there?name=ferret
+    ///   \_/
+    ///    |
+    /// scheme
+    ///    |
+    ///   / \
+    ///   urn:example:animal:ferret:nose
+    /// ```
     #[inline]
     pub const fn scheme(&self) -> &str {
         self.scheme.as_str()
     }
 
+    /// Returns the scheme component as [`Scheme`].
     #[inline]
     pub const fn as_scheme(&self) -> &Scheme {
         &self.scheme
     }
 
+    /// Returns the authority component if exists.
+    ///
+    /// ```not_rust
+    /// foo://example.com:8042/over/there?name=ferret
+    ///       \______________/
+    ///              |
+    ///          authority
+    /// ```
+    ///
+    /// If returned [`Some`], the string will not be empty.
     #[inline]
     pub const fn authority(&self) -> Option<&str> {
         match &self.authority {
@@ -137,21 +204,97 @@ impl Uri {
         }
     }
 
+    /// Returns the authority component as [`Authority`] if exists.
     #[inline]
     pub const fn as_authority(&self) -> Option<&Authority> {
         self.authority.as_ref()
     }
 
+    /// Returns the host component if exists.
+    ///
+    /// ```not_rust
+    /// foo://example.com:8042/over/there?name=ferret
+    ///       \______________/
+    ///              |
+    ///            host
+    /// ```
+    #[inline]
+    pub const fn host(&self) -> Option<&str> {
+        match &self.authority {
+            Some(auth) => Some(auth.host()),
+            None => None,
+        }
+    }
+
+    /// Returns the hostname component if exists.
+    ///
+    /// ```not_rust
+    /// foo://example.com:8042/over/there?name=ferret
+    ///       \_________/
+    ///            |
+    ///        hostname
+    /// ```
+    #[inline]
+    pub const fn hostname(&self) -> Option<&str> {
+        match &self.authority {
+            Some(auth) => Some(auth.hostname()),
+            None => None,
+        }
+    }
+
+    /// Returns the userinfo component if exists.
+    ///
+    /// ```not_rust
+    /// foo://user:pass@example.com:8042/over/there?name=ferret
+    ///       \_______/
+    ///           |
+    ///       userinfo
+    /// ```
+    #[inline]
+    pub const fn userinfo(&self) -> Option<&str> {
+        match &self.authority {
+            Some(auth) => auth.userinfo(),
+            None => None,
+        }
+    }
+
+    /// Returns the path component.
+    ///
+    /// ```not_rust
+    /// foo://example.com:8042/over/there?name=ferret
+    ///                       \_________/
+    ///                           |
+    ///                          path
+    ///      _____________________|__
+    ///     /                        \
+    /// urn:example:animal:ferret:nose
+    /// ```
     #[inline]
     pub const fn path(&self) -> &str {
         self.path.path()
     }
 
+    /// Returns the query component if exists.
+    ///
+    /// ```not_rust
+    /// foo://example.com:8042/over/there?name=ferret
+    ///                                   \_________/
+    ///                                        |
+    ///                                      query
+    /// ```
     #[inline]
     pub const fn query(&self) -> Option<&str> {
         self.path.query()
     }
 
+    /// Returns the path and query component.
+    ///
+    /// ```not_rust
+    /// foo://example.com:8042/over/there?name=ferret
+    ///                       \_____________________/
+    ///                                  |
+    ///                            path and query
+    /// ```
     #[inline]
     pub const fn path_and_query(&self) -> &str {
         self.path.as_str()
@@ -159,50 +302,84 @@ impl Uri {
 }
 
 impl HttpUri {
-    #[inline]
-    pub const fn from_parts(is_https: bool, authority: Authority, path: Path) -> Self {
-        Self {
-            is_https,
-            authority,
-            path,
-        }
-    }
-
+    /// Returns `true` if the scheme is HTTPS.
     #[inline]
     pub const fn is_https(&self) -> bool {
         self.is_https
     }
 
+    /// Returns the authority component.
+    ///
+    /// ```not_rust
+    /// http://example.com:8042/over/there?name=ferret
+    ///        \______________/
+    ///               |
+    ///           authority
+    /// ```
     #[inline]
     pub const fn authority(&self) -> &str {
         self.authority.as_str()
     }
 
+    /// Returns the authority component as [`Authority`].
     #[inline]
     pub const fn as_authority(&self) -> &Authority {
         &self.authority
     }
 
+    /// Returns the host component.
+    ///
+    /// ```not_rust
+    /// http://example.com:8042/over/there?name=ferret
+    ///        \______________/
+    ///               |
+    ///           authority
+    /// ```
     #[inline]
     pub const fn host(&self) -> &str {
         self.authority.host()
     }
 
+    /// Returns the path component.
+    ///
+    /// ```not_rust
+    /// http://example.com:8042/over/there?name=ferret
+    ///        \______________/
+    ///               |
+    ///           authority
+    /// ```
     #[inline]
     pub const fn path(&self) -> &str {
         self.path.path()
     }
 
+    /// Returns the query component if exists.
+    ///
+    /// ```not_rust
+    /// http://example.com:8042/over/there?name=ferret
+    ///                                    \_________/
+    ///                                         |
+    ///                                       query
+    /// ```
     #[inline]
     pub const fn query(&self) -> Option<&str> {
         self.path.query()
     }
 
+    /// Returns the path and query component.
+    ///
+    /// ```not_rust
+    /// http://example.com:8042/over/there?name=ferret
+    ///                        \_____________________/
+    ///                                   |
+    ///                             path and query
+    /// ```
     #[inline]
     pub const fn path_and_query(&self) -> &str {
         self.path.as_str()
     }
 
+    /// Consume `HttpUri` into each components.
     #[inline]
     pub fn into_parts(self) -> (bool, Authority, Path) {
         (self.is_https, self.authority, self.path)
@@ -230,8 +407,4 @@ macro_rules! delegate_fmt {
     () => {}
 }
 
-delegate_fmt! {
-    Scheme,
-    Authority,
-    Path
-}
+delegate_fmt!(Scheme, Authority, Path);

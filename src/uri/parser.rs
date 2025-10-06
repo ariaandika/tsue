@@ -1,7 +1,7 @@
 use super::{Authority, Bytes, HttpUri, Path, Scheme, Uri, UriError, matches};
 
 impl Scheme {
-    /// Parse scheme from static slice.
+    /// Parse scheme from static bytes.
     ///
     /// # Panics
     ///
@@ -28,7 +28,7 @@ impl Scheme {
         }
     }
 
-    /// Parse scheme by copying from slice reference.
+    /// Parse scheme by copying from slice of bytes.
     ///
     /// # Errors
     ///
@@ -45,7 +45,7 @@ impl Scheme {
 }
 
 impl Authority {
-    /// Parse authority from static slice.
+    /// Parse authority from static bytes.
     ///
     /// # Panics
     ///
@@ -72,7 +72,7 @@ impl Authority {
         }
     }
 
-    /// Parse authority by copying from slice reference.
+    /// Parse authority by copying from slice of bytes.
     ///
     /// # Errors
     ///
@@ -87,7 +87,7 @@ impl Authority {
 }
 
 impl Path {
-    /// Parse path from static slice.
+    /// Parse path from static bytes.
     ///
     /// Path fragment is trimmed.
     ///
@@ -123,7 +123,7 @@ impl Path {
         })
     }
 
-    /// Parse path by copying from slice reference.
+    /// Parse path by copying from slice of bytes.
     ///
     /// Path fragment is trimmed.
     ///
@@ -163,14 +163,20 @@ impl Uri {
     /// assert_eq!(http.host(), Some("example.com"));
     /// assert_eq!(http.path(), "/users/all");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid URI.
     #[inline]
     pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
         parse_uri(bytes.into())
     }
 
-    /// Parse URI by copying from slice.
+    /// Parse URI by copying from slice of bytes.
     ///
-    /// If the input is owned [`Bytes`], consider using [`Uri::parse_from`].
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid URI.
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         parse_uri(Bytes::copy_from_slice(bytes.as_ref()))
@@ -178,26 +184,40 @@ impl Uri {
 }
 
 impl HttpUri {
-    // Parse HTTP URI from [`Bytes`].
-    //
-    // # Examples
-    //
-    // ```
-    // # use tsue::uri::HttpUri;
-    // # use tcio::bytes::Bytes;
-    // let bytes = Bytes::from_static(b"http://example.com/users/all");
-    // let http = HttpUri::parse_from(bytes).unwrap();
-    // assert_eq!(http.host(), "example.com");
-    // assert_eq!(http.path(), "/users/all");
-    // ```
+    /// Creates [`HttpUri`] from https flag, [`Authority`], and [`Path`].
+    #[inline]
+    pub const fn from_parts(is_https: bool, authority: Authority, path: Path) -> Self {
+        Self {
+            is_https,
+            authority,
+            path,
+        }
+    }
+
+    /// Parse HTTP URI from [`Bytes`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tsue::uri::HttpUri;
+    /// let http = HttpUri::from_bytes("http://example.com/users/all").unwrap();
+    /// assert_eq!(http.host(), "example.com");
+    /// assert_eq!(http.path(), "/users/all");
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid HTTP URI.
     #[inline]
     pub fn from_bytes(bytes: impl Into<Bytes>) -> Result<Self, UriError> {
         parse_http(bytes.into())
     }
 
-    /// Parse HTTP URI by copying from slice.
+    /// Parse HTTP URI by copying from slice of bytes.
     ///
-    /// If the input is owned [`Bytes`], consider using [`HttpUri::parse_from`].
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid HTTP URI.
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         parse_http(Bytes::copy_from_slice(bytes.as_ref()))

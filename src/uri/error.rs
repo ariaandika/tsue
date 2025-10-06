@@ -1,4 +1,5 @@
 
+/// A possible error value when parsing URI.
 #[derive(Clone)]
 pub enum UriError {
     /// Bytes ends before all components parsed.
