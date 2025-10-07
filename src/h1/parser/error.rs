@@ -53,10 +53,10 @@ impl std::fmt::Display for HttpError {
 
 impl From<crate::uri::UriError> for HttpError {
     fn from(value: crate::uri::UriError) -> Self {
+        use crate::uri::UriError::*;
         match value {
-            crate::uri::UriError::Incomplete => Self::from(ErrorKind::TooShort),
-            crate::uri::UriError::TooLong => Self::from(ErrorKind::TooLong),
-            crate::uri::UriError::Char => Self::from(ErrorKind::InvalidTarget),
+            TooLong => Self::from(ErrorKind::TooLong),
+            InvalidScheme | InvalidAuthority | InvalidPath => Self::from(ErrorKind::InvalidTarget),
         }
     }
 }

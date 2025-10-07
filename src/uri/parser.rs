@@ -228,13 +228,13 @@ impl HttpUri {
 
 const fn validate_scheme(mut bytes: &[u8]) -> Result<(), UriError> {
     if bytes.is_empty() {
-        return Err(UriError::Incomplete);
+        return Err(UriError::InvalidScheme);
     }
     while let [byte, rest @ ..] = bytes {
         if matches::is_scheme(*byte) {
             bytes = rest
         } else {
-            return Err(UriError::Char)
+            return Err(UriError::InvalidScheme)
         }
     }
     Ok(())
@@ -253,7 +253,7 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
             if matches::is_userinfo(*byte) {
                 userinfo = rest
             } else {
-                return Err(UriError::Char);
+                return Err(UriError::InvalidAuthority);
             }
         }
     }
@@ -265,11 +265,11 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
         // port
         if port.len() > 5 {
             // add specific error ?
-            return Err(UriError::Char);
+            return Err(UriError::InvalidAuthority);
         }
         while let [byte, rest @ ..] = port {
             if !byte.is_ascii_digit() {
-                return Err(UriError::Char);
+                return Err(UriError::InvalidAuthority);
             } else {
                 port = rest;
             }
@@ -285,7 +285,7 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
             if matches::is_regname(*byte) {
                 bytes = rest
             } else {
-                return Err(UriError::Char);
+                return Err(UriError::InvalidAuthority);
             }
         }
 
@@ -293,7 +293,7 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
     } else if let [b'[', ip @ .., b']'] = bytes {
         if let [b'v' | b'V', lead, rest @ ..] = ip {
             if !lead.is_ascii_hexdigit() || rest.is_empty() {
-                return Err(UriError::Char);
+                return Err(UriError::InvalidAuthority);
             }
 
             let mut ip = rest;
@@ -305,7 +305,7 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
                     ip = rest;
                     break;
                 } else {
-                    return Err(UriError::Char);
+                    return Err(UriError::InvalidAuthority);
                 }
             }
 
@@ -313,7 +313,7 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
                 if matches::is_ipvfuture(*byte) {
                     ip = rest;
                 } else {
-                    return Err(UriError::Char);
+                    return Err(UriError::InvalidAuthority);
                 }
             }
         } else {
@@ -323,14 +323,14 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
                 if matches::is_ipv6(*byte) {
                     ip = rest;
                 } else {
-                    return Err(UriError::Char);
+                    return Err(UriError::InvalidAuthority);
                 }
             }
         }
 
         Ok(())
     } else {
-        Err(UriError::Char)
+        Err(UriError::InvalidAuthority)
     }
 }
 
@@ -359,7 +359,7 @@ const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
             bytes = &[];
             break;
         } else {
-            return Err(UriError::Char);
+            return Err(UriError::InvalidPath);
         }
     }
 
@@ -370,7 +370,7 @@ const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
             frag = frag - rest.len() - 1;
             break;
         } else {
-            return Err(UriError::Char);
+            return Err(UriError::InvalidPath);
         }
     }
 
@@ -379,7 +379,7 @@ const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
 
 fn parse_uri(mut bytes: Bytes) -> Result<Uri, UriError> {
     let at = matches::match_scheme!(bytes.as_slice(); else {
-        return Err(UriError::Char)
+        return Err(UriError::InvalidScheme)
     });
     let scheme = Scheme::from_bytes(bytes.split_to(at))?;
 
@@ -413,7 +413,7 @@ fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
     } else if bytes.starts_with(b"https://") {
         true
     } else {
-        return Err(UriError::Char);
+        return Err(UriError::InvalidScheme);
     };
 
     bytes.advance(5 + 2 + is_https as usize);

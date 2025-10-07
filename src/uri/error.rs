@@ -2,12 +2,11 @@
 /// A possible error value when parsing URI.
 #[derive(Clone)]
 pub enum UriError {
-    /// Bytes ends before all components parsed.
-    Incomplete,
     /// Bytes length is too large.
     TooLong,
-    /// Invalid character found.
-    Char,
+    InvalidScheme,
+    InvalidAuthority,
+    InvalidPath,
 }
 
 // ===== Error =====
@@ -35,9 +34,10 @@ macro_rules! gen_error {
 }
 
 gen_error! {
-    Incomplete => "URI incomplete",
     TooLong => "URI too long",
-    Char => "URI contains invalid character",
+    InvalidScheme => "invalid scheme",
+    InvalidAuthority => "invalid authority",
+    InvalidPath => "invalid path",
 }
 
 impl std::error::Error for UriError { }
