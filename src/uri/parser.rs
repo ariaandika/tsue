@@ -393,7 +393,11 @@ fn parse_uri(mut bytes: Bytes) -> Result<Uri, UriError> {
             None => std::mem::take(&mut bytes),
         };
 
-        Some(Authority::from_bytes(authority)?)
+        if !authority.is_empty() {
+            Some(Authority::from_bytes(authority)?)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -422,6 +426,12 @@ fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
         Some(at) => bytes.split_to(at),
         None => std::mem::take(&mut bytes),
     };
+
+    // > A sender MUST NOT generate an "http" URI with an empty host identifier.
+    if authority.is_empty() {
+        return Err(UriError::InvalidAuthority);
+    }
+
     let authority = Authority::from_bytes(authority)?;
 
     let path = Path::from_slice(bytes)?;
