@@ -1,6 +1,6 @@
 use std::slice::from_raw_parts;
 
-use super::{Authority, Host, HttpUri, Path, Scheme, Uri, matches};
+use super::{Authority, Host, HttpScheme, HttpUri, Path, Scheme, Uri, matches};
 
 impl Scheme {
     /// Extracts a string slice containing the scheme.
@@ -8,6 +8,32 @@ impl Scheme {
     pub const fn as_str(&self) -> &str {
         // SAFETY: precondition `value` is valid ASCII
         unsafe { str::from_utf8_unchecked(self.value.as_slice()) }
+    }
+}
+
+impl HttpScheme {
+    /// HTTP Scheme.
+    pub const HTTP: Self = Self(false);
+    /// HTTPS Scheme.
+    pub const HTTPS: Self = Self(true);
+
+    /// Returns `true` if this is an HTTP scheme.
+    #[inline]
+    pub const fn is_http(&self) -> bool {
+        !self.0
+    }
+
+    /// Returns `true` if this is an HTTPS scheme.
+    #[inline]
+    pub const fn is_https(&self) -> bool {
+        self.0
+    }
+
+    /// Extracts a string slice containing http scheme.
+    #[inline]
+    pub const fn as_str(&self) -> &str {
+        const HTTPS: &str = "https";
+        unsafe { str::from_utf8_unchecked(from_raw_parts(HTTPS.as_ptr(), 4 + self.0 as usize)) }
     }
 }
 
@@ -448,12 +474,14 @@ macro_rules! delegate_fmt {
     ($($ty:ty),*) => {
         $(
             impl std::fmt::Debug for $ty {
+                #[inline]
                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     self.as_str().fmt(f)
                 }
             }
 
             impl std::fmt::Display for $ty {
+                #[inline]
                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     self.as_str().fmt(f)
                 }
@@ -463,4 +491,4 @@ macro_rules! delegate_fmt {
     () => {}
 }
 
-delegate_fmt!(Scheme, Authority, Host, Path);
+delegate_fmt!(Scheme, HttpScheme, Authority, Host, Path);

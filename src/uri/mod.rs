@@ -89,6 +89,15 @@ pub struct Scheme {
     value: Bytes,
 }
 
+/// HTTP Scheme.
+///
+/// HTTP/HTTPS scheme.
+///
+/// This struct is usually used when building HTTP URI [from parts][HttpUri::from_parts].
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct HttpScheme(bool);
+
 /// URI Authority.
 ///
 /// The authority component of a URI.
@@ -134,7 +143,7 @@ pub struct Authority {
 ///                     host
 /// ```
 ///
-/// This struct is usually used when building URI [from parts][Uri::from_parts].
+/// This struct is usually used when building HTTP URI [from parts][HttpUri::from_parts].
 ///
 /// # Example
 ///
