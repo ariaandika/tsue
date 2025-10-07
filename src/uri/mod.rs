@@ -265,8 +265,8 @@ pub struct Uri {
 /// ```
 #[derive(Debug, Clone)]
 pub struct HttpUri {
-    is_https: bool,
-    authority: Authority,
+    scheme: HttpScheme,
+    host: Host,
     path: Path,
 }
 

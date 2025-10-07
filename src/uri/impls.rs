@@ -384,29 +384,16 @@ impl Uri {
 }
 
 impl HttpUri {
+    /// Returns `true` if the scheme is HTTP.
+    #[inline]
+    pub const fn is_http(&self) -> bool {
+        self.scheme.is_http()
+    }
+
     /// Returns `true` if the scheme is HTTPS.
     #[inline]
     pub const fn is_https(&self) -> bool {
-        self.is_https
-    }
-
-    /// Returns the authority component.
-    ///
-    /// ```not_rust
-    /// http://example.com:8042/over/there?name=ferret
-    ///        \______________/
-    ///               |
-    ///           authority
-    /// ```
-    #[inline]
-    pub const fn authority(&self) -> &str {
-        self.authority.as_str()
-    }
-
-    /// Returns the authority component as [`Authority`].
-    #[inline]
-    pub const fn as_authority(&self) -> &Authority {
-        &self.authority
+        self.scheme.is_https()
     }
 
     /// Returns the host component.
@@ -415,20 +402,26 @@ impl HttpUri {
     /// http://example.com:8042/over/there?name=ferret
     ///        \______________/
     ///               |
-    ///           authority
+    ///             host
     /// ```
     #[inline]
     pub const fn host(&self) -> &str {
-        self.authority.host()
+        self.host.as_str()
+    }
+
+    /// Returns the host component as [`Host`].
+    #[inline]
+    pub const fn as_host(&self) -> &Host {
+        &self.host
     }
 
     /// Returns the path component.
     ///
     /// ```not_rust
     /// http://example.com:8042/over/there?name=ferret
-    ///        \______________/
-    ///               |
-    ///           authority
+    ///                        \_________/
+    ///                             |
+    ///                           path
     /// ```
     #[inline]
     pub const fn path(&self) -> &str {
@@ -463,8 +456,8 @@ impl HttpUri {
 
     /// Consume `HttpUri` into each components.
     #[inline]
-    pub fn into_parts(self) -> (bool, Authority, Path) {
-        (self.is_https, self.authority, self.path)
+    pub fn into_parts(self) -> (HttpScheme, Host, Path) {
+        (self.scheme, self.host, self.path)
     }
 }
 

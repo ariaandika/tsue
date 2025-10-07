@@ -130,7 +130,7 @@ fn test_uri() {
 fn test_http_uri() {
     let http = HttpUri::from_slice("http://example.com/users/all?page=420#section-443").unwrap();
     assert!(!http.is_https());
-    assert_eq!(http.authority(), "example.com");
+    assert_eq!(http.host(), "example.com");
     assert_eq!(http.path(), "/users/all");
 
     // authority required

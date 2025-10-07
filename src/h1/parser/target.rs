@@ -3,7 +3,7 @@ use tcio::bytes::{Bytes, BytesMut};
 use crate::{
     h1::parser::{HttpError, error::ErrorKind},
     http::Method,
-    uri::{Authority, HttpUri, Path},
+    uri::{Host, HttpScheme, HttpUri, Path},
 };
 
 #[derive(Debug)]
@@ -40,36 +40,36 @@ impl Target {
         }
     }
 
-    pub fn build_origin(self, host: Bytes, is_https: bool) -> Result<HttpUri, HttpError> {
-        let authority;
+    pub fn build_origin(self, host: Bytes, scheme: HttpScheme) -> Result<HttpUri, HttpError> {
+        let uri_host;
         let path;
 
         match self.kind {
             Kind::Origin => {
-                authority = Authority::from_bytes(host)?;
+                uri_host = Host::from_bytes(host)?;
                 path = Path::from_bytes(self.value)?;
-            },
+            }
             Kind::Absolute => {
                 let uri = HttpUri::from_bytes(self.value)?;
-                if uri.authority().as_bytes() == host.as_slice() {
+                if uri.host().as_bytes() == host.as_slice() {
                     return Err(ErrorKind::MissmatchHost.into());
                 }
                 return Ok(uri);
-            },
+            }
             Kind::Asterisk => {
-                authority = Authority::from_bytes(host)?;
+                uri_host = Host::from_bytes(host)?;
                 path = Path::from_static(b"*");
-            },
+            }
             Kind::Authority => {
                 if self.value != host {
                     return Err(ErrorKind::MissmatchHost.into());
                 }
-                authority = Authority::from_bytes(self.value)?;
+                uri_host = Host::from_bytes(self.value)?;
                 path = Path::from_static(b"");
-            },
+            }
         }
 
-        Ok(HttpUri::from_parts(is_https, authority, path))
+        Ok(HttpUri::from_parts(scheme, uri_host, path))
     }
 }
 

@@ -6,6 +6,7 @@ use crate::{
     headers::{HeaderMap, HeaderName, HeaderValue},
     http::{Extensions, httpdate_now},
     request, response,
+    uri::HttpScheme,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -78,7 +79,7 @@ impl HttpState {
             return Err("missing host header".into());
         };
 
-        let uri = self.reqline.target.build_origin(host, false)?;
+        let uri = self.reqline.target.build_origin(host, HttpScheme::HTTP)?;
 
         Ok(request::Parts {
             method: self.reqline.method,

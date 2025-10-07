@@ -3,7 +3,7 @@ use crate::{
     body::Body,
     headers::HeaderMap,
     http::{Extensions, Method, Version},
-    uri::{Authority, HttpUri, Path},
+    uri::{Host, HttpScheme, HttpUri, Path},
 };
 
 /// HTTP Request Parts.
@@ -20,7 +20,11 @@ impl Default for Parts {
     fn default() -> Self {
         Self {
             method: <_>::default(),
-            uri: HttpUri::from_parts(false, Authority::from_static(b""), Path::from_static(b"/")),
+            uri: HttpUri::from_parts(
+                HttpScheme::HTTP,
+                Host::from_static(b""),
+                Path::from_static(b"/"),
+            ),
             version: <_>::default(),
             headers: <_>::default(),
             extensions: <_>::default(),

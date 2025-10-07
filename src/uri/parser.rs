@@ -1,4 +1,4 @@
-use super::{Authority, Bytes, Host, HttpUri, Path, Scheme, Uri, UriError, matches};
+use super::{Authority, Bytes, Host, HttpScheme, HttpUri, Path, Scheme, Uri, UriError, matches};
 
 impl Scheme {
     /// Parse scheme from static bytes.
@@ -188,6 +188,10 @@ impl Uri {
     /// Creates [`Uri`] from [`Scheme`], optionally [`Authority`], and [`Path`].
     #[inline]
     pub const fn from_parts(scheme: Scheme, authority: Option<Authority>, path: Path) -> Self {
+        // TODO: check that path should be `path-abempty` ?
+        // > [RFC3986#section-3] When authority is present, the path must either be empty or begin
+        // > with a slash ("/") character
+
         Self {
             scheme,
             authority,
@@ -226,14 +230,10 @@ impl Uri {
 }
 
 impl HttpUri {
-    /// Creates [`HttpUri`] from https flag, [`Authority`], and [`Path`].
+    /// Creates [`HttpUri`] from [`HttpScheme`], [`Host`], and [`Path`].
     #[inline]
-    pub const fn from_parts(is_https: bool, authority: Authority, path: Path) -> Self {
-        Self {
-            is_https,
-            authority,
-            path,
-        }
+    pub const fn from_parts(scheme: HttpScheme, host: Host, path: Path) -> Self {
+        Self { scheme, host, path }
     }
 
     /// Parse HTTP URI from [`Bytes`].
@@ -458,33 +458,33 @@ fn parse_uri(mut bytes: Bytes) -> Result<Uri, UriError> {
 }
 
 fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
-    let is_https = if bytes.starts_with(b"http://") {
-        false
+    let scheme = if bytes.starts_with(b"http://") {
+        HttpScheme::HTTP
     } else if bytes.starts_with(b"https://") {
-        true
+        HttpScheme::HTTPS
     } else {
         return Err(UriError::InvalidScheme);
     };
 
-    bytes.advance(5 + 2 + is_https as usize);
+    bytes.advance(5 + 2 + scheme.is_https() as usize);
 
-    let authority = match matches::find_path_delim!(bytes.as_slice()) {
+    let host = match matches::find_path_delim!(bytes.as_slice()) {
         Some(at) => bytes.split_to(at),
         None => std::mem::take(&mut bytes),
     };
 
     // > A sender MUST NOT generate an "http" URI with an empty host identifier.
-    if authority.is_empty() {
+    if host.is_empty() {
         return Err(UriError::InvalidAuthority);
     }
 
-    let authority = Authority::from_bytes(authority)?;
+    let host = Host::from_bytes(host)?;
 
     let path = Path::from_slice(bytes)?;
 
     Ok(HttpUri {
-        is_https,
-        authority,
+        scheme,
+        host,
         path,
     })
 }
