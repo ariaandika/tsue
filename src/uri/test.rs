@@ -1,4 +1,4 @@
-use super::{Authority, HttpUri, Path, Scheme};
+use super::{Authority, HttpUri, Path, Scheme, Uri};
 
 #[test]
 pub fn test_scheme() {
@@ -111,9 +111,29 @@ fn test_path() {
 }
 
 #[test]
+fn test_uri() {
+    let uri = Uri::from_slice("foo://example.com:8042/over/there?name=ferret").unwrap();
+    assert_eq!(uri.scheme(), "foo");
+    assert_eq!(uri.authority(), Some("example.com:8042"));
+    assert_eq!(uri.path(), "/over/there");
+    assert_eq!(uri.query(), Some("name=ferret"));
+
+    // detect empty authority
+
+    let uri = Uri::from_slice("file:///home/user/downloads").unwrap();
+    assert_eq!(uri.scheme(), "file");
+    assert_eq!(uri.authority(), None);
+    assert_eq!(uri.path(), "/home/user/downloads");
+}
+
+#[test]
 fn test_http_uri() {
-    let ok = HttpUri::from_slice("http://example.com/users/all?page=420#section-443").unwrap();
-    assert!(!ok.is_https());
-    assert_eq!(ok.authority(), "example.com");
-    assert_eq!(ok.path(), "/users/all");
+    let http = HttpUri::from_slice("http://example.com/users/all?page=420#section-443").unwrap();
+    assert!(!http.is_https());
+    assert_eq!(http.authority(), "example.com");
+    assert_eq!(http.path(), "/users/all");
+
+    // authority required
+
+    assert!(HttpUri::from_slice("http:/users/all?page=420#section-443").is_err());
 }
