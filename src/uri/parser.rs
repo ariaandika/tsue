@@ -1,4 +1,4 @@
-use super::{Authority, Bytes, HttpUri, Path, Scheme, Uri, UriError, matches};
+use super::{Authority, Bytes, Host, HttpUri, Path, Scheme, Uri, UriError, matches};
 
 impl Scheme {
     /// Parse scheme from static bytes.
@@ -80,6 +80,48 @@ impl Authority {
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         match validate_authority(bytes.as_ref()) {
+            Ok(()) => Ok(Self { value: Bytes::copy_from_slice(bytes.as_ref()) }),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl Host {
+    /// Parse host from static bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input is not a valid host.
+    #[inline]
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
+        match validate_host(bytes) {
+            Ok(()) => Self { value: Bytes::from_static(bytes) },
+            Err(err) => err.panic_const(),
+        }
+    }
+
+    /// Parse host from [`Bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid host.
+    #[inline]
+    pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+        let value = bytes.into();
+        match validate_host(value.as_slice()) {
+            Ok(()) => Ok(Self { value }),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Parse host by copying from slice of bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid host.
+    #[inline]
+    pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+        match validate_host(bytes.as_ref()) {
             Ok(()) => Ok(Self { value: Bytes::copy_from_slice(bytes.as_ref()) }),
             Err(err) => Err(err),
         }
@@ -241,10 +283,6 @@ const fn validate_scheme(mut bytes: &[u8]) -> Result<(), UriError> {
 }
 
 const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
-    if bytes.is_empty() {
-        return Ok(());
-    }
-
     // userinfo
     if let Some((mut userinfo, host)) = matches::split_at_sign(bytes) {
         bytes = host;
@@ -256,6 +294,14 @@ const fn validate_authority(mut bytes: &[u8]) -> Result<(), UriError> {
                 return Err(UriError::InvalidAuthority);
             }
         }
+    }
+
+    validate_host(bytes)
+}
+
+const fn validate_host(mut bytes: &[u8]) -> Result<(), UriError> {
+    if bytes.is_empty() {
+        return Ok(());
     }
 
     // port

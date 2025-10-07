@@ -94,10 +94,10 @@ pub struct Scheme {
 /// The authority component of a URI.
 ///
 /// ```not_rust
-/// foo://example.com:8042/over/there?name=ferret
-///       \______________/
-///              |
-///          authority
+/// foo://username@example.com:8042/over/there?name=ferret
+///       \_______________________/
+///                   |
+///               authority
 /// ```
 ///
 /// This struct is usually used when building URI [from parts][Uri::from_parts].
@@ -110,12 +110,44 @@ pub struct Scheme {
 ///
 /// ```
 /// use tsue::uri::Authority;
-/// let authority = Authority::from_bytes("example.com:8042").unwrap();
+/// let authority = Authority::from_bytes("username@example.com:8042").unwrap();
+/// assert_eq!(authority.hostname(), "example.com");
+/// assert_eq!(authority.port(), Some(8042));
+/// assert_eq!(authority.userinfo(), Some("username"));
+/// ```
+#[derive(Clone)]
+pub struct Authority {
+    /// is valid ASCII
+    value: Bytes,
+}
+
+/// URI Host.
+///
+/// The host component of a URI.
+///
+/// Host is authority without userinfo.
+///
+/// ```not_rust
+/// foo://username@example.com:8042/over/there?name=ferret
+///                \______________/
+///                       |
+///                     host
+/// ```
+///
+/// This struct is usually used when building URI [from parts][Uri::from_parts].
+///
+/// # Example
+///
+/// To create [`Host`] use one of the `Host::from_*` method:
+///
+/// ```
+/// use tsue::uri::Host;
+/// let authority = Host::from_bytes("example.com:8042").unwrap();
 /// assert_eq!(authority.hostname(), "example.com");
 /// assert_eq!(authority.port(), Some(8042));
 /// ```
 #[derive(Clone)]
-pub struct Authority {
+pub struct Host {
     /// is valid ASCII
     value: Bytes,
 }
@@ -144,7 +176,6 @@ pub struct Authority {
 ///
 /// ```
 /// use tsue::uri::Path;
-///
 /// let path = Path::from_bytes("/over/there?name=ferret").unwrap();
 /// assert_eq!(path.path(), "/over/there");
 /// assert_eq!(path.query(), Some("name=ferret"));

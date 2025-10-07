@@ -1,6 +1,6 @@
 use std::slice::from_raw_parts;
 
-use super::{Authority, Path, Scheme, Uri, HttpUri, matches};
+use super::{Authority, Host, HttpUri, Path, Scheme, Uri, matches};
 
 impl Scheme {
     /// Extracts a string slice containing the scheme.
@@ -100,6 +100,62 @@ impl Authority {
     }
 
     /// Extracts a string slice containing the authority.
+    #[inline]
+    pub const fn as_str(&self) -> &str {
+        // SAFETY: precondition `value` is valid ASCII
+        unsafe { str::from_utf8_unchecked(self.value.as_slice()) }
+    }
+}
+
+impl Host {
+    const fn split_port(&self) -> Option<(&[u8], &[u8])> {
+        matches::split_port(self.value.as_slice())
+    }
+
+    /// Returns the entire host.
+    #[inline]
+    pub const fn host(&self) -> &str {
+        self.as_str()
+    }
+
+    /// Returns the authority hostname.
+    ///
+    /// ```not_rust
+    /// example.com:8042
+    /// \_________/
+    ///      |
+    ///   hostname
+    /// ```
+    #[inline]
+    pub const fn hostname(&self) -> &str {
+        let hostname = match self.split_port() {
+            Some((hostname, _)) => hostname,
+            None => self.value.as_slice(),
+        };
+        unsafe { str::from_utf8_unchecked(hostname) }
+    }
+
+    /// Returns the authority port.
+    ///
+    /// ```not_rust
+    /// example.com:8042
+    ///             \__/
+    ///              |
+    ///             port
+    /// ```
+    #[inline]
+    pub const fn port(&self) -> Option<u16> {
+        match self.split_port() {
+            // with port validation in constructor, should we do unsafe calculation ?
+            Some((_, port)) => match tcio::atou(port) {
+                Some(ok) => Some(ok as u16),
+                None => None,
+            }
+            None => None,
+        }
+    }
+
+    /// Extracts a string slice containing the host.
     #[inline]
     pub const fn as_str(&self) -> &str {
         // SAFETY: precondition `value` is valid ASCII
@@ -407,4 +463,4 @@ macro_rules! delegate_fmt {
     () => {}
 }
 
-delegate_fmt!(Scheme, Authority, Path);
+delegate_fmt!(Scheme, Authority, Host, Path);
