@@ -1,3 +1,5 @@
+use std::num::NonZeroU8;
+
 /// HTTP Method.
 ///
 /// This API follows the [RFC9110] and the PATCH method from [RFC5789].
@@ -6,8 +8,15 @@
 ///
 /// [RFC5789]: https://www.rfc-editor.org/rfc/rfc5789
 /// [RFC9110]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-methods>
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct Method(u8);
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Method(NonZeroU8);
+
+impl Default for Method {
+    #[inline]
+    fn default() -> Self {
+        Self::GET
+    }
+}
 
 struct Props {
     safe: bool,
@@ -16,7 +25,7 @@ struct Props {
 }
 
 props! {
-    static PROPS: [9];
+    static PROPS: [10];
 
     /// The [GET] method requests transfer of a current [selected representation][sr] for the
     /// [target resource][tr].
@@ -24,51 +33,51 @@ props! {
     /// [GET]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-get>
     /// [sr]: <https://www.rfc-editor.org/rfc/rfc9110.html#selected.representation>
     /// [tr]: <https://www.rfc-editor.org/rfc/rfc9110.html#target.resource>
-    pub const GET = (0, b"GET", safe, idempotent);
+    pub const GET = (1, b"GET", safe, idempotent);
     /// The [HEAD] method is identical to GET except that the server MUST NOT send content in the
     /// response. HEAD
     ///
     /// [HEAD]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-head>
-    pub const HEAD = (1, b"HEAD", safe, idempotent);
+    pub const HEAD = (2, b"HEAD", safe, idempotent);
     /// The [POST] method requests that the [target resource][tr] process the representation
     /// enclosed in the request according to the resource's own specific semantics.
     ///
     /// [POST]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-post>
     /// [tr]: <https://www.rfc-editor.org/rfc/rfc9110.html#target.resource>
-    pub const POST = (2, b"POST", , );
+    pub const POST = (3, b"POST", , );
     /// The [PUT] method requests that the state of the [target resource][tr] be created or
     /// replaced with the state defined by the representation enclosed in the request message
     /// content.
     ///
     /// [PUT]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-put>
     /// [tr]: <https://www.rfc-editor.org/rfc/rfc9110.html#target.resource>
-    pub const PUT = (3, b"PUT", , idempotent);
+    pub const PUT = (4, b"PUT", , idempotent);
     /// The [DELETE] method requests that the origin server remove the association between the
     /// [target resource][tr] and its current functionality.
     ///
     /// [DELETE]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-delete>
     /// [tr]: <https://www.rfc-editor.org/rfc/rfc9110.html#target.resource>
-    pub const DELETE = (4, b"DELETE", , idempotent);
+    pub const DELETE = (5, b"DELETE", , idempotent);
     /// The [CONNECT] method requests that the recipient establish a tunnel to the destination
     /// origin server identified by the request target and, if successful, thereafter restrict its
     /// behavior to blind forwarding of data, in both directions, until the tunnel is closed.
     ///
     /// [CONNECT]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-connect>
-    pub const CONNECT = (5, b"CONNECT", , );
+    pub const CONNECT = (6, b"CONNECT", , );
     /// The [OPTIONS] method requests information about the communication options available for the
     /// target resource, at either the origin server or an intervening intermediary.
     ///
     /// [OPTIONS]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-options>
-    pub const OPTIONS = (6, b"OPTIONS", safe, idempotent);
+    pub const OPTIONS = (7, b"OPTIONS", safe, idempotent);
     /// The [TRACE] method requests a remote, application-level loop-back of the request message.
     ///
     /// [TRACE]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-trace>
-    pub const TRACE = (7, b"TRACE", safe, idempotent);
+    pub const TRACE = (8, b"TRACE", safe, idempotent);
     /// The [PATCH] method requests that a set of changes described in the request entity be
     /// applied to the resource identified by the Request-URI.
     ///
     /// [PATCH]: <https://www.rfc-editor.org/rfc/rfc5789#section-2>
-    pub const PATCH = (8, b"PATCH", , );
+    pub const PATCH = (9, b"PATCH", , );
 }
 
 impl Method {
@@ -84,7 +93,7 @@ impl Method {
     /// ["safe"]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-safe-methods>
     #[inline]
     pub const fn is_safe(&self) -> bool {
-        PROPS[self.0 as usize].safe
+        PROPS[self.0.get() as usize].safe
     }
 
     /// Returns `true` if method is considered ["idempotent"].
@@ -99,19 +108,20 @@ impl Method {
     /// ["idempotent"]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-idempotent-methods>
     #[inline]
     pub const fn is_idempoten(&self) -> bool {
-        PROPS[self.0 as usize].idem
+        PROPS[self.0.get() as usize].idem
     }
 
     /// Returns string representation of the method.
     #[inline]
     pub const fn as_str(&self) -> &'static str {
-        unsafe { str::from_utf8_unchecked(PROPS[self.0 as usize].value) }
+        unsafe { str::from_utf8_unchecked(PROPS[self.0.get() as usize].value) }
     }
 }
 
 impl std::str::FromStr for Method {
     type Err = UnknownMethod;
 
+    #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::from_bytes(s.as_bytes()).ok_or(UnknownMethod)
     }
@@ -133,16 +143,10 @@ impl std::fmt::Display for Method {
 
 // ===== Error =====
 
+#[derive(Debug)]
 pub struct UnknownMethod;
 
 impl std::error::Error for UnknownMethod { }
-
-impl std::fmt::Debug for UnknownMethod {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("unknown method")
-    }
-}
 
 impl std::fmt::Display for UnknownMethod {
     #[inline]
@@ -164,7 +168,7 @@ macro_rules! props {
         impl Method {
             $(
                $(#[$doc])*
-               pub const $name: Self = Self($idx);
+               pub const $name: Self = unsafe { Self(NonZeroU8::new_unchecked($idx)) };
             )*
 
             /// Create [`Method`] from bytes.
@@ -180,6 +184,8 @@ macro_rules! props {
         }
 
         static $props: [Props; $len] = [
+            // invalid 0 index for NonZeroU8
+            Props { value: b"", safe: false, idem: false },
             $(
                 Props { value: $val, safe: prop!($($safe)?), idem: prop!($($safe)?) },
             )*
@@ -193,4 +199,4 @@ macro_rules! prop {
     () => { false };
 }
 
-use {props, prop};
+use {prop, props};
