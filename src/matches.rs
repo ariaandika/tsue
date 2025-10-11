@@ -139,7 +139,7 @@ byte_map! {
     ///         / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
     ///         / DIGIT / ALPHA
     #[inline(always)]
-    const fn is_token(byte: u8) {
+    pub const fn is_token(byte: u8) {
         matches!(
             byte,
             | b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*'

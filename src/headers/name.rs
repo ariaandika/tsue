@@ -1,56 +1,103 @@
-use tcio::bytes::ByteStr;
+use tcio::bytes::{ByteStr, Bytes};
+
+use super::{matches, error::HeaderError};
 
 // ===== HeaderName =====
 
 /// HTTP Header name.
 #[derive(Clone)]
 pub struct HeaderName {
-    repr: Repr,
-}
-
-#[derive(Clone)]
-enum Repr {
-    Standard(StandardHeader),
-    Bytes(ByteStr),
-}
-
-/// Precomputed known header name.
-#[derive(Clone)]
-struct StandardHeader {
-    name: &'static str,
+    /// is valid ASCII
+    bytes: Bytes,
     hash: u16,
 }
 
 impl HeaderName {
     /// Used in iterator.
-    pub(crate) const PLACEHOLDER: Self = Self {
-        repr: Repr::Standard(StandardHeader {
-            name: "",
+    pub(crate) const fn placeholder() -> Self {
+        Self {
+            bytes: Bytes::new(),
             hash: 0,
-        })
-    };
-
-    /// Create new [`HeaderName`].
-    pub fn new(name: impl Into<ByteStr>) -> Self {
-        Self { repr: Repr::Bytes(name.into()) }
+        }
     }
 
-    /// May calculate hash
-    pub(crate) fn hash(&self) -> u16 {
-        match &self.repr {
-            Repr::Standard(s) => s.hash,
-            Repr::Bytes(b) => fnv_hash_to_lowercase(b.as_bytes()),
+    /// Parse header name from static bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input is not a valid header name.
+    #[inline]
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
+        match validate_header_name(bytes) {
+            Ok(()) => Self {
+                bytes: Bytes::from_static(bytes),
+                hash: fnv_hash_to_lowercase(bytes),
+            },
+            Err(err) => err.panic_const(),
+        }
+    }
+
+    /// Parse header name from [`Bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the input is not a valid header name.
+    #[inline]
+    pub fn from_bytes<B: Into<Bytes>>(name: B) -> Result<Self, HeaderError> {
+        let bytes = name.into();
+        match validate_header_name(bytes.as_slice()) {
+            Ok(()) => Ok(Self {
+                hash: fnv_hash_to_lowercase(bytes.as_slice()),
+                bytes,
+            }),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Parse header name by copying from slice of bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the input is not a valid header name.
+    #[inline]
+    pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
+        match validate_header_name(name.as_ref()) {
+            Ok(()) => Ok(Self {
+                bytes: Bytes::copy_from_slice(name.as_ref()),
+                hash: fnv_hash_to_lowercase(name.as_ref()),
+            }),
+            Err(err) => Err(err),
         }
     }
 
     /// Extracts a string slice of the header name.
     #[inline]
-    pub fn as_str(&self) -> &str {
-        match &self.repr {
-            Repr::Standard(s) => s.name,
-            Repr::Bytes(s) => s.as_str(),
+    pub const fn as_str(&self) -> &str {
+        unsafe { str::from_utf8_unchecked(self.bytes.as_slice()) }
+    }
+
+    /// Returns cached hash.
+    pub(crate) const fn hash(&self) -> u16 {
+        self.hash
+    }
+}
+
+// ===== Parser =====
+
+/// token       = 1*tchar
+/// field-name  = token
+const fn validate_header_name(mut bytes: &[u8]) -> Result<(), HeaderError> {
+    if bytes.is_empty() {
+        return Err(HeaderError::new_name());
+    }
+    while let [byte, rest @ ..] = bytes {
+        if matches::is_field_name_char(*byte) {
+            bytes = rest;
+        } else {
+            return Err(HeaderError::new_name())
         }
     }
+    Ok(())
 }
 
 // ===== Hash =====
@@ -124,7 +171,7 @@ impl SealedRef for &str {
 impl AsHeaderName for HeaderName { }
 impl SealedRef for HeaderName {
     fn hash(&self) -> u16 {
-        self.hash()
+        HeaderName::hash(self)
     }
 
     fn as_str(&self) -> &str {
@@ -147,7 +194,8 @@ impl IntoHeaderName for ByteStr {}
 impl Sealed for ByteStr {
     fn into_header_name(self) -> HeaderName {
         HeaderName {
-            repr: Repr::Bytes(self),
+            hash: fnv_hash_to_lowercase(self.as_bytes()),
+            bytes: self.into_bytes(),
         }
     }
 }
@@ -157,7 +205,8 @@ impl IntoHeaderName for &str {}
 impl Sealed for &str {
     fn into_header_name(self) -> HeaderName {
         HeaderName {
-            repr: Repr::Bytes(ByteStr::copy_from_str(self)),
+            bytes: Bytes::copy_from_slice(self.as_bytes()),
+            hash: fnv_hash_to_lowercase(self.as_bytes()),
         }
     }
 }
@@ -172,27 +221,25 @@ impl Sealed for HeaderName {
 // ===== Traits =====
 
 impl std::fmt::Display for HeaderName {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         str::fmt(self.as_str(), f)
     }
 }
 
 impl std::fmt::Debug for HeaderName {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("HeaderName");
-        match &self.repr {
-            Repr::Standard(s) => f.field("name", &s.name),
-            Repr::Bytes(b) => f.field("name", &b),
-        }.finish()
+        f.debug_struct("HeaderName")
+            .field("name", &self.as_str())
+            .finish()
     }
 }
 
 impl std::hash::Hash for HeaderName {
+    #[inline]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match &self.repr {
-            Repr::Standard(s) => s.hash.hash(state),
-            Repr::Bytes(b) => b.hash(state),
-        }
+        self.hash.hash(state);
     }
 }
 
@@ -613,8 +660,10 @@ macro_rules! standard_header {
     ) => {
         $(
             $(#[$doc])*
+            #[allow(clippy::declare_interior_mutable_const)]
             pub const $id: $t = HeaderName {
-                repr: Repr::Standard(StandardHeader { name: $name, hash: fnv_hash_to_lowercase($name.as_bytes()) })
+                bytes: Bytes::from_static($name.as_bytes()),
+                hash: fnv_hash_to_lowercase($name.as_bytes()),
             };
         )*
     };
@@ -635,4 +684,3 @@ macro_rules! standard_header {
 }
 
 use standard_header;
-

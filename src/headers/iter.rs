@@ -20,6 +20,8 @@ pub struct Iter<'a> {
     iter: GetAll<'a>,
 }
 
+static PLACEHOLDER: HeaderName = HeaderName::placeholder();
+
 impl<'a> Iter<'a> {
     pub(crate) fn new(map: &'a HeaderMap) -> Self {
         match map.entries().first() {
@@ -37,7 +39,7 @@ impl<'a> Iter<'a> {
         Self {
             map,
             n: 0,
-            name: &HeaderName::PLACEHOLDER,
+            name: &PLACEHOLDER,
             iter: GetAll::empty(),
         }
     }

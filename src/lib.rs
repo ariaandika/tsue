@@ -13,9 +13,9 @@ mod matches;
 
 pub mod uri;
 pub mod http;
-pub mod h1;
-
 pub mod headers;
+
+pub mod h1;
 pub mod body;
 pub mod request;
 pub mod response;
