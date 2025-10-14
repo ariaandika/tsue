@@ -4,29 +4,29 @@ use super::{HeaderName, HeaderValue};
 
 type Size = u16;
 
-/// Header Entry.
+/// Header Field.
 ///
 /// Contains [`HeaderName`] and multiple [`HeaderValue`].
-pub struct Entry {
+pub struct HeaderField {
     hash: Size,
     name: HeaderName,
     value: HeaderValue,
-    next: *mut EntryExtra,
+    next: *mut FieldExtra,
     extra_len: Size,
 }
 
-// SAFETY: EntryExtra pointer is exclusively owned by Entry
-unsafe impl Send for Entry {}
+// SAFETY: FieldExtra pointer is exclusively owned by Field
+unsafe impl Send for HeaderField {}
 
-// SAFETY: EntryExtra pointer is exclusively owned by Entry
-unsafe impl Sync for Entry {}
+// SAFETY: FieldExtra pointer is exclusively owned by Field
+unsafe impl Sync for HeaderField {}
 
-struct EntryExtra {
+struct FieldExtra {
     value: HeaderValue,
-    next: *mut EntryExtra,
+    next: *mut FieldExtra,
 }
 
-impl Entry {
+impl HeaderField {
     pub(crate) fn new(hash: Size, name: HeaderName, value: HeaderValue) -> Self {
         Self {
             hash,
@@ -61,7 +61,7 @@ impl Entry {
     #[inline]
     #[allow(
         clippy::len_without_is_empty,
-        reason = "Entry always have at least 1 value"
+        reason = "Field always have at least 1 value"
     )]
     pub const fn len(&self) -> usize {
         self.extra_len as usize + 1
@@ -80,7 +80,7 @@ impl Entry {
 
     /// Push header value.
     pub fn push(&mut self, value: HeaderValue) {
-        let new = Box::into_raw(Box::new(EntryExtra {
+        let new = Box::into_raw(Box::new(FieldExtra {
             value,
             next: std::ptr::null_mut(),
         }));
@@ -107,7 +107,7 @@ impl Entry {
         }
     }
 
-    /// Consume [`Entry`] into [`HeaderName`] and [`HeaderValue`].
+    /// Consume [`HeaderField`] into [`HeaderName`] and [`HeaderValue`].
     ///
     /// Extra header value will be dropped.
     #[inline]
@@ -119,7 +119,7 @@ impl Entry {
     }
 }
 
-impl Clone for Entry {
+impl Clone for HeaderField {
     fn clone(&self) -> Self {
         Self {
             hash: self.hash,
@@ -129,14 +129,14 @@ impl Clone for Entry {
                 self.next
             } else {
                 // SAFETY: null checked
-                Box::into_raw(Box::new(EntryExtra::clone(unsafe { &*self.next })))
+                Box::into_raw(Box::new(FieldExtra::clone(unsafe { &*self.next })))
             },
             extra_len: self.extra_len,
         }
     }
 }
 
-impl Drop for Entry {
+impl Drop for HeaderField {
     fn drop(&mut self) {
         if !self.next.is_null() {
             // SAFETY: null checked
@@ -145,7 +145,7 @@ impl Drop for Entry {
     }
 }
 
-impl Clone for EntryExtra {
+impl Clone for FieldExtra {
     fn clone(&self) -> Self {
         Self {
             value: self.value.clone(),
@@ -154,14 +154,14 @@ impl Clone for EntryExtra {
                     self.next
                 } else {
                     // SAFETY: null checked
-                    Box::into_raw(Box::new(EntryExtra::clone(unsafe { &*self.next })))
+                    Box::into_raw(Box::new(FieldExtra::clone(unsafe { &*self.next })))
                 }
             },
         }
     }
 }
 
-impl Drop for EntryExtra {
+impl Drop for FieldExtra {
     fn drop(&mut self) {
         if !self.next.is_null() {
             // SAFETY: null checked
@@ -170,9 +170,9 @@ impl Drop for EntryExtra {
     }
 }
 
-impl std::fmt::Debug for Entry {
+impl std::fmt::Debug for HeaderField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Entry")
+        f.debug_struct("HeaderField")
             .field("name", &self.name)
             .field("values", &GetAll::new(self))
             .finish()
@@ -181,7 +181,7 @@ impl std::fmt::Debug for Entry {
 
 // ===== Iterator =====
 
-impl<'a> IntoIterator for &'a Entry {
+impl<'a> IntoIterator for &'a HeaderField {
     type Item = &'a HeaderValue;
 
     type IntoIter = GetAll<'a>;
@@ -194,15 +194,15 @@ impl<'a> IntoIterator for &'a Entry {
 
 /// Iterator returned from [`HeaderMap::get_all`][super::HeaderMap::get_all].
 pub struct GetAll<'a> {
-    first: Option<&'a Entry>,
-    next: *const EntryExtra,
+    first: Option<&'a HeaderField>,
+    next: *const FieldExtra,
 }
 
 impl<'a> GetAll<'a> {
-    pub(crate) const fn new(entry: &'a Entry) -> Self {
+    pub(crate) const fn new(field: &'a HeaderField) -> Self {
         Self {
-            first: Some(entry),
-            next: entry.next,
+            first: Some(field),
+            next: field.next,
         }
     }
 

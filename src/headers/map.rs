@@ -5,7 +5,7 @@ use std::{
 
 use super::{
     AsHeaderName, HeaderName, HeaderValue,
-    entry::{Entry, GetAll},
+    field::{HeaderField, GetAll},
     iter::Iter,
     name::{HeaderNameRef, IntoHeaderName},
 };
@@ -16,7 +16,7 @@ type Size = u16;
 #[derive(Default, Clone)]
 pub struct HeaderMap {
     indices: Box<[Slot]>,
-    entries: Vec<Entry>,
+    fields: Vec<HeaderField>,
     extra_len: Size,
     delim: Size,
     is_full: bool,
@@ -47,7 +47,7 @@ impl HeaderMap {
         Self {
             // zero sized type does not allocate
             indices: Box::new([]),
-            entries: Vec::new(),
+            fields: Vec::new(),
             extra_len: 0,
             delim: 0,
             is_full: true,
@@ -64,7 +64,7 @@ impl HeaderMap {
         let new_cap = capacity.next_power_of_two();
         Self {
             indices: Vec::from_iter(repeat_with(<_>::default).take(new_cap)).into_boxed_slice(),
-            entries: Vec::with_capacity(new_cap),
+            fields: Vec::with_capacity(new_cap),
             extra_len: 0,
             delim: new_cap as Size * 3 / 4,
             is_full: false,
@@ -74,20 +74,20 @@ impl HeaderMap {
     /// Returns headers length.
     #[inline]
     pub const fn len(&self) -> usize {
-        self.entries.len() + self.extra_len as usize
+        self.fields.len() + self.extra_len as usize
     }
 
     /// Returns the total number of elements the map can hold without reallocating.
     #[inline]
     pub const fn capacity(&self) -> usize {
-        self.entries.capacity()
+        self.fields.capacity()
     }
 
     /// Returns `true` if headers has no element.
     #[inline]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.entries.len() == 0 && self.extra_len == 0
+        self.fields.len() == 0 && self.extra_len == 0
     }
 }
 
@@ -123,11 +123,11 @@ impl HeaderMap {
 
         loop {
             match self.indices[index as usize] {
-                Slot::Some(entry_index) => {
-                    let entry = &self.entries[entry_index as usize];
+                Slot::Some(field_index) => {
+                    let field = &self.fields[field_index as usize];
 
-                    if entry.get_hashed() == &hash && entry.name().as_str().eq_ignore_ascii_case(name.name) {
-                        return Some(entry.value());
+                    if field.get_hashed() == &hash && field.name().as_str().eq_ignore_ascii_case(name.name) {
+                        return Some(field.value());
                     }
                 },
                 Slot::Tombstone => { },
@@ -157,11 +157,11 @@ impl HeaderMap {
 
         loop {
             match self.indices[index as usize] {
-                Slot::Some(entry_index) => {
-                    let entry = &self.entries[entry_index as usize];
+                Slot::Some(field_index) => {
+                    let field = &self.fields[field_index as usize];
 
-                    if entry.get_hashed() == &hash && entry.name().as_str() == name.name {
-                        return GetAll::new(entry);
+                    if field.get_hashed() == &hash && field.name().as_str() == name.name {
+                        return GetAll::new(field);
                     }
                 },
                 Slot::Tombstone => { },
@@ -181,14 +181,14 @@ impl HeaderMap {
         Iter::new(self)
     }
 
-    /// Returns an iterator over header [`Entry`].
+    /// Returns an iterator over header [`HeaderField`].
     #[inline]
-    pub const fn entries(&self) -> &[Entry] {
-        self.entries.as_slice()
+    pub const fn fields(&self) -> &[HeaderField] {
+        self.fields.as_slice()
     }
 
-    // pub(crate) fn entries_mut(&mut self) -> &mut Vec<Entry> {
-    //     &mut self.entries
+    // pub(crate) fn fields_mut(&mut self) -> &mut Vec<HeaderField> {
+    //     &mut self.fields
     // }
 }
 
@@ -203,42 +203,42 @@ impl HeaderMap {
         }
 
         // `to_header_ref` may calculate hash
-        let entry = self.try_remove_entry(name.to_header_ref())?;
+        let field = self.try_remove_field(name.to_header_ref())?;
 
         // the rest ot duplicate header values are dropped
-        let (_, val) = entry.into_parts();
+        let (_, val) = field.into_parts();
         Some(val)
     }
 
-    fn try_remove_entry(&mut self, name: HeaderNameRef) -> Option<Entry> {
+    fn try_remove_field(&mut self, name: HeaderNameRef) -> Option<HeaderField> {
         let mask = self.indices.len() as Size;
         let hash = name.hash;
         let mut index = hash & (mask - 1);
 
         loop {
             match &mut self.indices[index as usize] {
-                Slot::Some(entry_index) => {
-                    let entry_index = *entry_index as usize;
-                    let entry = &self.entries[entry_index];
+                Slot::Some(field_index) => {
+                    let field_index = *field_index as usize;
+                    let field = &self.fields[field_index];
 
-                    if entry.get_hashed() == &hash && entry.name().as_str() == name.name {
+                    if field.get_hashed() == &hash && field.name().as_str() == name.name {
 
-                        // prepare for `swap_remove` below, change indices of to be swaped entry
-                        if let Some(last_entry) = self.entries.last().filter(|last|last.get_hashed() != entry.get_hashed()) {
+                        // prepare for `swap_remove` below, change indices of to be swaped field
+                        if let Some(last_field) = self.fields.last().filter(|last|last.get_hashed() != field.get_hashed()) {
                             // this still possibly collisioned index
-                            let mut index = last_entry.get_hashed() & (mask - 1);
+                            let mut index = last_field.get_hashed() & (mask - 1);
 
                             loop {
-                                let Slot::Some(inner_entry_index) = &mut self.indices[index as usize] else {
-                                    unreachable!("[BUG] entry does not have slot index")
+                                let Slot::Some(inner_field_index) = &mut self.indices[index as usize] else {
+                                    unreachable!("[BUG] field does not have slot index")
                                 };
 
-                                let inner_entry = &self.entries[*inner_entry_index as usize];
+                                let inner_field = &self.fields[*inner_field_index as usize];
 
-                                if inner_entry.get_hashed() == last_entry.get_hashed()
-                                    && inner_entry.name().as_str() == last_entry.name().as_str()
+                                if inner_field.get_hashed() == last_field.get_hashed()
+                                    && inner_field.name().as_str() == last_field.name().as_str()
                                 {
-                                    *inner_entry_index = entry_index as Size;
+                                    *inner_field_index = field_index as Size;
                                     break;
                                 }
 
@@ -248,13 +248,13 @@ impl HeaderMap {
                         }
 
                         // make it tombstone
-                        let Slot::Some(entry_index) = self.indices[index as usize].take_as_tombstone() else {
+                        let Slot::Some(field_index) = self.indices[index as usize].take_as_tombstone() else {
                             unreachable!("matched in the first loop")
                         };
 
-                        let entry = self.entries.swap_remove(entry_index as usize);
-                        self.extra_len -= entry.extra_len();
-                        return Some(entry);
+                        let field = self.fields.swap_remove(field_index as usize);
+                        self.extra_len -= field.extra_len();
+                        return Some(field);
                     }
                 }
                 Slot::Tombstone => { },
@@ -298,25 +298,25 @@ impl HeaderMap {
         let result = loop {
             match &mut self.indices[index as usize] {
                 index @ Slot::None | index @ Slot::Tombstone => {
-                    let entry_index = self.entries.len();
-                    *index = Slot::Some(entry_index as _);
-                    self.entries.push(Entry::new(hash, name, value));
+                    let field_index = self.fields.len();
+                    *index = Slot::Some(field_index as _);
+                    self.fields.push(HeaderField::new(hash, name, value));
                     break None
                 },
 
-                Slot::Some(entry_index) => {
-                    let entry = &mut self.entries[*entry_index as usize];
+                Slot::Some(field_index) => {
+                    let field = &mut self.fields[*field_index as usize];
 
-                    if entry.get_hashed() == &hash && entry.name().as_str() == name.as_str() {
+                    if field.get_hashed() == &hash && field.name().as_str() == name.as_str() {
                         break if append {
                             // Append
-                            entry.push(value);
+                            field.push(value);
                             self.extra_len += 1;
                             None
                         } else {
                             // Returns duplicate
-                            let entry = replace(entry, Entry::new(hash, name, value));
-                            Some(entry.into_parts().1)
+                            let field = replace(field, HeaderField::new(hash, name, value));
+                            Some(field.into_parts().1)
                         };
                     }
                 }
@@ -326,7 +326,7 @@ impl HeaderMap {
             index = (index + 1) & (mask - 1);
         };
 
-        self.is_full = self.entries.len() as Size > self.delim;
+        self.is_full = self.fields.len() as Size > self.delim;
 
         result
     }
@@ -337,8 +337,8 @@ impl HeaderMap {
 
         let mut me = HeaderMap::with_capacity(new_cap);
 
-        for entry in take(&mut self.entries) {
-            let (name,value) = entry.into_parts();
+        for field in take(&mut self.fields) {
+            let (name,value) = field.into_parts();
             me.try_insert(name, value, true);
         }
 
@@ -347,14 +347,14 @@ impl HeaderMap {
 
     /// Reserves capacity for at least `additional` more headers.
     pub fn reserve(&mut self, additional: usize) {
-        if self.entries.capacity() - self.entries.len() > additional {
+        if self.fields.capacity() - self.fields.len() > additional {
             return;
         }
 
-        let mut me = HeaderMap::with_capacity(self.entries.capacity() + additional);
+        let mut me = HeaderMap::with_capacity(self.fields.capacity() + additional);
 
-        for entry in take(&mut self.entries) {
-            let (name,value) = entry.into_parts();
+        for field in take(&mut self.fields) {
+            let (name,value) = field.into_parts();
             me.try_insert(name, value, true);
         }
 
@@ -366,8 +366,8 @@ impl HeaderMap {
         for index in &mut self.indices {
             take(index);
         }
-        self.entries.clear();
-        self.is_full = self.entries.capacity() == 0;
+        self.fields.clear();
+        self.is_full = self.fields.capacity() == 0;
     }
 }
 
@@ -390,7 +390,7 @@ mod test {
         map.insert("content-type", HeaderValue::from_string("FOO"));
         assert!(map.contains_key("content-type"));
 
-        let ptr = map.entries.as_ptr();
+        let ptr = map.fields.as_ptr();
         let cap = map.capacity();
 
         map.insert("accept", HeaderValue::from_string("BAR"));
@@ -408,14 +408,14 @@ mod test {
         assert!(map.contains_key("referer"));
         assert!(map.contains_key("rim"));
 
-        assert_eq!(ptr, map.entries.as_ptr());
+        assert_eq!(ptr, map.fields.as_ptr());
         assert_eq!(cap, map.capacity());
 
         // Insert Allocate
 
         map.insert("lea", HeaderValue::from_string("BAR"));
 
-        assert_ne!(ptr, map.entries.as_ptr());
+        assert_ne!(ptr, map.fields.as_ptr());
         assert_ne!(cap, map.capacity());
 
         assert!(map.contains_key("Content-type"));
