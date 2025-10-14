@@ -485,3 +485,20 @@ macro_rules! delegate_fmt {
 }
 
 delegate_fmt!(Scheme, HttpScheme, Authority, Host, Path);
+
+// ===== FromStr =====
+
+macro_rules! impl_from_str {
+    ($($ty:ty),*) => {$(
+        impl std::str::FromStr for $ty {
+            type Err = super::UriError;
+
+            #[inline]
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Self::from_slice(s.as_bytes())
+            }
+        }
+    )*};
+}
+
+impl_from_str!(Scheme, Authority, Host, Path, Uri, HttpUri);
