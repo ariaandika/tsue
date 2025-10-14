@@ -9,6 +9,14 @@ impl Scheme {
         // SAFETY: precondition `value` is valid ASCII
         unsafe { str::from_utf8_unchecked(self.value.as_slice()) }
     }
+
+    /// Checks that two scheme are an ASCII case-insensitive match.
+    #[inline]
+    pub const fn eq_ignore_ascii_case(&self, scheme: &str) -> bool {
+        // Although schemes are case-insensitive, the canonical form is lowercase and documents
+        // that specify schemes must do so with lowercase letters.
+        self.as_str().eq_ignore_ascii_case(scheme)
+    }
 }
 
 impl HttpScheme {

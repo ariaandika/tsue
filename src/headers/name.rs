@@ -76,6 +76,14 @@ impl HeaderName {
         unsafe { str::from_utf8_unchecked(self.bytes.as_slice()) }
     }
 
+    /// Checks that two header name are an ASCII case-insensitive match.
+    ///
+    /// Header names are case-insensitive.
+    #[inline]
+    pub const fn eq_ignore_ascii_case(&self, name: &str) -> bool {
+        self.as_str().eq_ignore_ascii_case(name)
+    }
+
     /// Returns cached hash.
     pub(crate) const fn hash(&self) -> u16 {
         self.hash
