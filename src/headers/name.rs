@@ -1,4 +1,4 @@
-use tcio::bytes::{ByteStr, Bytes};
+use tcio::bytes::Bytes;
 
 use super::{matches, error::HeaderError};
 
@@ -106,105 +106,6 @@ const fn validate_header_name(mut bytes: &[u8]) -> Result<(), HeaderError> {
         }
     }
     Ok(())
-}
-
-// ===== Ref Traits =====
-
-/// The contrete type used in header map lookup operation.
-pub(crate) struct HeaderNameRef<'a> {
-    pub(crate) name: &'a str,
-    pub(crate) hash: u16,
-}
-
-/// A type that can be used for [`HeaderMap`] operation.
-///
-/// [`HeaderMap`]: super::HeaderMap
-#[allow(private_bounds)]
-pub trait AsHeaderName: SealedRef { }
-pub(crate) trait SealedRef: Sized {
-    fn hash(&self) -> u16;
-
-    fn as_str(&self) -> &str;
-
-    /// May calculate hash
-    fn to_header_ref(&self) -> HeaderNameRef<'_> {
-        HeaderNameRef {
-            name: self.as_str(),
-            hash: self.hash(),
-        }
-    }
-}
-
-impl<K: AsHeaderName> AsHeaderName for &K { }
-impl<S: SealedRef> SealedRef for &S {
-    fn hash(&self) -> u16 {
-        S::hash(self)
-    }
-
-    fn as_str(&self) -> &str {
-        S::as_str(self)
-    }
-}
-
-impl AsHeaderName for &str { }
-impl SealedRef for &str {
-    fn hash(&self) -> u16 {
-        matches::hash_to_lowercase(self.as_bytes()) as u16
-    }
-
-    fn as_str(&self) -> &str {
-        self
-    }
-}
-
-impl AsHeaderName for HeaderName { }
-impl SealedRef for HeaderName {
-    fn hash(&self) -> u16 {
-        HeaderName::hash(self)
-    }
-
-    fn as_str(&self) -> &str {
-        HeaderName::as_str(self)
-    }
-}
-
-// ===== Owned Traits =====
-
-/// A type that can be used for name consuming [`HeaderMap`] operation.
-///
-/// [`HeaderMap`]: super::HeaderMap
-#[allow(private_bounds)]
-pub trait IntoHeaderName: Sealed {}
-pub(crate) trait Sealed: Sized {
-    fn into_header_name(self) -> HeaderName;
-}
-
-impl IntoHeaderName for ByteStr {}
-impl Sealed for ByteStr {
-    fn into_header_name(self) -> HeaderName {
-        HeaderName {
-            hash: matches::hash_to_lowercase(self.as_bytes()) as u16,
-            bytes: self.into_bytes(),
-        }
-    }
-}
-
-// for static data use provided constants, not static str
-impl IntoHeaderName for &str {}
-impl Sealed for &str {
-    fn into_header_name(self) -> HeaderName {
-        HeaderName {
-            bytes: Bytes::copy_from_slice(self.as_bytes()),
-            hash: matches::hash_to_lowercase(self.as_bytes()) as u16,
-        }
-    }
-}
-
-impl IntoHeaderName for HeaderName {}
-impl Sealed for HeaderName {
-    fn into_header_name(self) -> HeaderName {
-        self
-    }
 }
 
 // ===== Traits =====

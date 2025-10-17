@@ -14,8 +14,8 @@ mod iter;
 
 pub mod error;
 
-pub use name::{HeaderName, AsHeaderName, IntoHeaderName, standard};
+pub use name::{HeaderName, standard};
 pub use value::{HeaderValue, InvalidHeaderValue};
 pub use field::{HeaderField, GetAll};
-pub use map::HeaderMap;
+pub use map::{HeaderMap, AsHeaderName, IntoHeaderName};
 pub use iter::Iter;

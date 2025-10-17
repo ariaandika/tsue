@@ -2,12 +2,13 @@ use std::{
     iter::repeat_with,
     mem::{replace, take},
 };
+use tcio::bytes::ByteStr;
 
 use super::{
-    AsHeaderName, HeaderName, HeaderValue,
-    field::{HeaderField, GetAll},
+    HeaderName, HeaderValue,
+    field::{GetAll, HeaderField},
     iter::Iter,
-    name::{HeaderNameRef, IntoHeaderName},
+    matches,
 };
 
 type Size = u16;
@@ -102,7 +103,7 @@ impl HeaderMap {
         }
 
         // `to_header_ref` may calculate hash
-        self.try_get(name.to_header_ref()).is_some()
+        self.try_get(name.as_str(), name.hash()).is_some()
     }
 
     /// Returns a reference to the first header value corresponding to the given header name.
@@ -113,12 +114,11 @@ impl HeaderMap {
         }
 
         // `to_header_ref` may calculate hash
-        self.try_get(name.to_header_ref())
+        self.try_get(name.as_str(), name.hash())
     }
 
-    fn try_get(&self, name: HeaderNameRef) -> Option<&HeaderValue> {
+    fn try_get(&self, name: &str, hash: u16) -> Option<&HeaderValue> {
         let mask = self.indices.len() as Size;
-        let hash = name.hash;
         let mut index = hash & (mask - 1);
 
         loop {
@@ -126,7 +126,7 @@ impl HeaderMap {
                 Slot::Some(field_index) => {
                     let field = &self.fields[field_index as usize];
 
-                    if field.get_hashed() == &hash && field.name().as_str().eq_ignore_ascii_case(name.name) {
+                    if field.get_hashed() == &hash && field.name().as_str().eq_ignore_ascii_case(name) {
                         return Some(field.value());
                     }
                 },
@@ -147,12 +147,11 @@ impl HeaderMap {
         }
 
         // `to_header_ref` may calculate hash
-        self.try_get_all(name.to_header_ref())
+        self.try_get_all(name.as_str(), name.hash())
     }
 
-    fn try_get_all(&self, name: HeaderNameRef) -> GetAll<'_> {
+    fn try_get_all(&self, name: &str, hash: u16) -> GetAll<'_> {
         let mask = self.indices.len() as Size;
-        let hash = name.hash;
         let mut index = hash & (mask - 1);
 
         loop {
@@ -160,7 +159,7 @@ impl HeaderMap {
                 Slot::Some(field_index) => {
                     let field = &self.fields[field_index as usize];
 
-                    if field.get_hashed() == &hash && field.name().as_str() == name.name {
+                    if field.get_hashed() == &hash && field.name().as_str() == name {
                         return GetAll::new(field);
                     }
                 },
@@ -203,16 +202,15 @@ impl HeaderMap {
         }
 
         // `to_header_ref` may calculate hash
-        let field = self.try_remove_field(name.to_header_ref())?;
+        let field = self.try_remove_field(name.as_str(), name.hash())?;
 
         // the rest ot duplicate header values are dropped
         let (_, val) = field.into_parts();
         Some(val)
     }
 
-    fn try_remove_field(&mut self, name: HeaderNameRef) -> Option<HeaderField> {
+    fn try_remove_field(&mut self, name: &str, hash: u16) -> Option<HeaderField> {
         let mask = self.indices.len() as Size;
-        let hash = name.hash;
         let mut index = hash & (mask - 1);
 
         loop {
@@ -221,7 +219,7 @@ impl HeaderMap {
                     let field_index = *field_index as usize;
                     let field = &self.fields[field_index];
 
-                    if field.get_hashed() == &hash && field.name().as_str() == name.name {
+                    if field.get_hashed() == &hash && field.name().as_str() == name {
 
                         // prepare for `swap_remove` below, change indices of to be swaped field
                         if let Some(last_field) = self.fields.last().filter(|last|last.get_hashed() != field.get_hashed()) {
@@ -374,6 +372,86 @@ impl HeaderMap {
 impl std::fmt::Debug for HeaderMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_map().entries(self.iter()).finish()
+    }
+}
+
+// ===== Ref Traits =====
+
+/// A type that can be used for [`HeaderMap`] operation.
+#[allow(private_bounds)]
+pub trait AsHeaderName: SealedRef { }
+trait SealedRef: Sized {
+    fn hash(&self) -> u16;
+
+    fn as_str(&self) -> &str;
+}
+
+/// for str input, calculate hash
+impl AsHeaderName for &str { }
+impl SealedRef for &str {
+    fn hash(&self) -> u16 {
+        matches::hash_to_lowercase(self.as_bytes()) as u16
+    }
+
+    fn as_str(&self) -> &str {
+        self
+    }
+}
+
+/// for HeaderName, hash may be cacheed
+impl AsHeaderName for HeaderName { }
+impl SealedRef for HeaderName {
+    fn hash(&self) -> u16 {
+        HeaderName::hash(self)
+    }
+
+    fn as_str(&self) -> &str {
+        HeaderName::as_str(self)
+    }
+}
+
+// blanket implementation
+impl<K: AsHeaderName> AsHeaderName for &K { }
+impl<S: SealedRef> SealedRef for &S {
+    fn hash(&self) -> u16 {
+        S::hash(self)
+    }
+
+    fn as_str(&self) -> &str {
+        S::as_str(self)
+    }
+}
+
+// ===== Owned Traits =====
+
+/// A type that can be used for name consuming [`HeaderMap`] operation.
+#[allow(private_bounds)]
+pub trait IntoHeaderName: Sealed {}
+trait Sealed: Sized {
+    fn into_header_name(self) -> HeaderName;
+}
+
+impl IntoHeaderName for ByteStr {}
+impl Sealed for ByteStr {
+    fn into_header_name(self) -> HeaderName {
+        // HeaderName::from_bytes(self.into_bytes())
+        todo!()
+    }
+}
+
+// for static data use provided constants, not static str
+impl IntoHeaderName for &str {}
+impl Sealed for &str {
+    fn into_header_name(self) -> HeaderName {
+        // HeaderName::from_bytes(self)
+        todo!()
+    }
+}
+
+impl IntoHeaderName for HeaderName {}
+impl Sealed for HeaderName {
+    fn into_header_name(self) -> HeaderName {
+        self
     }
 }
 
