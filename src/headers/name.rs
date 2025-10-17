@@ -31,7 +31,7 @@ impl HeaderName {
         match validate_header_name(bytes) {
             Ok(()) => Self {
                 bytes: Bytes::from_static(bytes),
-                hash: fnv_hash_to_lowercase(bytes),
+                hash: matches::hash(bytes) as u16,
             },
             Err(err) => err.panic_const(),
         }
@@ -47,7 +47,7 @@ impl HeaderName {
         let bytes = name.into();
         match validate_header_name(bytes.as_slice()) {
             Ok(()) => Ok(Self {
-                hash: fnv_hash_to_lowercase(bytes.as_slice()),
+                hash: matches::hash_to_lowercase(bytes.as_slice()) as u16,
                 bytes,
             }),
             Err(err) => Err(err),
@@ -64,7 +64,7 @@ impl HeaderName {
         match validate_header_name(name.as_ref()) {
             Ok(()) => Ok(Self {
                 bytes: Bytes::copy_from_slice(name.as_ref()),
-                hash: fnv_hash_to_lowercase(name.as_ref()),
+                hash: matches::hash_to_lowercase(name.as_ref()) as u16,
             }),
             Err(err) => Err(err),
         }
@@ -108,25 +108,6 @@ const fn validate_header_name(mut bytes: &[u8]) -> Result<(), HeaderError> {
     Ok(())
 }
 
-// ===== Hash =====
-
-#[inline]
-const fn fnv_hash_to_lowercase(bytes: &[u8]) -> u16 {
-    const INITIAL_STATE: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0100_0000_01b3;
-
-    let mut hash = INITIAL_STATE;
-    let mut i = 0;
-
-    while i < bytes.len() {
-        hash ^= bytes[i].to_ascii_lowercase() as u64;
-        hash = hash.wrapping_mul(PRIME);
-        i += 1;
-    }
-
-    hash as _
-}
-
 // ===== Ref Traits =====
 
 /// The contrete type used in header map lookup operation.
@@ -168,7 +149,7 @@ impl<S: SealedRef> SealedRef for &S {
 impl AsHeaderName for &str { }
 impl SealedRef for &str {
     fn hash(&self) -> u16 {
-        fnv_hash_to_lowercase(self.as_bytes())
+        matches::hash_to_lowercase(self.as_bytes()) as u16
     }
 
     fn as_str(&self) -> &str {
@@ -202,7 +183,7 @@ impl IntoHeaderName for ByteStr {}
 impl Sealed for ByteStr {
     fn into_header_name(self) -> HeaderName {
         HeaderName {
-            hash: fnv_hash_to_lowercase(self.as_bytes()),
+            hash: matches::hash_to_lowercase(self.as_bytes()) as u16,
             bytes: self.into_bytes(),
         }
     }
@@ -214,7 +195,7 @@ impl Sealed for &str {
     fn into_header_name(self) -> HeaderName {
         HeaderName {
             bytes: Bytes::copy_from_slice(self.as_bytes()),
-            hash: fnv_hash_to_lowercase(self.as_bytes()),
+            hash: matches::hash_to_lowercase(self.as_bytes()) as u16,
         }
     }
 }
@@ -671,7 +652,7 @@ macro_rules! standard_header {
             #[allow(clippy::declare_interior_mutable_const)]
             pub const $id: $t = HeaderName {
                 bytes: Bytes::from_static($name.as_bytes()),
-                hash: fnv_hash_to_lowercase($name.as_bytes()),
+                hash: matches::hash_to_lowercase($name.as_bytes()) as u16,
             };
         )*
     };
