@@ -18,14 +18,9 @@ impl Default for Method {
     }
 }
 
-struct Props {
-    safe: bool,
-    idem: bool,
-    value: &'static [u8],
-}
-
 props! {
-    static PROPS: [10];
+    // first element being invalid for NonZeroU8 + 9 standard methods
+    const LEN = 10;
 
     /// The [GET] method requests transfer of a current [selected representation][sr] for the
     /// [target resource][tr].
@@ -93,7 +88,7 @@ impl Method {
     /// ["safe"]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-safe-methods>
     #[inline]
     pub const fn is_safe(&self) -> bool {
-        PROPS[self.0.get() as usize].safe
+        SAFE[self.0.get() as usize]
     }
 
     /// Returns `true` if method is considered ["idempotent"].
@@ -108,13 +103,13 @@ impl Method {
     /// ["idempotent"]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-idempotent-methods>
     #[inline]
     pub const fn is_idempoten(&self) -> bool {
-        PROPS[self.0.get() as usize].idem
+        IDEMPOTENT[self.0.get() as usize]
     }
 
     /// Returns string representation of the method.
     #[inline]
     pub const fn as_str(&self) -> &'static str {
-        unsafe { str::from_utf8_unchecked(PROPS[self.0.get() as usize].value) }
+        STR[self.0.get() as usize]
     }
 }
 
@@ -159,7 +154,7 @@ impl std::fmt::Display for UnknownMethod {
 
 macro_rules! props {
     (
-        static $props:ident: [$len:literal];
+        const LEN = $len:literal;
         $(
            $(#[$doc:meta])*
            pub const $name:ident = ($idx:literal, $val:literal, $($safe:ident)?, $($idem:ident)?);
@@ -183,11 +178,26 @@ macro_rules! props {
             }
         }
 
-        static $props: [Props; $len] = [
-            // invalid 0 index for NonZeroU8
-            Props { value: b"", safe: false, idem: false },
+        const STR: [&'static str; $len] = unsafe {
+            [
+                "", // 0 index is invalid for NonZeroU8
+                $(
+                    str::from_utf8_unchecked($val),
+                )*
+            ]
+        };
+
+        const IDEMPOTENT: [bool; $len] = [
+            false, // 0 index is invalid for NonZeroU8
             $(
-                Props { value: $val, safe: prop!($($safe)?), idem: prop!($($safe)?) },
+                prop!($($idem)?),
+            )*
+        ];
+
+        const SAFE: [bool; $len] = [
+            false, // 0 index is invalid for NonZeroU8
+            $(
+                prop!($($safe)?),
             )*
         ];
     };
@@ -195,7 +205,7 @@ macro_rules! props {
 
 macro_rules! prop {
     (safe) => { true };
-    (idem) => { true };
+    (idempotent) => { true };
     () => { false };
 }
 

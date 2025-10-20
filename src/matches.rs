@@ -48,7 +48,7 @@ macro_rules! byte_map {
         ///
         /// `byte` must be less than 128.
         $vis const unsafe fn $fn_id($byte: $u8) -> bool {
-            static PAT: [bool; 128] = {
+            const PAT: [bool; 128] = {
                 let mut bytes = [false; 128];
                 let mut $byte = 0u8;
                 const fn filter($byte: $u8) -> bool {
@@ -75,7 +75,7 @@ macro_rules! byte_map {
     } => {
         $(#[$meta])*
         $vis const fn $fn_id($byte: $u8) -> bool {
-            static PAT: [bool; 256] = {
+            const PAT: [bool; 256] = {
                 let mut bytes = [false; 256];
                 let mut $byte = 0u8;
                 const fn filter($byte: $u8) -> bool {
