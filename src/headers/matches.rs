@@ -1,12 +1,40 @@
 pub(crate) use crate::matches::*;
 
 byte_map! {
-    /// field-name = token
+    /// Specialized `token` for lowercase only header name.
+    ///
+    /// token   = 1*tchar
+    /// tchar   = "!" / "#" / "$" / "%" / "&" / "'" / "*"
+    ///         / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
+    ///         / DIGIT / ALPHA
     #[inline(always)]
-    pub const fn is_field_name_char(byte: u8) {
-        self::is_token(byte)
+    pub const fn is_token_lowercase(byte: u8) {
+        matches!(
+            byte,
+            | b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*'
+            | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
+            | b'0'..=b'9' | b'a'..=b'z'
+        )
     }
 }
+
+/// Any invalid character will have it MSB set.
+///
+/// Character is normalized to lowercase.
+pub const HEADER_NAME: [u8; 256] = {
+    let mut bytes = [0b10000000; 256];
+    let mut i = 0u8;
+    loop {
+        if is_token(i) {
+            bytes[i as usize] = i.to_ascii_lowercase();
+        }
+        if i == 255 {
+            break;
+        }
+        i += 1;
+    }
+    bytes
+};
 
 pub const fn hash(bytes: &[u8]) -> u64 {
     const INITIAL_STATE: u64 = 0xcbf2_9ce4_8422_2325;

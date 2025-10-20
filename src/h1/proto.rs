@@ -46,7 +46,7 @@ impl HttpState {
             return Err("too many headers".into());
         }
 
-        let name = HeaderName::from_bytes(header.name)?;
+        let name = HeaderName::from_slice(header.name)?;
 
         header.value.make_ascii_lowercase();
         let value = header.value.freeze();

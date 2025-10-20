@@ -5,6 +5,8 @@ use super::{matches, error::HeaderError};
 // ===== HeaderName =====
 
 /// HTTP Header name.
+///
+/// Input is normalized to lowercase.
 #[derive(Clone)]
 pub struct HeaderName {
     /// is valid ASCII
@@ -23,12 +25,14 @@ impl HeaderName {
 
     /// Parse header name from static bytes.
     ///
+    /// The input must not contains ASCII uppercase characters.
+    ///
     /// # Panics
     ///
-    /// Panics if the input is not a valid header name.
+    /// Panics if the input is not a valid header name or contains ASCII uppercase characters.
     #[inline]
     pub const fn from_static(bytes: &'static [u8]) -> Self {
-        match validate_header_name(bytes) {
+        match validate_header_name_lowercase(bytes) {
             Ok(()) => Self {
                 bytes: Bytes::from_static(bytes),
                 hash: matches::hash(bytes) as u16,
@@ -39,16 +43,21 @@ impl HeaderName {
 
     /// Parse header name from [`Bytes`].
     ///
+    /// The input must not contains ASCII uppercase characters.
+    ///
+    /// For more flexible API use [`HeaderName::from_slice`].
+    ///
     /// # Errors
     ///
-    /// Returns error if the input is not a valid header name.
+    /// Returns error if the input is not a valid header name or contains ASCII uppercase
+    /// characters.
     #[inline]
-    pub fn from_bytes<B: Into<Bytes>>(name: B) -> Result<Self, HeaderError> {
-        let bytes = name.into();
-        match validate_header_name(bytes.as_slice()) {
+    pub fn from_bytes_lowercase<B: Into<Bytes>>(name: B) -> Result<Self, HeaderError> {
+        let name = name.into();
+        match validate_header_name_lowercase(name.as_slice()) {
             Ok(()) => Ok(Self {
-                hash: matches::hash_to_lowercase(bytes.as_slice()) as u16,
-                bytes,
+                hash: matches::hash_to_lowercase(name.as_slice()) as u16,
+                bytes: name,
             }),
             Err(err) => Err(err),
         }
@@ -56,14 +65,16 @@ impl HeaderName {
 
     /// Parse header name by copying from slice of bytes.
     ///
+    /// Input name is normalized to lowercase.
+    ///
     /// # Errors
     ///
     /// Returns error if the input is not a valid header name.
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
-        match validate_header_name(name.as_ref()) {
-            Ok(()) => Ok(Self {
-                bytes: Bytes::copy_from_slice(name.as_ref()),
+        match copy_as_header_name(name.as_ref()) {
+            Ok(bytes) => Ok(Self {
+                bytes,
                 hash: matches::hash_to_lowercase(name.as_ref()) as u16,
             }),
             Err(err) => Err(err),
@@ -92,20 +103,42 @@ impl HeaderName {
 
 // ===== Parser =====
 
+const MAX_HEADER_NAME_LEN: usize = 1 << 10;  // 1KB
+
 /// token       = 1*tchar
 /// field-name  = token
-const fn validate_header_name(mut bytes: &[u8]) -> Result<(), HeaderError> {
-    if bytes.is_empty() {
+const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderError> {
+    if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
         return Err(HeaderError::new_name());
     }
     while let [byte, rest @ ..] = bytes {
-        if matches::is_field_name_char(*byte) {
+        if matches::is_token_lowercase(*byte) {
             bytes = rest;
         } else {
             return Err(HeaderError::new_name())
         }
     }
     Ok(())
+}
+
+fn copy_as_header_name(bytes: &[u8]) -> Result<Bytes, HeaderError> {
+    if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
+        return Err(HeaderError::new_name());
+    }
+    let mut result = 0;
+    let mut name = vec![0; bytes.len()];
+
+    for (name_i, input) in name.iter_mut().zip(bytes) {
+        *name_i = matches::HEADER_NAME[*input as usize];
+
+        // Any invalid character will have it MSB set
+        result |= *name_i;
+    }
+
+    if result & 0x80 != 0 {
+        return Err(HeaderError::new_name());
+    }
+    Ok(name.into())
 }
 
 // ===== Traits =====
