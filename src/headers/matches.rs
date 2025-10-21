@@ -36,20 +36,31 @@ pub const HEADER_NAME: [u8; 256] = {
     bytes
 };
 
-pub const fn hash(bytes: &[u8]) -> u64 {
-    const INITIAL_STATE: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0100_0000_01b3;
+pub const fn hash_32(mut bytes: &[u8]) -> u32 {
+    const BASIS: u32 = 0x811C_9DC5;
+    const PRIME: u32 = 0x0100_0193;
 
-    let mut hash = INITIAL_STATE;
-    let mut i = 0;
+    let mut hash = BASIS;
 
-    while i < bytes.len() {
-        hash ^= bytes[i].to_ascii_lowercase() as u64;
-        hash = hash.wrapping_mul(PRIME);
-        i += 1;
+    while let [byte, rest @ ..] = bytes {
+        hash = PRIME.wrapping_mul(hash ^ *byte as u32);
+        bytes = rest;
     }
 
     hash
 }
 
-pub use hash as hash_to_lowercase;
+// pub const fn hash_64(mut bytes: &[u8]) -> u64 {
+//     const BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+//     const PRIME: u64 = 0x0100_0000_01b3;
+//
+//     let mut hash = BASIS;
+//
+//     while let [byte, rest @ ..] = bytes {
+//         hash = PRIME.wrapping_mul(hash ^ *byte as u64);
+//         bytes = rest;
+//     }
+//
+//     hash
+// }
+

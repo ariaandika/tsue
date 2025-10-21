@@ -2,7 +2,7 @@ use std::mem::replace;
 
 use super::{HeaderName, HeaderValue};
 
-type Size = u16;
+type Size = u32;
 
 /// Header Field.
 ///
@@ -68,7 +68,7 @@ impl HeaderField {
     }
 
     #[inline]
-    pub(crate) const fn extra_len(&self) -> u16 {
+    pub(crate) const fn extra_len(&self) -> Size {
         self.extra_len
     }
 

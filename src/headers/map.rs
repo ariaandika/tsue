@@ -11,7 +11,7 @@ use super::{
     matches,
 };
 
-type Size = u16;
+type Size = u32;
 
 /// HTTP Headers Multimap.
 #[derive(Default, Clone)]
@@ -117,7 +117,7 @@ impl HeaderMap {
         self.try_get(name.as_str(), name.hash())
     }
 
-    fn try_get(&self, name: &str, hash: u16) -> Option<&HeaderValue> {
+    fn try_get(&self, name: &str, hash: Size) -> Option<&HeaderValue> {
         let mask = self.indices.len() as Size;
         let mut index = hash & (mask - 1);
 
@@ -150,7 +150,7 @@ impl HeaderMap {
         self.try_get_all(name.as_str(), name.hash())
     }
 
-    fn try_get_all(&self, name: &str, hash: u16) -> GetAll<'_> {
+    fn try_get_all(&self, name: &str, hash: Size) -> GetAll<'_> {
         let mask = self.indices.len() as Size;
         let mut index = hash & (mask - 1);
 
@@ -209,7 +209,7 @@ impl HeaderMap {
         Some(val)
     }
 
-    fn try_remove_field(&mut self, name: &str, hash: u16) -> Option<HeaderField> {
+    fn try_remove_field(&mut self, name: &str, hash: Size) -> Option<HeaderField> {
         let mask = self.indices.len() as Size;
         let mut index = hash & (mask - 1);
 
@@ -251,7 +251,7 @@ impl HeaderMap {
                         };
 
                         let field = self.fields.swap_remove(field_index as usize);
-                        self.extra_len -= field.extra_len();
+                        self.extra_len -= field.extra_len() as Size;
                         return Some(field);
                     }
                 }
@@ -381,7 +381,7 @@ impl std::fmt::Debug for HeaderMap {
 #[allow(private_bounds)]
 pub trait AsHeaderName: SealedRef { }
 trait SealedRef: Sized {
-    fn hash(&self) -> u16;
+    fn hash(&self) -> Size;
 
     fn as_str(&self) -> &str;
 }
@@ -389,8 +389,8 @@ trait SealedRef: Sized {
 /// for str input, calculate hash
 impl AsHeaderName for &str { }
 impl SealedRef for &str {
-    fn hash(&self) -> u16 {
-        matches::hash_to_lowercase(self.as_bytes()) as u16
+    fn hash(&self) -> Size {
+        matches::hash_32(self.as_bytes())
     }
 
     fn as_str(&self) -> &str {
@@ -401,7 +401,7 @@ impl SealedRef for &str {
 /// for HeaderName, hash may be cacheed
 impl AsHeaderName for HeaderName { }
 impl SealedRef for HeaderName {
-    fn hash(&self) -> u16 {
+    fn hash(&self) -> Size {
         HeaderName::hash(self)
     }
 
@@ -413,7 +413,7 @@ impl SealedRef for HeaderName {
 // blanket implementation
 impl<K: AsHeaderName> AsHeaderName for &K { }
 impl<S: SealedRef> SealedRef for &S {
-    fn hash(&self) -> u16 {
+    fn hash(&self) -> Size {
         S::hash(self)
     }
 

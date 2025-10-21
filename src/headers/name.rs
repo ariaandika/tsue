@@ -33,13 +33,6 @@ struct Static {
 }
 
 impl HeaderName {
-    /// Used in iterator.
-    pub(crate) const fn placeholder() -> Self {
-        Self {
-            repr: Repr::Arbitrary(Bytes::new())
-        }
-    }
-
     /// Parse header name from static bytes.
     ///
     /// The input must not contains ASCII uppercase characters.
@@ -112,11 +105,18 @@ impl HeaderName {
         self.as_str().eq_ignore_ascii_case(name)
     }
 
+    /// Used in iterator.
+    pub(crate) const fn placeholder() -> Self {
+        Self {
+            repr: Repr::Arbitrary(Bytes::new())
+        }
+    }
+
     /// Returns cached hash.
-    pub(crate) const fn hash(&self) -> u16 {
+    pub(crate) const fn hash(&self) -> u32 {
         match &self.repr {
-            Repr::Static(s) => s.hash as u16,
-            Repr::Arbitrary(bytes) => matches::hash(bytes.as_slice()) as _,
+            Repr::Static(s) => s.hash,
+            Repr::Arbitrary(bytes) => matches::hash_32(bytes.as_slice()),
         }
     }
 }
@@ -182,7 +182,7 @@ impl std::fmt::Debug for HeaderName {
 impl std::hash::Hash for HeaderName {
     #[inline]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u16(self.hash());
+        state.write_u32(self.hash());
     }
 }
 
@@ -608,7 +608,7 @@ macro_rules! standard_header {
             pub const $id: $t = {
                 static $id: Static = Static {
                     string: $name,
-                    hash: matches::hash($name.as_bytes()) as _,
+                    hash: matches::hash_32($name.as_bytes()),
                 };
 
                 HeaderName {
