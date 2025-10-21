@@ -80,12 +80,7 @@ impl HeaderName {
     /// Returns error if the input is not a valid header name.
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
-        match copy_as_header_name(name.as_ref()) {
-            Ok(bytes) => Ok(Self {
-                repr: Repr::Arbitrary(bytes),
-            }),
-            Err(err) => Err(err),
-        }
+        copy_as_header_name(name.as_ref())
     }
 
     /// Extracts a string slice of the header name.
@@ -112,7 +107,6 @@ impl HeaderName {
         }
     }
 
-    /// Returns cached hash.
     pub(crate) const fn hash(&self) -> u32 {
         match &self.repr {
             Repr::Static(s) => s.hash,
@@ -141,24 +135,26 @@ const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderEr
     Ok(())
 }
 
-fn copy_as_header_name(bytes: &[u8]) -> Result<Bytes, HeaderError> {
+fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
     if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
         return Err(HeaderError::new_name());
     }
     let mut result = 0;
     let mut name = vec![0; bytes.len()];
 
-    for (name_i, input) in name.iter_mut().zip(bytes) {
-        *name_i = matches::HEADER_NAME[*input as usize];
+    for (output, input) in name.iter_mut().zip(bytes) {
+        *output = matches::HEADER_NAME[*input as usize];
 
         // Any invalid character will have it MSB set
-        result |= *name_i;
+        result |= *output;
     }
 
-    if result & 0x80 != 0 {
-        return Err(HeaderError::new_name());
+    match result & 128 {
+        0 => Ok(HeaderName {
+                repr: Repr::Arbitrary(name.into()),
+            }),
+        _ => Err(HeaderError::new_name()),
     }
-    Ok(name.into())
 }
 
 // ===== Traits =====
@@ -604,7 +600,6 @@ macro_rules! standard_header {
         $(
 
             $(#[$doc])*
-            #[allow(clippy::declare_interior_mutable_const)]
             pub const $id: $t = {
                 static $id: Static = Static {
                     string: $name,

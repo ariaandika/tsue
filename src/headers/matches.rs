@@ -28,7 +28,7 @@ pub const HEADER_NAME: [u8; 256] = {
         if is_token(i) {
             bytes[i as usize] = i.to_ascii_lowercase();
         }
-        if i == 255 {
+        if i == 127 {
             break;
         }
         i += 1;
