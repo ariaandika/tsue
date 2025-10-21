@@ -2,24 +2,41 @@ use tcio::bytes::Bytes;
 
 use super::{matches, error::HeaderError};
 
-// ===== HeaderName =====
+// HeaderName is optimized towards predefined standard headers
+//
+// Optimized operations is:
+// - validation, must contains valid
+// - hashing, for header map lookup
+//
+// predefined headers skip validation and returns precomputed hash
+// while arbitrary headers must pass validation and compute hashing when required
 
 /// HTTP Header name.
 ///
 /// Input is normalized to lowercase.
 #[derive(Clone)]
 pub struct HeaderName {
+    repr: Repr,
+}
+
+#[derive(Clone)]
+enum Repr {
+    Static(&'static Static),
     /// is valid ASCII
-    bytes: Bytes,
-    hash: u16,
+    Arbitrary(Bytes),
+}
+
+#[derive(Clone)]
+struct Static {
+    string: &'static str,
+    hash: u32,
 }
 
 impl HeaderName {
     /// Used in iterator.
     pub(crate) const fn placeholder() -> Self {
         Self {
-            bytes: Bytes::new(),
-            hash: 0,
+            repr: Repr::Arbitrary(Bytes::new())
         }
     }
 
@@ -34,8 +51,7 @@ impl HeaderName {
     pub const fn from_static(bytes: &'static [u8]) -> Self {
         match validate_header_name_lowercase(bytes) {
             Ok(()) => Self {
-                bytes: Bytes::from_static(bytes),
-                hash: matches::hash(bytes) as u16,
+                repr: Repr::Arbitrary(Bytes::from_static(bytes)),
             },
             Err(err) => err.panic_const(),
         }
@@ -56,8 +72,7 @@ impl HeaderName {
         let name = name.into();
         match validate_header_name_lowercase(name.as_slice()) {
             Ok(()) => Ok(Self {
-                hash: matches::hash_to_lowercase(name.as_slice()) as u16,
-                bytes: name,
+                repr: Repr::Arbitrary(name),
             }),
             Err(err) => Err(err),
         }
@@ -74,8 +89,7 @@ impl HeaderName {
     pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
         match copy_as_header_name(name.as_ref()) {
             Ok(bytes) => Ok(Self {
-                bytes,
-                hash: matches::hash_to_lowercase(name.as_ref()) as u16,
+                repr: Repr::Arbitrary(bytes),
             }),
             Err(err) => Err(err),
         }
@@ -84,7 +98,10 @@ impl HeaderName {
     /// Extracts a string slice of the header name.
     #[inline]
     pub const fn as_str(&self) -> &str {
-        unsafe { str::from_utf8_unchecked(self.bytes.as_slice()) }
+        match &self.repr {
+            Repr::Static(s) => s.string,
+            Repr::Arbitrary(bytes) => unsafe { str::from_utf8_unchecked(bytes.as_slice()) },
+        }
     }
 
     /// Checks that two header name are an ASCII case-insensitive match.
@@ -97,7 +114,10 @@ impl HeaderName {
 
     /// Returns cached hash.
     pub(crate) const fn hash(&self) -> u16 {
-        self.hash
+        match &self.repr {
+            Repr::Static(s) => s.hash as u16,
+            Repr::Arbitrary(bytes) => matches::hash(bytes.as_slice()) as _,
+        }
     }
 }
 
@@ -162,7 +182,7 @@ impl std::fmt::Debug for HeaderName {
 impl std::hash::Hash for HeaderName {
     #[inline]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash.hash(state);
+        state.write_u16(self.hash());
     }
 }
 
@@ -582,11 +602,18 @@ macro_rules! standard_header {
         )*
     ) => {
         $(
+
             $(#[$doc])*
             #[allow(clippy::declare_interior_mutable_const)]
-            pub const $id: $t = HeaderName {
-                bytes: Bytes::from_static($name.as_bytes()),
-                hash: matches::hash_to_lowercase($name.as_bytes()) as u16,
+            pub const $id: $t = {
+                static $id: Static = Static {
+                    string: $name,
+                    hash: matches::hash($name.as_bytes()) as _,
+                };
+
+                HeaderName {
+                    repr: Repr::Static(&$id)
+                }
             };
         )*
     };
