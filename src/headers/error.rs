@@ -7,14 +7,23 @@ pub struct HeaderError {
 #[derive(Debug)]
 enum Kind {
     Empty,
-    InvalidHeaderName,
     TooLong,
+    InvalidHeaderName,
+    InvalidHeaderValue,
+    // /// Only when constructing HeaderValue with utf8 promise.
+    // NonUtf8HeaderValue,
 }
 
 impl HeaderError {
     pub(crate) const fn invalid_name() -> Self {
         Self {
             kind: Kind::InvalidHeaderName,
+        }
+    }
+
+    pub(crate) const fn invalid_value() -> Self {
+        Self {
+            kind: Kind::InvalidHeaderValue,
         }
     }
 
@@ -30,8 +39,9 @@ impl HeaderError {
     pub(crate) const fn msg(&self) -> &'static str {
         match self.kind {
             Kind::Empty => "header cannot be empty",
-            Kind::InvalidHeaderName => "invalid header name",
             Kind::TooLong => "header too long",
+            Kind::InvalidHeaderName => "invalid header name",
+            Kind::InvalidHeaderValue => "invalid header value",
         }
     }
 

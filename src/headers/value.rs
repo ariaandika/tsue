@@ -1,82 +1,68 @@
-use std::{
-    mem::take,
-    str::{FromStr, from_utf8},
-};
+use std::str::FromStr;
 use tcio::bytes::{ByteStr, Bytes};
 
-// ===== HeaderValue =====
+use super::error::HeaderError;
 
 /// HTTP Header Value.
 #[derive(Clone)]
 pub struct HeaderValue {
-    repr: Repr,
-}
-
-#[derive(Clone)]
-enum Repr {
-    Bytes(Bytes),
-    Str(ByteStr),
+    bytes: Bytes,
+    is_str: bool,
 }
 
 impl HeaderValue {
     /// used in iterator.
     pub(crate) fn placeholder() -> Self {
         Self {
-            repr: Repr::Bytes(Bytes::new()),
+            bytes: Bytes::new(),
+            is_str: false,
         }
     }
 
-    /// Parse [`HeaderValue`] from slice.
+    /// Parse header value from static bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input is not a valid header value.
     #[inline]
-    pub fn try_from_slice(value: impl Into<Bytes>) -> Result<Self, InvalidHeaderValue> {
-        let bytes: Bytes = value.into();
-        match parse_from_slice(&bytes) {
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
+        match validate_header_value(bytes) {
+            Ok(()) => Self {
+                bytes: Bytes::from_static(bytes),
+                is_str: false,
+            },
+            Err(err) => err.panic_const(),
+        }
+    }
+
+    /// Parse header value from [`Bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the input is not a valid header value.
+    #[inline]
+    pub fn from_bytes<B: Into<Bytes>>(name: B) -> Result<Self, HeaderError> {
+        let value = name.into();
+        match validate_header_value(value.as_slice()) {
             Ok(()) => Ok(Self {
-                repr: Repr::Bytes(bytes),
+                bytes: value,
+                is_str: false,
             }),
             Err(err) => Err(err),
         }
     }
 
-    /// Parse [`HeaderValue`] from string.
+    /// Parse header value by coyping from slice of bytes.
     ///
-    /// This will cache the result and make [`to_str`] and [`as_str`] infallible.
+    /// # Errors
     ///
-    /// [`to_str`]: HeaderValue::to_str
-    /// [`as_str`]: HeaderValue::as_str
+    /// Returns error if the input is not a valid header value.
     #[inline]
-    pub fn try_from_string(value: impl Into<ByteStr>) -> Result<HeaderValue, InvalidHeaderValue> {
-        let value: ByteStr = value.into();
-        match parse_from_slice(value.as_bytes()) {
+    pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
+        match validate_header_value(name.as_ref()) {
             Ok(()) => Ok(Self {
-                repr: Repr::Str(value),
-            }),
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Parse [`HeaderValue`] by copying from slice.
-    #[inline]
-    pub fn try_copy_from_slice(value: &[u8]) -> Result<HeaderValue, InvalidHeaderValue> {
-        match parse_from_slice(value) {
-            Ok(()) => Ok(Self {
-                repr: Repr::Bytes(Bytes::copy_from_slice(value)),
-            }),
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Parse [`HeaderValue`] by copying from str.
-    ///
-    /// This will cache the result and make [`to_str`] and [`as_str`] infallible.
-    ///
-    /// [`to_str`]: HeaderValue::to_str
-    /// [`as_str`]: HeaderValue::as_str
-    #[inline]
-    pub fn try_copy_from_string(value: &str) -> Result<HeaderValue, InvalidHeaderValue> {
-        match parse_from_slice(value.as_bytes()) {
-            Ok(()) => Ok(Self {
-                repr: Repr::Str(ByteStr::copy_from_str(value)),
+                bytes: Bytes::copy_from_slice(name.as_ref()),
+                is_str: false,
             }),
             Err(err) => Err(err),
         }
@@ -93,17 +79,20 @@ impl HeaderValue {
     /// [`to_str`]: HeaderValue::to_str
     /// [`as_str`]: HeaderValue::as_str
     #[inline]
-    pub fn from_string(value: impl Into<ByteStr>) -> HeaderValue {
-        Self::try_from_string(value).expect("called `HeaderValue::from_string` with invalid bytes")
+    pub fn from_string<S: Into<ByteStr>>(value: S) -> HeaderValue {
+        match Self::from_bytes(ByteStr::into_bytes(value.into())) {
+            Ok(mut ok) => {
+                ok.is_str = true;
+                ok
+            },
+            Err(err) => err.panic_const(),
+        }
     }
 
     /// Returns value as slice.
     #[inline]
-    pub fn as_bytes(&self) -> &[u8] {
-        match &self.repr {
-            Repr::Bytes(b) => b,
-            Repr::Str(s) => s.as_bytes(),
-        }
+    pub const fn as_bytes(&self) -> &[u8] {
+        self.bytes.as_slice()
     }
 
     /// Parse value as [`str`].
@@ -112,17 +101,23 @@ impl HeaderValue {
     ///
     /// Panic if header value is not a valid utf8.
     #[inline]
-    pub fn as_str(&self) -> &str {
-        self.try_as_str()
-            .expect("cannot convert header value as utf8 string")
+    pub const fn as_str(&self) -> &str {
+        match self.try_as_str() {
+            Ok(ok) => ok,
+            Err(_) => panic!("cannot convert header value as utf8 string"),
+        }
     }
 
     /// Try to parse value as [`str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if header value is not a valid utf8.
     #[inline]
-    pub fn try_as_str(&self) -> Result<&str, std::str::Utf8Error> {
-        match &self.repr {
-            Repr::Bytes(b) => from_utf8(b),
-            Repr::Str(s) => Ok(s),
+    pub const fn try_as_str(&self) -> Result<&str, std::str::Utf8Error> {
+        match self.is_str {
+            true => unsafe { Ok(str::from_utf8_unchecked(self.bytes.as_slice())) },
+            false => str::from_utf8(self.bytes.as_slice()),
         }
     }
 
@@ -132,40 +127,44 @@ impl HeaderValue {
     ///
     /// Panic if header value is not a valid utf8.
     #[inline]
-    pub fn to_str(&mut self) -> &str {
-        self.try_to_str()
-            .expect("cannot convert header value as utf8 string")
+    pub const fn to_str(&mut self) -> &str {
+        match self.try_to_str() {
+            Ok(ok) => ok,
+            Err(_) => panic!("cannot convert header value as utf8 string"),
+        }
     }
 
     /// Try to parse value as [`str`] and cache the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if header value is not a valid utf8.
     #[inline]
-    pub fn try_to_str(&mut self) -> Result<&str, std::str::Utf8Error> {
-        match self.repr {
-            Repr::Bytes(ref mut b) => {
-                let s = match ByteStr::from_utf8(take(b)) {
-                    Ok(s) => s,
-                    Err(err) => return Err(*err.utf8_error()),
-                };
-                self.repr = Repr::Str(s);
-                self.try_as_str()
-            }
-            Repr::Str(ref s) => Ok(s.as_str()),
+    pub const fn try_to_str(&mut self) -> Result<&str, std::str::Utf8Error> {
+        if !self.is_str {
+            if let Err(err) = str::from_utf8(self.bytes.as_slice()) {
+                return Err(err);
+            };
+            self.is_str = true;
         }
+        unsafe { Ok(str::from_utf8_unchecked(self.bytes.as_slice())) }
     }
 }
 
 impl FromStr for HeaderValue {
-    type Err = InvalidHeaderValue;
+    type Err = HeaderError;
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::try_copy_from_string(s)
+        let mut ok = Self::from_slice(s)?;
+        ok.is_str = true;
+        Ok(ok)
     }
 }
 
 // ===== Parsing =====
 
-const fn parse_from_slice(value: &[u8]) -> Result<(), InvalidHeaderValue> {
+const fn validate_header_value(value: &[u8]) -> Result<(), HeaderError> {
     let ptr = value.as_ptr();
     let len = value.len();
     let mut i = 0;
@@ -173,9 +172,8 @@ const fn parse_from_slice(value: &[u8]) -> Result<(), InvalidHeaderValue> {
         unsafe {
             // SAFETY: i < value.len()
             let b = *ptr.add(i);
-            if b >= b' ' && b != 127 || b == b'\t' {
-            } else {
-                return Err(InvalidHeaderValue { });
+            if !(b >= b' ' && b != 127 || b == b'\t') {
+                return Err(HeaderError::invalid_value());
             }
             // SAFETY: i < value.len()
             i = i.unchecked_add(1);
@@ -189,27 +187,5 @@ const fn parse_from_slice(value: &[u8]) -> Result<(), InvalidHeaderValue> {
 impl std::fmt::Debug for HeaderValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "\"{}\"",tcio::fmt::lossy(&self.as_bytes()))
-    }
-}
-
-// ===== Error =====
-
-/// An error that can occur when parsing header value.
-#[non_exhaustive]
-pub struct InvalidHeaderValue {
-
-}
-
-impl std::error::Error for InvalidHeaderValue { }
-
-impl std::fmt::Display for InvalidHeaderValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("header contains invalid bytes")
-    }
-}
-
-impl std::fmt::Debug for InvalidHeaderValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InvalidHeaderValue").finish()
     }
 }
