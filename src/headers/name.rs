@@ -123,13 +123,13 @@ const MAX_HEADER_NAME_LEN: usize = 1 << 10;  // 1KB
 /// field-name  = token
 const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderError> {
     if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
-        return Err(HeaderError::new_name());
+        return Err(HeaderError::invalid_len(bytes.len()));
     }
     while let [byte, rest @ ..] = bytes {
         if matches::is_token_lowercase(*byte) {
             bytes = rest;
         } else {
-            return Err(HeaderError::new_name())
+            return Err(HeaderError::invalid_name())
         }
     }
     Ok(())
@@ -137,7 +137,7 @@ const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderEr
 
 fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
     if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
-        return Err(HeaderError::new_name());
+        return Err(HeaderError::invalid_len(bytes.len()));
     }
     let mut result = 0;
     let mut name = vec![0; bytes.len()];
@@ -153,7 +153,7 @@ fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
         0 => Ok(HeaderName {
                 repr: Repr::Arbitrary(name.into()),
             }),
-        _ => Err(HeaderError::new_name()),
+        _ => Err(HeaderError::invalid_name()),
     }
 }
 

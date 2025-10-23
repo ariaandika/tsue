@@ -1,18 +1,42 @@
 
 /// Header name/value parsing error.
 pub struct HeaderError {
-    error: &'static str,
+    kind: Kind,
+}
+
+#[derive(Debug)]
+enum Kind {
+    Empty,
+    InvalidHeaderName,
+    TooLong,
 }
 
 impl HeaderError {
-    pub(crate) const fn new_name() -> HeaderError {
+    pub(crate) const fn invalid_name() -> Self {
         Self {
-            error: "invalid header name",
+            kind: Kind::InvalidHeaderName,
+        }
+    }
+
+    pub(crate) const fn invalid_len(len: usize) -> Self {
+        Self {
+            kind: match len {
+                0 => Kind::Empty,
+                _ => Kind::TooLong,
+            },
+        }
+    }
+
+    pub(crate) const fn msg(&self) -> &'static str {
+        match self.kind {
+            Kind::Empty => "header cannot be empty",
+            Kind::InvalidHeaderName => "invalid header name",
+            Kind::TooLong => "header too long",
         }
     }
 
     pub(crate) const fn panic_const(&self) -> ! {
-        panic!("{}", self.error)
+        panic!("{}", self.msg())
     }
 }
 
@@ -20,12 +44,12 @@ impl std::error::Error for HeaderError {}
 
 impl std::fmt::Debug for HeaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self, f)
+        f.debug_tuple("HeaderError").field(&self.kind).finish()
     }
 }
 
 impl std::fmt::Display for HeaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.error)
+        self.msg().fmt(f)
     }
 }
