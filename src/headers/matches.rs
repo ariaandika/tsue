@@ -18,6 +18,26 @@ byte_map! {
     }
 }
 
+const fn vchar(byte: u8) -> bool {
+    matches!(byte, 0x21..=0x7E)
+}
+
+const fn obs_text(byte: u8) -> bool {
+    matches!(byte, 0x80..=0xFF)
+}
+
+byte_map! {
+    /// field-value    = *field-content
+    /// field-content  = field-vchar
+    ///                  [ 1*( SP / HTAB / field-vchar ) field-vchar ]
+    /// field-vchar    = VCHAR / obs-text
+    /// obs-text       = %x80-FF
+    #[inline(always)]
+    pub const fn is_header_value(byte: u8) {
+        vchar(byte) || obs_text(byte) || matches!(byte, b' ' | b'\t')
+    }
+}
+
 /// Any invalid character will have it MSB set.
 ///
 /// Character is normalized to lowercase.

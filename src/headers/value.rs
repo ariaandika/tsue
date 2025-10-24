@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use tcio::bytes::{ByteStr, Bytes};
 
-use super::error::HeaderError;
+use super::{matches, error::HeaderError};
 
 /// HTTP Header Value.
 #[derive(Clone)]
@@ -164,20 +164,27 @@ impl FromStr for HeaderValue {
 
 // ===== Parsing =====
 
-const fn validate_header_value(value: &[u8]) -> Result<(), HeaderError> {
-    let ptr = value.as_ptr();
-    let len = value.len();
-    let mut i = 0;
-    while i < len {
-        unsafe {
-            // SAFETY: i < value.len()
-            let b = *ptr.add(i);
-            if !(b >= b' ' && b != 127 || b == b'\t') {
-                return Err(HeaderError::invalid_value());
-            }
-            // SAFETY: i < value.len()
-            i = i.unchecked_add(1);
+const MAX_HEADER_VALUE_LEN: usize = 1 << 13;  // 8KB
+
+const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderError> {
+    match bytes {
+        // no leading SP / HTAB
+        | [b' ' | b'\t', ..]
+        // no trailing SP / HTAB
+        | [.., b' ' | b'\t'] => {
+            return Err(HeaderError::invalid_value());
+        },
+        _ => {}
+    }
+    // too long
+    if bytes.len() > MAX_HEADER_VALUE_LEN {
+        return Err(HeaderError::invalid_len(bytes.len()));
+    }
+    while let [byte, rest @ ..] = bytes {
+        if !matches::is_header_value(*byte) {
+            return Err(HeaderError::invalid_value())
         }
+        bytes = rest;
     }
     Ok(())
 }
