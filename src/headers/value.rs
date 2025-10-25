@@ -7,7 +7,7 @@ use super::{matches, error::HeaderError};
 #[derive(Clone)]
 pub struct HeaderValue {
     bytes: Bytes,
-    is_str: bool,
+    is_utf8: bool,
 }
 
 impl HeaderValue {
@@ -15,7 +15,7 @@ impl HeaderValue {
     pub(crate) fn placeholder() -> Self {
         Self {
             bytes: Bytes::new(),
-            is_str: false,
+            is_utf8: false,
         }
     }
 
@@ -27,9 +27,9 @@ impl HeaderValue {
     #[inline]
     pub const fn from_static(bytes: &'static [u8]) -> Self {
         match validate_header_value(bytes) {
-            Ok(()) => Self {
+            Ok(is_ascii) => Self {
                 bytes: Bytes::from_static(bytes),
-                is_str: false,
+                is_utf8: is_ascii,
             },
             Err(err) => err.panic_const(),
         }
@@ -44,9 +44,9 @@ impl HeaderValue {
     pub fn from_bytes<B: Into<Bytes>>(name: B) -> Result<Self, HeaderError> {
         let value = name.into();
         match validate_header_value(value.as_slice()) {
-            Ok(()) => Ok(Self {
+            Ok(is_ascii) => Ok(Self {
                 bytes: value,
-                is_str: false,
+                is_utf8: is_ascii,
             }),
             Err(err) => Err(err),
         }
@@ -60,9 +60,9 @@ impl HeaderValue {
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
         match validate_header_value(name.as_ref()) {
-            Ok(()) => Ok(Self {
+            Ok(is_ascii) => Ok(Self {
                 bytes: Bytes::copy_from_slice(name.as_ref()),
-                is_str: false,
+                is_utf8: is_ascii,
             }),
             Err(err) => Err(err),
         }
@@ -82,7 +82,10 @@ impl HeaderValue {
     pub fn from_string<S: Into<ByteStr>>(value: S) -> HeaderValue {
         match Self::from_bytes(ByteStr::into_bytes(value.into())) {
             Ok(mut ok) => {
-                ok.is_str = true;
+                // validation only detect for valid ASCII not UTF-8,
+                // but the input `str` is valid UTF-8 and is a valid ASCII,
+                // so it is required to set the flag here
+                ok.is_utf8 = true;
                 ok
             },
             Err(err) => err.panic_const(),
@@ -115,7 +118,7 @@ impl HeaderValue {
     /// Returns [`Err`] if header value is not a valid utf8.
     #[inline]
     pub const fn try_as_str(&self) -> Result<&str, std::str::Utf8Error> {
-        match self.is_str {
+        match self.is_utf8 {
             true => unsafe { Ok(str::from_utf8_unchecked(self.bytes.as_slice())) },
             false => str::from_utf8(self.bytes.as_slice()),
         }
@@ -141,11 +144,11 @@ impl HeaderValue {
     /// Returns [`Err`] if header value is not a valid utf8.
     #[inline]
     pub const fn try_to_str(&mut self) -> Result<&str, std::str::Utf8Error> {
-        if !self.is_str {
+        if !self.is_utf8 {
             if let Err(err) = str::from_utf8(self.bytes.as_slice()) {
                 return Err(err);
             };
-            self.is_str = true;
+            self.is_utf8 = true;
         }
         unsafe { Ok(str::from_utf8_unchecked(self.bytes.as_slice())) }
     }
@@ -157,7 +160,10 @@ impl FromStr for HeaderValue {
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut ok = Self::from_slice(s)?;
-        ok.is_str = true;
+        // validation only detect for valid ASCII not UTF-8,
+        // but the input `str` is valid UTF-8 and is a valid ASCII,
+        // so it is required to set the flag here
+        ok.is_utf8 = true;
         Ok(ok)
     }
 }
@@ -166,7 +172,7 @@ impl FromStr for HeaderValue {
 
 const MAX_HEADER_VALUE_LEN: usize = 1 << 13;  // 8KB
 
-const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderError> {
+const fn validate_header_value(mut bytes: &[u8]) -> Result<bool, HeaderError> {
     match bytes {
         // no leading SP / HTAB
         | [b' ' | b'\t', ..]
@@ -180,13 +186,16 @@ const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderError> {
     if bytes.len() > MAX_HEADER_VALUE_LEN {
         return Err(HeaderError::invalid_len(bytes.len()));
     }
+    let mut is_ascii = true;
     while let [byte, rest @ ..] = bytes {
-        if !matches::is_header_value(*byte) {
+        let (ok, ascii) = matches::is_header_value(*byte);
+        if !ok {
             return Err(HeaderError::invalid_value())
         }
+        is_ascii &= ascii;
         bytes = rest;
     }
-    Ok(())
+    Ok(is_ascii)
 }
 
 // ===== Traits =====

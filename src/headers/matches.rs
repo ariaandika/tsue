@@ -18,26 +18,6 @@ byte_map! {
     }
 }
 
-const fn vchar(byte: u8) -> bool {
-    matches!(byte, 0x21..=0x7E)
-}
-
-const fn obs_text(byte: u8) -> bool {
-    matches!(byte, 0x80..=0xFF)
-}
-
-byte_map! {
-    /// field-value    = *field-content
-    /// field-content  = field-vchar
-    ///                  [ 1*( SP / HTAB / field-vchar ) field-vchar ]
-    /// field-vchar    = VCHAR / obs-text
-    /// obs-text       = %x80-FF
-    #[inline(always)]
-    pub const fn is_header_value(byte: u8) {
-        vchar(byte) || obs_text(byte) || matches!(byte, b' ' | b'\t')
-    }
-}
-
 /// Any invalid character will have it MSB set.
 ///
 /// Character is normalized to lowercase.
@@ -55,6 +35,49 @@ pub const HEADER_NAME: [u8; 256] = {
     }
     bytes
 };
+
+/// Returns (is_valid_header_name, is_valid_ascii).
+///
+/// field-value    = *field-content
+/// field-content  = field-vchar
+///                  [ 1*( SP / HTAB / field-vchar ) field-vchar ]
+/// field-vchar    = VCHAR / obs-text
+/// obs-text       = %x80-FF
+#[inline(always)]
+pub const fn is_header_value(byte: u8) -> (bool, bool) {
+    const fn vchar(byte: u8) -> bool {
+        matches!(byte, 0x21..=0x7E)
+    }
+
+    const fn obs_text(byte: u8) -> bool {
+        matches!(byte, 0x80..=0xFF)
+    }
+
+    const fn valid(byte: u8) -> bool {
+        vchar(byte) || obs_text(byte) || matches!(byte, b' ' | b'\t')
+    }
+
+    const OK: u8 = 0b01;
+    const ASCII: u8 = 0b10;
+
+    const PAT: [u8; 256] = {
+        let mut bytes = [0b00; 256];
+        let mut byte = 0u8;
+        loop {
+            if valid(byte) {
+                bytes[byte as usize] = if byte.is_ascii() { ASCII } else { OK };
+            }
+            if byte == 255 {
+                break;
+            }
+            byte += 1;
+        }
+        bytes
+    };
+
+    let flag = unsafe { *PAT.as_ptr().add(byte as usize) };
+    (flag & OK == OK, flag & ASCII == ASCII)
+}
 
 pub const fn hash_32(mut bytes: &[u8]) -> u32 {
     const BASIS: u32 = 0x811C_9DC5;
