@@ -3,37 +3,34 @@ use std::mem::replace;
 use super::{HeaderName, HeaderValue};
 
 type Size = u32;
+type NonZeroSize = std::num::NonZeroU32;
 
 /// Header Field.
 ///
 /// Contains [`HeaderName`] and multiple [`HeaderValue`].
+#[derive(Clone)]
 pub struct HeaderField {
     hash: Size,
     name: HeaderName,
     value: HeaderValue,
-    next: *mut FieldExtra,
-    extra_len: Size,
+    next: Option<Box<FieldExtra>>,
+    len: NonZeroSize,
 }
 
-// SAFETY: FieldExtra pointer is exclusively owned by Field
-unsafe impl Send for HeaderField {}
-
-// SAFETY: FieldExtra pointer is exclusively owned by Field
-unsafe impl Sync for HeaderField {}
-
+#[derive(Clone)]
 struct FieldExtra {
     value: HeaderValue,
-    next: *mut FieldExtra,
+    next: Option<Box<FieldExtra>>,
 }
 
 impl HeaderField {
-    pub(crate) fn new(hash: Size, name: HeaderName, value: HeaderValue) -> Self {
+    pub(crate) const fn new(hash: Size, name: HeaderName, value: HeaderValue) -> Self {
         Self {
             hash,
             name,
             value,
-            next: std::ptr::null_mut(),
-            extra_len: 0,
+            next: None,
+            len: unsafe { NonZeroSize::new_unchecked(1) },
         }
     }
 
@@ -64,12 +61,7 @@ impl HeaderField {
         reason = "Field always have at least 1 value"
     )]
     pub const fn len(&self) -> usize {
-        self.extra_len as usize + 1
-    }
-
-    #[inline]
-    pub(crate) const fn extra_len(&self) -> Size {
-        self.extra_len
+        self.len.get() as _
     }
 
     /// Returns an iterator over [`HeaderValue`].
@@ -80,31 +72,14 @@ impl HeaderField {
 
     /// Push header value.
     pub fn push(&mut self, value: HeaderValue) {
-        let new = Box::into_raw(Box::new(FieldExtra {
-            value,
-            next: std::ptr::null_mut(),
-        }));
+        let new_len = self.len.checked_add(1).unwrap();
 
-        if self.next.is_null() {
-            self.next = new;
-            self.extra_len += 1;
-            return;
+        match self.next.as_mut() {
+            Some(next) => next.push(value),
+            None => self.next = FieldExtra::new_option_box(value),
         }
 
-        let mut next = self.next;
-
-        loop {
-            // SAFETY: null checked above and below
-            let now = unsafe { &mut *next };
-
-            if now.next.is_null() {
-                now.next = new;
-                self.extra_len += 1;
-                return;
-            } else {
-                next = now.next;
-            }
-        }
+        self.len = new_len;
     }
 
     /// Consume [`HeaderField`] into [`HeaderName`] and [`HeaderValue`].
@@ -119,53 +94,18 @@ impl HeaderField {
     }
 }
 
-impl Clone for HeaderField {
-    fn clone(&self) -> Self {
-        Self {
-            hash: self.hash,
-            name: self.name.clone(),
-            value: self.value.clone(),
-            next: if self.next.is_null() {
-                self.next
-            } else {
-                // SAFETY: null checked
-                Box::into_raw(Box::new(FieldExtra::clone(unsafe { &*self.next })))
-            },
-            extra_len: self.extra_len,
-        }
+impl FieldExtra {
+    fn new_option_box(value: HeaderValue) -> Option<Box<FieldExtra>> {
+        Some(Box::new(Self {
+            value,
+            next: None
+        }))
     }
-}
 
-impl Drop for HeaderField {
-    fn drop(&mut self) {
-        if !self.next.is_null() {
-            // SAFETY: null checked
-            drop(unsafe { Box::from_raw(self.next) });
-        }
-    }
-}
-
-impl Clone for FieldExtra {
-    fn clone(&self) -> Self {
-        Self {
-            value: self.value.clone(),
-            next: {
-                if self.next.is_null() {
-                    self.next
-                } else {
-                    // SAFETY: null checked
-                    Box::into_raw(Box::new(FieldExtra::clone(unsafe { &*self.next })))
-                }
-            },
-        }
-    }
-}
-
-impl Drop for FieldExtra {
-    fn drop(&mut self) {
-        if !self.next.is_null() {
-            // SAFETY: null checked
-            drop(unsafe { Box::from_raw(self.next) });
+    fn push(&mut self, value: HeaderValue) {
+        match self.next.as_mut() {
+            Some(next) => next.push(value),
+            None => self.next = Self::new_option_box(value),
         }
     }
 }
@@ -195,28 +135,28 @@ impl<'a> IntoIterator for &'a HeaderField {
 /// Iterator returned from [`HeaderMap::get_all`][super::HeaderMap::get_all].
 pub struct GetAll<'a> {
     first: Option<&'a HeaderField>,
-    next: *const FieldExtra,
+    next: Option<&'a Box<FieldExtra>>,
 }
 
 impl<'a> GetAll<'a> {
     pub(crate) const fn new(field: &'a HeaderField) -> Self {
         Self {
             first: Some(field),
-            next: field.next,
+            next: field.next.as_ref(),
         }
     }
 
     pub(crate) const fn empty() -> Self {
         Self {
             first: None,
-            next: std::ptr::null(),
+            next: None,
         }
     }
 
     /// Returns `true` if there is still remaining value.
     #[inline]
     pub const fn has_remaining(&self) -> bool {
-        self.first.is_some() || !self.next.is_null()
+        self.first.is_some() || self.next.is_some()
     }
 }
 
@@ -227,13 +167,8 @@ impl<'a> Iterator for GetAll<'a> {
         match self.first.take() {
             Some(e) => Some(e.value()),
             None => {
-                if self.next.is_null() {
-                    return None;
-                }
-
-                // SAFETY: null checked
-                let extra = unsafe { &*self.next };
-                self.next = extra.next;
+                let extra = self.next?;
+                self.next = extra.next.as_ref();
                 Some(&extra.value)
             }
         }

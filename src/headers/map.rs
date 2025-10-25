@@ -251,7 +251,7 @@ impl HeaderMap {
                         };
 
                         let field = self.fields.swap_remove(field_index as usize);
-                        self.extra_len -= field.extra_len() as Size;
+                        self.extra_len -= (field.len() - 1) as Size;
                         return Some(field);
                     }
                 }
