@@ -65,7 +65,8 @@ pub const fn is_header_value(byte: u8) -> (bool, bool) {
         let mut byte = 0u8;
         loop {
             if valid(byte) {
-                bytes[byte as usize] = if byte.is_ascii() { ASCII } else { OK };
+                // `(bool as u8) << 1` will mimic the ASCII flag
+                bytes[byte as usize] = OK | (byte.is_ascii() as u8) << 1;
             }
             if byte == 255 {
                 break;
