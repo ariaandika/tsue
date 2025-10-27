@@ -3,6 +3,7 @@ use std::mem::replace;
 use super::{HeaderName, HeaderValue};
 
 type Size = u32;
+
 type NonZeroSize = std::num::NonZeroU32;
 
 /// Header Field.
@@ -12,15 +13,14 @@ type NonZeroSize = std::num::NonZeroU32;
 pub struct HeaderField {
     hash: Size,
     name: HeaderName,
-    value: HeaderValue,
-    next: Option<Box<FieldExtra>>,
+    entry: FieldEntry,
     len: NonZeroSize,
 }
 
 #[derive(Clone)]
-struct FieldExtra {
+struct FieldEntry {
     value: HeaderValue,
-    next: Option<Box<FieldExtra>>,
+    next: Option<Box<FieldEntry>>,
 }
 
 impl HeaderField {
@@ -28,8 +28,7 @@ impl HeaderField {
         Self {
             hash,
             name,
-            value,
-            next: None,
+            entry: FieldEntry::new(value),
             len: unsafe { NonZeroSize::new_unchecked(1) },
         }
     }
@@ -49,7 +48,7 @@ impl HeaderField {
     /// Returns reference to [`HeaderValue`].
     #[inline]
     pub const fn value(&self) -> &HeaderValue {
-        &self.value
+        &self.entry.value
     }
 
     /// Returns the number of [`HeaderValue`].
@@ -71,14 +70,10 @@ impl HeaderField {
     }
 
     /// Push header value.
+    #[inline]
     pub fn push(&mut self, value: HeaderValue) {
         let new_len = self.len.checked_add(1).unwrap();
-
-        match self.next.as_mut() {
-            Some(next) => next.push(value),
-            None => self.next = FieldExtra::new_option_box(value),
-        }
-
+        self.entry.push(value);
         self.len = new_len;
     }
 
@@ -89,17 +84,18 @@ impl HeaderField {
     pub fn into_parts(mut self) -> (HeaderName, HeaderValue) {
         (
             replace(&mut self.name, HeaderName::placeholder()),
-            replace(&mut self.value, HeaderValue::placeholder()),
+            replace(&mut self.entry.value, HeaderValue::placeholder()),
         )
     }
 }
 
-impl FieldExtra {
-    fn new_option_box(value: HeaderValue) -> Option<Box<FieldExtra>> {
-        Some(Box::new(Self {
-            value,
-            next: None
-        }))
+impl FieldEntry {
+    const fn new(value: HeaderValue) -> FieldEntry {
+        Self { value, next: None }
+    }
+
+    fn new_option_box(value: HeaderValue) -> Option<Box<FieldEntry>> {
+        Some(Box::new(Self { value, next: None }))
     }
 
     fn push(&mut self, value: HeaderValue) {
@@ -133,55 +129,46 @@ impl<'a> IntoIterator for &'a HeaderField {
 }
 
 /// Iterator returned from [`HeaderMap::get_all`][super::HeaderMap::get_all].
+#[derive(Clone)]
 pub struct GetAll<'a> {
-    first: Option<&'a HeaderField>,
-    next: Option<&'a Box<FieldExtra>>,
+    entry: Option<&'a FieldEntry>,
 }
 
 impl<'a> GetAll<'a> {
     pub(crate) const fn new(field: &'a HeaderField) -> Self {
         Self {
-            first: Some(field),
-            next: field.next.as_ref(),
+            entry: Some(&field.entry),
         }
     }
 
     pub(crate) const fn empty() -> Self {
-        Self {
-            first: None,
-            next: None,
-        }
+        Self { entry: None }
     }
 
     /// Returns `true` if there is still remaining value.
     #[inline]
     pub const fn has_remaining(&self) -> bool {
-        self.first.is_some() || self.next.is_some()
+        self.entry.is_some()
     }
 }
 
 impl<'a> Iterator for GetAll<'a> {
     type Item = &'a HeaderValue;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        match self.first.take() {
-            Some(e) => Some(e.value()),
-            None => {
-                let extra = self.next?;
-                self.next = extra.next.as_ref();
-                Some(&extra.value)
+        match self.entry.take() {
+            Some(entry) => {
+                self.entry = entry.next.as_deref();
+                Some(&entry.value)
             }
+            None => None,
         }
     }
 }
 
-impl std::fmt::Debug for GetAll<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_list()
-            .entries(Self {
-                first: self.first,
-                next: self.next,
-            })
-            .finish()
+impl<'a> std::fmt::Debug for GetAll<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.clone()).finish()
     }
 }
