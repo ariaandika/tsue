@@ -205,3 +205,16 @@ impl std::fmt::Debug for HeaderValue {
         write!(f, "\"{}\"",tcio::fmt::lossy(&self.as_bytes()))
     }
 }
+
+impl PartialEq for HeaderValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
+}
+
+impl PartialEq<[u8]> for HeaderValue {
+    #[inline]
+    fn eq(&self, other: &[u8]) -> bool {
+        self.bytes.as_slice() == other
+    }
+}

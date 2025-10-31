@@ -33,10 +33,9 @@ impl HeaderField {
         }
     }
 
-    /// Returns cached hash.
-    #[inline]
-    pub(crate) const fn get_hashed(&self) -> &Size {
-        &self.hash
+    /// name must be in lowercase
+    pub(crate) fn eq_hash_and_name(&self, hash: Size, name: &str) -> bool {
+        self.hash == hash && self.name.as_str() == name
     }
 
     /// Returns reference to [`HeaderName`].
@@ -139,10 +138,6 @@ impl<'a> GetAll<'a> {
         Self {
             entry: Some(&field.entry),
         }
-    }
-
-    pub(crate) const fn empty() -> Self {
-        Self { entry: None }
     }
 
     /// Returns `true` if there is still remaining value.

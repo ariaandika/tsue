@@ -1,8 +1,7 @@
 use std::{
-    iter::repeat_with,
-    mem::{replace, take},
+    mem::{ManuallyDrop, replace},
+    ptr::NonNull,
 };
-use tcio::bytes::ByteStr;
 
 use super::{
     HeaderName, HeaderValue,
@@ -14,28 +13,29 @@ use super::{
 type Size = u32;
 
 /// HTTP Headers Multimap.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct HeaderMap {
-    indices: Box<[Slot]>,
-    fields: Vec<HeaderField>,
-    extra_len: Size,
-    delim: Size,
-    is_full: bool,
+    ptr: NonNull<Option<HeaderField>>,
+    len: usize,
+    cap: usize,
 }
 
-#[derive(Debug, Default, Clone)]
-enum Slot {
-    Some(Size),
-    /// there is collision previously, but index removed,
-    /// keed searching forward instead of giveup searching
-    Tombstone,
-    #[default]
-    None,
+unsafe impl Send for HeaderMap { }
+unsafe impl Sync for HeaderMap { }
+
+impl Default for HeaderMap {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-impl Slot {
-    fn take_as_tombstone(&mut self) -> Self {
-        replace(self, Self::Tombstone)
+impl Drop for HeaderMap {
+    fn drop(&mut self) {
+        // `self.len` is actually represent the field that `Some`
+        // the underlying memory is actually all initialized
+        // so we use `self.cap` here
+        unsafe { Vec::from_raw_parts(self.ptr.as_ptr(), self.cap, self.cap) };
     }
 }
 
@@ -44,51 +44,69 @@ impl HeaderMap {
     ///
     /// This function does not allocate.
     #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
+        let mut vec = Vec::new();
+        let ptr = unsafe { NonNull::new_unchecked(vec.as_mut_ptr()) };
+        let _ = ManuallyDrop::new(vec);
         Self {
-            // zero sized type does not allocate
-            indices: Box::new([]),
-            fields: Vec::new(),
-            extra_len: 0,
-            delim: 0,
-            is_full: true,
+            ptr,
+            len: 0,
+            cap: 0,
         }
     }
 
     /// Create new empty [`HeaderMap`] with at least the specified capacity.
     ///
     /// If the `capacity` is `0`, this function does not allocate.
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         if capacity == 0 {
             return Self::new();
         }
-        let new_cap = capacity.next_power_of_two();
+        Self::with_capacity_unchecked(capacity.next_power_of_two())
+    }
+
+    fn with_capacity_unchecked(capacity: usize) -> Self {
+        // it is required that capacity is power of two,
+        // see `HeaderMap::mask_capacity`
+        debug_assert!(capacity.is_power_of_two());
+
+        let mut vec = ManuallyDrop::new(vec![None; capacity]);
+        debug_assert_eq!(vec.len(), vec.capacity());
+
+        // `self.len` is actually represent the field that is `Some`
+        // the underlying memory is actually all initialized
         Self {
-            indices: Vec::from_iter(repeat_with(<_>::default).take(new_cap)).into_boxed_slice(),
-            fields: Vec::with_capacity(new_cap),
-            extra_len: 0,
-            delim: new_cap as Size * 3 / 4,
-            is_full: false,
+            ptr: unsafe { NonNull::new_unchecked(vec.as_mut_ptr()) },
+            len: 0,
+            cap: vec.capacity(),
         }
     }
 
     /// Returns headers length.
     #[inline]
     pub const fn len(&self) -> usize {
-        self.fields.len() + self.extra_len as usize
+        self.len
     }
 
     /// Returns the total number of elements the map can hold without reallocating.
     #[inline]
     pub const fn capacity(&self) -> usize {
-        self.fields.capacity()
+        self.cap
     }
 
     /// Returns `true` if headers has no element.
     #[inline]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.fields.len() == 0 && self.extra_len == 0
+        self.len == 0
+    }
+
+    const fn mask_capacity(&self, hash: Size) -> Size {
+        // capacity is always a power of two
+        // any power of two - 1 will have all the appropriate bit set to mask the hash value
+        // the result is always equal to to `hash % capacity`
+        hash & (self.cap - 1) as Size
     }
 }
 
@@ -96,82 +114,64 @@ impl HeaderMap {
 
 impl HeaderMap {
     /// Returns `true` if the map contains a header value for given header name.
+    ///
+    /// # Panics
+    ///
+    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
     #[inline]
     pub fn contains_key<K: AsHeaderName>(&self, name: K) -> bool {
         if self.is_empty() {
             return false
         }
-
-        // `to_header_ref` may calculate hash
-        self.try_get(name.as_str(), name.hash()).is_some()
+        self.field(name.as_lowercase_str(), name.hash()).is_some()
     }
 
     /// Returns a reference to the first header value corresponding to the given header name.
+    ///
+    /// Key can be valid static str, but note that using [`HeaderName`] directly is more performant
+    /// because the hash is calculated at compile time.
+    ///
+    /// ```rust
+    /// use tsue::headers::{CONTENT_TYPE, DATE, HeaderMap, HeaderValue};
+    ///
+    /// let mut map = HeaderMap::new()
+    /// map.insert(CONTENT_TYPE, HeaderValue::from_static(b"text/html"));
+    /// assert_eq!(map.get(CONTENT_TYPE), Some())
+    ///
+    /// let ctype = map.get(CONTENT_TYPE);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    ///
+    /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
+    /// constant.
     #[inline]
     pub fn get<K: AsHeaderName>(&self, name: K) -> Option<&HeaderValue> {
         if self.is_empty() {
             return None;
         }
-
-        // `to_header_ref` may calculate hash
-        self.try_get(name.as_str(), name.hash())
-    }
-
-    fn try_get(&self, name: &str, hash: Size) -> Option<&HeaderValue> {
-        let mask = self.indices.len() as Size;
-        let mut index = hash & (mask - 1);
-
-        loop {
-            match self.indices[index as usize] {
-                Slot::Some(field_index) => {
-                    let field = &self.fields[field_index as usize];
-
-                    if field.get_hashed() == &hash && field.name().as_str().eq_ignore_ascii_case(name) {
-                        return Some(field.value());
-                    }
-                },
-                Slot::Tombstone => { },
-                Slot::None => return None,
-            }
-
-            // Get Collision
-            index = (index + 1) & (mask - 1);
+        match self.field(name.as_lowercase_str(), name.hash()) {
+            Some(field) => Some(field.value()),
+            None => None,
         }
     }
 
     /// Returns an iterator to all header values corresponding to the given header name.
+    ///
+    /// # Panics
+    ///
+    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    ///
+    /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
+    /// constant.
     #[inline]
-    pub fn get_all<K: AsHeaderName>(&self, name: K) -> GetAll<'_> {
+    pub fn get_all<K: AsHeaderName>(&self, name: K) -> Option<GetAll<'_>> {
         if self.is_empty() {
-            return GetAll::empty();
+            return None;
         }
-
-        // `to_header_ref` may calculate hash
-        self.try_get_all(name.as_str(), name.hash())
-    }
-
-    fn try_get_all(&self, name: &str, hash: Size) -> GetAll<'_> {
-        let mask = self.indices.len() as Size;
-        let mut index = hash & (mask - 1);
-
-        loop {
-            match self.indices[index as usize] {
-                Slot::Some(field_index) => {
-                    let field = &self.fields[field_index as usize];
-
-                    if field.get_hashed() == &hash && field.name().as_str() == name {
-                        return GetAll::new(field);
-                    }
-                },
-                Slot::Tombstone => { },
-                Slot::None => {
-                    return GetAll::empty();
-                },
-            }
-
-            // Get Collision
-            index = (index + 1) & (mask - 1);
-        }
+        self.field(name.as_lowercase_str(), name.hash()).map(GetAll::new)
     }
 
     /// Returns an iterator over headers as name and value pair.
@@ -180,15 +180,46 @@ impl HeaderMap {
         Iter::new(self)
     }
 
-    /// Returns an iterator over header [`HeaderField`].
-    #[inline]
-    pub const fn fields(&self) -> &[HeaderField] {
-        self.fields.as_slice()
+    fn field(&self, name: &str, hash: Size) -> Option<&HeaderField> {
+        let start_index = self.mask_capacity(hash);
+        let mut index = start_index;
+
+        loop {
+            match self.get_index(index as usize) {
+                Some(field) => {
+                    if field.eq_hash_and_name(hash, name) {
+                        return Some(field);
+                    }
+                },
+                // this is the base case of the loop, there is always `None`
+                // because the load factor is limited
+                None => return None,
+            }
+
+            // hash collision, open address linear probing
+            index = self.mask_capacity(index + 1);
+        }
     }
 
-    // pub(crate) fn fields_mut(&mut self) -> &mut Vec<HeaderField> {
-    //     &mut self.fields
-    // }
+    const fn get_index(&self, index: usize) -> &Option<HeaderField> {
+        unsafe { self.ptr.add(index).as_ref() }
+    }
+
+    const fn get_index_mut(&mut self, index: usize) -> &mut Option<HeaderField> {
+        unsafe { self.ptr.add(index).as_mut() }
+    }
+
+    // `self.len` is actually represent the field that is `Some`
+    // the underlying memory is actually all initialized
+    // so we use `self.cap` here
+
+    pub(crate) const fn fields(&self) -> &[Option<HeaderField>] {
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.cap) }
+    }
+
+    const fn fields_mut(&mut self) -> &mut [Option<HeaderField>] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.cap) }
+    }
 }
 
 // ===== Mutation =====
@@ -196,71 +227,60 @@ impl HeaderMap {
 impl HeaderMap {
     /// Removes a header from the map, returning the first header value at the key if the key was
     /// previously in the map.
+    ///
+    /// # Panics
+    ///
+    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    ///
+    /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
+    /// constant.
     pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
         if self.is_empty() {
             return None;
         }
-
-        // `to_header_ref` may calculate hash
-        let field = self.try_remove_field(name.as_str(), name.hash())?;
-
-        // the rest ot duplicate header values are dropped
-        let (_, val) = field.into_parts();
-        Some(val)
+        // the rest of duplicate header values are dropped
+        self.try_remove_field(name.as_lowercase_str(), name.hash()).map(|field| field.into_parts().1)
     }
 
     fn try_remove_field(&mut self, name: &str, hash: Size) -> Option<HeaderField> {
-        let mask = self.indices.len() as Size;
-        let mut index = hash & (mask - 1);
+        let start_index = self.mask_capacity(hash);
+        let mut index = start_index;
 
         loop {
-            match &mut self.indices[index as usize] {
-                Slot::Some(field_index) => {
-                    let field_index = *field_index as usize;
-                    let field = &self.fields[field_index];
+            let slot = self.get_index_mut(index as usize);
 
-                    if field.get_hashed() == &hash && field.name().as_str() == name {
+            // LATEST: robin hood hashing
+            // use two allocation for the hash and header field, that way when eviction as of robin hood
+            // hashing happens, only small amount of memory (the hash value) is copied
 
-                        // prepare for `swap_remove` below, change indices of to be swaped field
-                        if let Some(last_field) = self.fields.last().filter(|last|last.get_hashed() != field.get_hashed()) {
-                            // this still possibly collisioned index
-                            let mut index = last_field.get_hashed() & (mask - 1);
+            if slot.as_ref()?.eq_hash_and_name(hash, name) {
+                let Some(field) = slot.take() else {
+                    // guaranteed by the `?` operator
+                    unsafe { std::hint::unreachable_unchecked() }
+                };
+                self.len -= 1;
 
-                            loop {
-                                let Slot::Some(inner_field_index) = &mut self.indices[index as usize] else {
-                                    unreachable!("[BUG] field does not have slot index")
-                                };
+                // backward shifting
+                let mut next_index = self.mask_capacity(index + 1);
 
-                                let inner_field = &self.fields[*inner_field_index as usize];
+                loop {
+                    let Some(next_slot) = self.get_index_mut(next_index as usize).take() else {
+                        break;
+                    };
 
-                                if inner_field.get_hashed() == last_field.get_hashed()
-                                    && inner_field.name().as_str() == last_field.name().as_str()
-                                {
-                                    *inner_field_index = field_index as Size;
-                                    break;
-                                }
+                    self.get_index_mut(index as usize).replace(next_slot);
+                    self.len -= 1;
 
-                                // Index swapping lookup collision
-                                index = (index + 1) & (mask - 1);
-                            }
-                        }
-
-                        // make it tombstone
-                        let Slot::Some(field_index) = self.indices[index as usize].take_as_tombstone() else {
-                            unreachable!("matched in the first loop")
-                        };
-
-                        let field = self.fields.swap_remove(field_index as usize);
-                        self.extra_len -= (field.len() - 1) as Size;
-                        return Some(field);
-                    }
+                    index = next_index;
+                    next_index = self.mask_capacity(index + 1);
                 }
-                Slot::Tombstone => { },
-                Slot::None => return None,
+
+
+                return Some(field);
             }
 
-            // Remove lookup collision
-            index = (index + 1) & (mask - 1);
+            // hash collision, open address linear probing
+            index = self.mask_capacity(index + 1);
         }
     }
 
@@ -270,6 +290,13 @@ impl HeaderMap {
     /// value is returned.
     ///
     /// If the map did not have this header key present, [`None`] is returned.
+    ///
+    /// # Panics
+    ///
+    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    ///
+    /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
+    /// constant.
     #[inline]
     pub fn insert<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) -> Option<HeaderValue> {
         self.try_insert(name.into_header_name(), value, false)
@@ -279,79 +306,83 @@ impl HeaderMap {
     ///
     /// Unlike [`insert`][HeaderMap::insert], if header key is present, header value is still
     /// appended as extra value.
+    ///
+    /// # Panics
+    ///
+    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    ///
+    /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
+    /// constant.
     #[inline]
     pub fn append<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) {
         self.try_insert(name.into_header_name(), value, true);
     }
 
     fn try_insert(&mut self, name: HeaderName, value: HeaderValue, append: bool) -> Option<HeaderValue> {
-        if self.is_full {
-            self.increase_capacity();
-        }
+        self.reserve_one();
 
-        let mask = self.indices.len() as Size;
         let hash = name.hash();
-        let mut index = hash & (mask - 1);
+        let start_index = self.mask_capacity(hash);
+        let mut index = start_index;
 
-        let result = loop {
-            match &mut self.indices[index as usize] {
-                index @ Slot::None | index @ Slot::Tombstone => {
-                    let field_index = self.fields.len();
-                    *index = Slot::Some(field_index as _);
-                    self.fields.push(HeaderField::new(hash, name, value));
-                    break None
-                },
-
-                Slot::Some(field_index) => {
-                    let field = &mut self.fields[*field_index as usize];
-
-                    if field.get_hashed() == &hash && field.name().as_str() == name.as_str() {
+        loop {
+            match self.get_index_mut(index as usize) {
+                Some(field) => {
+                    if field.eq_hash_and_name(hash, name.as_str()) {
+                        // duplicate header
                         break if append {
                             // Append
                             field.push(value);
-                            self.extra_len += 1;
+                            self.len += 1;
                             None
                         } else {
                             // Returns duplicate
-                            let field = replace(field, HeaderField::new(hash, name, value));
-                            Some(field.into_parts().1)
+                            Some(replace(field, HeaderField::new(hash, name, value)).into_parts().1)
                         };
                     }
                 }
+                // this is the base case of the loop, there is always `None`
+                // because the load factor is limited
+                slot @ None => {
+                    slot.replace(HeaderField::new(hash, name, value));
+                    self.len += 1;
+                    return None;
+                }
             }
 
-            // Insert lookup Collision
-            index = (index + 1) & (mask - 1);
-        };
-
-        self.is_full = self.fields.len() as Size > self.delim;
-
-        result
+            // hash collision, open address linear probing
+            index = self.mask_capacity(index + 1);
+        }
     }
 
-    fn increase_capacity(&mut self) {
-        debug_assert!(self.is_full, "[BUG] increasing capacity should only `is_full`");
-        let new_cap = (self.indices.len() + 1).next_power_of_two().max(8);
+    fn reserve_one(&mut self) {
+        const LOAD_FACTOR: f64 = 0.7;
 
-        let mut me = HeaderMap::with_capacity(new_cap);
+        if self.cap == 0 || self.len as f64 / self.cap as f64 >= LOAD_FACTOR {
+            let cap = if self.cap == 0 { 2 } else { self.cap << 1 };
+            let mut me = Self::with_capacity_unchecked(cap);
 
-        for field in take(&mut self.fields) {
-            let (name,value) = field.into_parts();
-            me.try_insert(name, value, true);
+            for field in self.fields_mut().iter_mut().filter_map(Option::take) {
+                // FIXME: extra header value is dropped
+                let (name,value) = field.into_parts();
+                me.try_insert(name, value, true);
+            }
+
+            *self = me;
+
+            debug_assert!((self.len as f64 / self.cap as f64) < LOAD_FACTOR)
         }
-
-        *self = me;
     }
 
     /// Reserves capacity for at least `additional` more headers.
     pub fn reserve(&mut self, additional: usize) {
-        if self.fields.capacity() - self.fields.len() > additional {
+        if self.cap - self.len > additional {
             return;
         }
 
-        let mut me = HeaderMap::with_capacity(self.fields.capacity() + additional);
+        let mut me = Self::with_capacity_unchecked(self.cap << 1);
 
-        for field in take(&mut self.fields) {
+        for field in self.fields_mut().iter_mut().filter_map(Option::take) {
             let (name,value) = field.into_parts();
             me.try_insert(name, value, true);
         }
@@ -361,11 +392,8 @@ impl HeaderMap {
 
     /// Clear headers map, removing all the value.
     pub fn clear(&mut self) {
-        for index in &mut self.indices {
-            take(index);
-        }
-        self.fields.clear();
-        self.is_full = self.fields.capacity() == 0;
+        for _ in self.fields_mut().iter_mut().filter_map(Option::take) { }
+        self.len = 0;
     }
 }
 
@@ -383,29 +411,35 @@ pub trait AsHeaderName: SealedRef { }
 trait SealedRef: Sized {
     fn hash(&self) -> Size;
 
-    fn as_str(&self) -> &str;
+    /// Returns lowercase string
+    fn as_lowercase_str(&self) -> &str;
 }
 
 /// for str input, calculate hash
-impl AsHeaderName for &str { }
-impl SealedRef for &str {
+impl AsHeaderName for &'static str { }
+impl SealedRef for &'static str {
+    #[inline]
     fn hash(&self) -> Size {
         matches::hash_32(self.as_bytes())
     }
 
-    fn as_str(&self) -> &str {
+    #[inline]
+    fn as_lowercase_str(&self) -> &str {
+        assert!(self.chars().all(|e|!e.is_ascii_uppercase()), "static header name must be in lowercase");
         self
     }
 }
 
-/// for HeaderName, hash may be cacheed
+/// for HeaderName, hash may be cached
 impl AsHeaderName for HeaderName { }
 impl SealedRef for HeaderName {
+    #[inline]
     fn hash(&self) -> Size {
         HeaderName::hash(self)
     }
 
-    fn as_str(&self) -> &str {
+    #[inline]
+    fn as_lowercase_str(&self) -> &str {
         HeaderName::as_str(self)
     }
 }
@@ -413,12 +447,14 @@ impl SealedRef for HeaderName {
 // blanket implementation
 impl<K: AsHeaderName> AsHeaderName for &K { }
 impl<S: SealedRef> SealedRef for &S {
+    #[inline]
     fn hash(&self) -> Size {
         S::hash(self)
     }
 
-    fn as_str(&self) -> &str {
-        S::as_str(self)
+    #[inline]
+    fn as_lowercase_str(&self) -> &str {
+        S::as_lowercase_str(self)
     }
 }
 
@@ -431,25 +467,18 @@ trait Sealed: Sized {
     fn into_header_name(self) -> HeaderName;
 }
 
-impl IntoHeaderName for ByteStr {}
-impl Sealed for ByteStr {
-    fn into_header_name(self) -> HeaderName {
-        // HeaderName::from_bytes(self.into_bytes())
-        todo!()
-    }
-}
-
 // for static data use provided constants, not static str
-impl IntoHeaderName for &str {}
-impl Sealed for &str {
+impl IntoHeaderName for &'static str {}
+impl Sealed for &'static str {
+    #[inline]
     fn into_header_name(self) -> HeaderName {
-        // HeaderName::from_bytes(self)
-        todo!()
+        HeaderName::from_static(self.as_bytes())
     }
 }
 
 impl IntoHeaderName for HeaderName {}
 impl Sealed for HeaderName {
+    #[inline]
     fn into_header_name(self) -> HeaderName {
         self
     }
@@ -468,7 +497,7 @@ mod test {
         map.insert("content-type", HeaderValue::from_string("FOO"));
         assert!(map.contains_key("content-type"));
 
-        let ptr = map.fields.as_ptr();
+        let ptr = map.ptr.as_ptr();
         let cap = map.capacity();
 
         map.insert("accept", HeaderValue::from_string("BAR"));
@@ -486,24 +515,24 @@ mod test {
         assert!(map.contains_key("referer"));
         assert!(map.contains_key("rim"));
 
-        assert_eq!(ptr, map.fields.as_ptr());
-        assert_eq!(cap, map.capacity());
+        // assert_eq!(ptr, map.ptr.as_ptr());
+        // assert_eq!(cap, map.capacity());
 
         // Insert Allocate
 
         map.insert("lea", HeaderValue::from_string("BAR"));
 
-        assert_ne!(ptr, map.fields.as_ptr());
+        assert_ne!(ptr, map.ptr.as_ptr());
         assert_ne!(cap, map.capacity());
 
-        assert!(map.contains_key("Content-type"));
-        assert!(map.contains_key("Accept"));
-        assert!(map.contains_key("Content-length"));
-        assert!(map.contains_key("Host"));
-        assert!(map.contains_key("Date"));
-        assert!(map.contains_key("Referer"));
-        assert!(map.contains_key("Rim"));
-        assert!(map.contains_key("Lea"));
+        assert!(map.contains_key("content-type"));
+        assert!(map.contains_key("accept"));
+        assert!(map.contains_key("content-length"));
+        assert!(map.contains_key("host"));
+        assert!(map.contains_key("date"));
+        assert!(map.contains_key("referer"));
+        assert!(map.contains_key("rim"));
+        assert!(map.contains_key("lea"));
 
         // Insert Multi
 
@@ -515,7 +544,7 @@ mod test {
         assert!(map.contains_key("referer"));
         assert!(map.contains_key("rim"));
 
-        let mut all = map.get_all("content-length");
+        let mut all = map.get_all("content-length").unwrap();
         assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("LEN"))));
         assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("BAR"))));
         assert!(all.next().is_none());

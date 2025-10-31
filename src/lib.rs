@@ -11,15 +11,14 @@
 
 mod matches;
 
-pub mod uri;
-pub mod http;
 pub mod headers;
+pub mod http;
+pub mod uri;
 
-pub mod h1;
 pub mod body;
+pub mod h1;
 pub mod request;
 pub mod response;
 
-pub mod service;
 pub mod server;
-
+pub mod service;

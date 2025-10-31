@@ -1,4 +1,4 @@
-use super::{HeaderMap, HeaderName, HeaderValue, field::GetAll};
+use super::{HeaderField, HeaderMap, HeaderName, HeaderValue, field::GetAll};
 
 impl<'a> IntoIterator for &'a HeaderMap {
     type Item = <Iter<'a> as Iterator>::Item;
@@ -11,36 +11,18 @@ impl<'a> IntoIterator for &'a HeaderMap {
     }
 }
 
-/// Iterator returned from [`HeaderMap::iter`].
 #[derive(Debug)]
 pub struct Iter<'a> {
-    map: &'a HeaderMap,
-    n: usize,
-    name: &'a HeaderName,
-    iter: GetAll<'a>,
+    iter: std::slice::Iter<'a, Option<HeaderField>>,
+    current: Option<(&'a HeaderName, GetAll<'a>)>,
 }
-
-static PLACEHOLDER: HeaderName = HeaderName::placeholder();
 
 impl<'a> Iter<'a> {
     pub(crate) fn new(map: &'a HeaderMap) -> Self {
-        match map.fields().first() {
-            Some(field) => Self {
-                map,
-                n: 0,
-                name: field.name(),
-                iter: GetAll::new(field),
-            },
-            None => Self::empty(map),
-        }
-    }
-
-    fn empty(map: &'a HeaderMap) -> Self {
+        let mut iter = map.fields().iter();
         Self {
-            map,
-            n: 0,
-            name: &PLACEHOLDER,
-            iter: GetAll::empty(),
+            current: iter.find_map(Option::as_ref).map(|e| (e.name(), e.iter())),
+            iter,
         }
     }
 }
@@ -50,15 +32,14 @@ impl<'a> Iterator for Iter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.iter.next() {
-                Some(value) => return Some((self.name, value)),
-                None => {
-                    self.n += 1;
-                    let field = self.map.fields().get(self.n)?;
-                    self.name = field.name();
-                    self.iter = self.map.get_all(field.name());
-                }
+            if let Some((name, values)) = &mut self.current
+                && let Some(value) = values.next()
+            {
+                return Some((name, value));
             }
+
+            let field = self.iter.find_map(Option::as_ref)?;
+            self.current = Some((field.name(), field.iter()));
         }
     }
 }

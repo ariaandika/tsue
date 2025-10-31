@@ -84,6 +84,8 @@ impl HeaderName {
     }
 
     /// Extracts a string slice of the header name.
+    ///
+    /// The returned string will always in ASCII lowercase.
     #[inline]
     pub const fn as_str(&self) -> &str {
         match &self.repr {
@@ -179,6 +181,14 @@ impl std::hash::Hash for HeaderName {
     #[inline]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_u32(self.hash());
+    }
+}
+
+impl PartialEq for HeaderName {
+    fn eq(&self, other: &Self) -> bool {
+        // HeaderName is guaranteed to have ascii lowercase value,
+        // therefore it is correct for case-insensitive eq
+        self.as_str() == other.as_str()
     }
 }
 
