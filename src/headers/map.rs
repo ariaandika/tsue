@@ -68,11 +68,10 @@ impl HeaderMap {
 
     fn with_capacity_unchecked(capacity: usize) -> Self {
         // it is required that capacity is power of two,
-        // see `HeaderMap::mask_capacity`
+        // see `fn mask_capacity()`
         debug_assert!(capacity.is_power_of_two());
 
         let mut vec = ManuallyDrop::new(vec![None; capacity]);
-        debug_assert_eq!(vec.len(), vec.capacity());
 
         // `self.len` is actually represent the field that is `Some`
         // the underlying memory is actually all initialized
@@ -101,13 +100,13 @@ impl HeaderMap {
     pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
+}
 
-    const fn mask_capacity(&self, hash: Size) -> Size {
-        // capacity is always a power of two
-        // any power of two - 1 will have all the appropriate bit set to mask the hash value
-        // the result is always equal to to `hash % capacity`
-        hash & (self.cap - 1) as Size
-    }
+const fn mask_capacity(cap: usize, hash: Size) -> Size {
+    // capacity is always a power of two
+    // any power of two - 1 will have all the appropriate bit set to mask the hash value
+    // the result is always equal to to `hash % capacity`
+    hash & (cap - 1) as Size
 }
 
 // ===== Lookup =====
@@ -181,7 +180,7 @@ impl HeaderMap {
     }
 
     fn field(&self, name: &str, hash: Size) -> Option<&HeaderField> {
-        let start_index = self.mask_capacity(hash);
+        let start_index = mask_capacity(self.cap, hash);
         let mut index = start_index;
 
         loop {
@@ -197,7 +196,7 @@ impl HeaderMap {
             }
 
             // hash collision, open address linear probing
-            index = self.mask_capacity(index + 1);
+            index = mask_capacity(self.cap, index + 1);
         }
     }
 
@@ -243,7 +242,7 @@ impl HeaderMap {
     }
 
     fn try_remove_field(&mut self, name: &str, hash: Size) -> Option<HeaderField> {
-        let start_index = self.mask_capacity(hash);
+        let start_index = mask_capacity(self.cap, hash);
         let mut index = start_index;
 
         loop {
@@ -261,18 +260,28 @@ impl HeaderMap {
                 self.len -= 1;
 
                 // backward shifting
-                let mut next_index = self.mask_capacity(index + 1);
+                let cap = self.cap;
+                let mut next_index = mask_capacity(cap, index + 1);
 
                 loop {
-                    let Some(next_slot) = self.get_index_mut(next_index as usize).take() else {
+                    let Some(next_slot) = self.get_index_mut(next_index as usize) else {
                         break;
                     };
 
-                    self.get_index_mut(index as usize).replace(next_slot);
-                    self.len -= 1;
+                    let ideal_index = mask_capacity(cap, next_slot.cached_hash());
 
-                    index = next_index;
-                    next_index = self.mask_capacity(index + 1);
+                    if ideal_index == index {
+                        let Some(slot) = self.get_index_mut(next_index as usize).take() else {
+                            // guaranteed by the `let else` at the start of the loop
+                            unsafe { std::hint::unreachable_unchecked() }
+                        };
+                        self.get_index_mut(index as usize).replace(slot);
+                        self.len -= 1;
+
+                        index = next_index;
+                    }
+
+                    next_index = mask_capacity(cap, next_index + 1);
                 }
 
 
@@ -280,7 +289,7 @@ impl HeaderMap {
             }
 
             // hash collision, open address linear probing
-            index = self.mask_capacity(index + 1);
+            index = mask_capacity(self.cap, index + 1);
         }
     }
 
@@ -322,7 +331,7 @@ impl HeaderMap {
         self.reserve_one();
 
         let hash = name.hash();
-        let start_index = self.mask_capacity(hash);
+        let start_index = mask_capacity(self.cap, hash);
         let mut index = start_index;
 
         loop {
@@ -351,7 +360,7 @@ impl HeaderMap {
             }
 
             // hash collision, open address linear probing
-            index = self.mask_capacity(index + 1);
+            index = mask_capacity(self.cap, index + 1);
         }
     }
 

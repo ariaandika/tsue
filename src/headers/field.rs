@@ -38,6 +38,11 @@ impl HeaderField {
         self.hash == hash && self.name.as_str() == name
     }
 
+    /// name must be in lowercase
+    pub(crate) fn cached_hash(&self) -> Size {
+        self.hash
+    }
+
     /// Returns reference to [`HeaderName`].
     #[inline]
     pub const fn name(&self) -> &HeaderName {
