@@ -132,11 +132,11 @@ impl HeaderMap {
     /// because the hash is calculated at compile time.
     ///
     /// ```rust
-    /// use tsue::headers::{CONTENT_TYPE, DATE, HeaderMap, HeaderValue};
+    /// use tsue::headers::{standard::{CONTENT_TYPE, DATE}, HeaderMap, HeaderValue};
     ///
-    /// let mut map = HeaderMap::new()
+    /// let mut map = HeaderMap::new();
     /// map.insert(CONTENT_TYPE, HeaderValue::from_static(b"text/html"));
-    /// assert_eq!(map.get(CONTENT_TYPE), Some())
+    /// assert_eq!(map.get(CONTENT_TYPE).unwrap().as_str(), "text/html");
     ///
     /// let ctype = map.get(CONTENT_TYPE);
     /// ```

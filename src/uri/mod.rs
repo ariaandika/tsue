@@ -259,7 +259,7 @@ pub struct Uri {
 ///
 /// let uri = HttpUri::from_bytes("https://example.com:80/over/there?name=ferret").unwrap();
 /// assert!(uri.is_https());
-/// assert_eq!(uri.authority(), "example.com:80");
+/// assert_eq!(uri.host(), "example.com:80");
 /// assert_eq!(uri.path(), "/over/there");
 /// assert_eq!(uri.query(), Some("name=ferret"));
 /// ```
