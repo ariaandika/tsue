@@ -308,7 +308,7 @@ impl HeaderMap {
     /// constant.
     #[inline]
     pub fn insert<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) -> Option<HeaderValue> {
-        self.try_insert(name.into_header_name(), value, false)
+        self.try_insert(HeaderField::new(name.into_header_name(), value), false)
     }
 
     /// Append a header key and value into the map.
@@ -324,36 +324,36 @@ impl HeaderMap {
     /// constant.
     #[inline]
     pub fn append<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) {
-        self.try_insert(name.into_header_name(), value, true);
+        self.try_insert(HeaderField::new(name.into_header_name(), value), true);
     }
 
-    fn try_insert(&mut self, name: HeaderName, value: HeaderValue, append: bool) -> Option<HeaderValue> {
+    fn try_insert(&mut self, field: HeaderField, append: bool) -> Option<HeaderValue> {
         self.reserve_one();
 
-        let hash = name.hash();
+        let hash = field.cached_hash();
         let start_index = mask_capacity(self.cap, hash);
         let mut index = start_index;
 
         loop {
             match self.get_index_mut(index as usize) {
-                Some(field) => {
-                    if field.eq_hash_and_name(hash, name.as_str()) {
+                Some(dup_field) => {
+                    if dup_field.eq_hash_and_name(hash, field.name().as_str()) {
                         // duplicate header
                         break if append {
                             // Append
-                            field.push(value);
+                            dup_field.merge(field);
                             self.len += 1;
                             None
                         } else {
-                            // Returns duplicate
-                            Some(replace(field, HeaderField::new(hash, name, value)).into_parts().1)
+                            // Returns duplicate, rest of multiple header values are dropped
+                            Some(replace(dup_field, field).into_parts().1)
                         };
                     }
                 }
                 // this is the base case of the loop, there is always `None`
                 // because the load factor is limited
                 slot @ None => {
-                    slot.replace(HeaderField::new(hash, name, value));
+                    slot.replace(field);
                     self.len += 1;
                     return None;
                 }
@@ -372,9 +372,7 @@ impl HeaderMap {
             let mut me = Self::with_capacity_unchecked(cap);
 
             for field in self.fields_mut().iter_mut().filter_map(Option::take) {
-                // FIXME: extra header value is dropped
-                let (name,value) = field.into_parts();
-                me.try_insert(name, value, true);
+                me.try_insert(field, true);
             }
 
             *self = me;
@@ -392,8 +390,7 @@ impl HeaderMap {
         let mut me = Self::with_capacity_unchecked(self.cap << 1);
 
         for field in self.fields_mut().iter_mut().filter_map(Option::take) {
-            let (name,value) = field.into_parts();
-            me.try_insert(name, value, true);
+            me.try_insert(field, true);
         }
 
         *self = me;

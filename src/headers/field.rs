@@ -24,9 +24,9 @@ struct FieldEntry {
 }
 
 impl HeaderField {
-    pub(crate) const fn new(hash: Size, name: HeaderName, value: HeaderValue) -> Self {
+    pub(crate) const fn new(name: HeaderName, value: HeaderValue) -> Self {
         Self {
-            hash,
+            hash: name.hash(),
             name,
             entry: FieldEntry::new(value),
             len: unsafe { NonZeroSize::new_unchecked(1) },
@@ -79,6 +79,17 @@ impl HeaderField {
         let new_len = self.len.checked_add(1).unwrap();
         self.entry.push(value);
         self.len = new_len;
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        let mut entry = other.entry;
+        loop {
+            self.push(entry.value);
+            match entry.next {
+                Some(next) => entry = *next,
+                None => break,
+            }
+        }
     }
 
     /// Consume [`HeaderField`] into [`HeaderName`] and [`HeaderValue`].
