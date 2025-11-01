@@ -398,7 +398,7 @@ impl HeaderMap {
 
     /// Clear headers map, removing all the value.
     pub fn clear(&mut self) {
-        for _ in self.fields_mut().iter_mut().filter_map(Option::take) { }
+        for _ in self.fields_mut().iter_mut().map(Option::take) { }
         self.len = 0;
     }
 }
