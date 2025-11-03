@@ -10,18 +10,40 @@ use super::{
     matches,
 };
 
+// space-time tradeoff
+// most of integer type is limited
+// this limit practically should never exceeded for header length
 type Size = u32;
 
-/// HTTP Headers Multimap.
-#[derive(Clone)]
-pub struct HeaderMap {
-    ptr: NonNull<Option<HeaderField>>,
-    len: usize,
-    cap: usize,
+/// Panics if the new capacity exceeds the HeaderMap capacity limit.
+const fn limit_cap(cap: usize) -> Size {
+    if cap <= Size::MAX as usize {
+        cap as Size
+    } else {
+        panic!("HeaderMap capacity limit exceeded")
+    }
 }
 
-unsafe impl Send for HeaderMap { }
-unsafe impl Sync for HeaderMap { }
+/// HTTP Headers Multimap.
+///
+/// # Capacity Limitations
+///
+/// This implementation has a maximum capacity that is lower than the theoretical system limit for
+/// performance reason. The exact limit is sufficient for all realistic HTTP header scenarios, as
+/// even extreme cases rarely approach this boundary.
+//
+// #[not_implemented]
+// Some APIs provide `try_*` variants that returns error instead of panicking when this limit is
+// exceeded.
+#[derive(Clone)]
+pub struct HeaderMap {
+    fields: NonNull<Option<HeaderField>>,
+    len: Size,
+    cap: Size,
+}
+
+unsafe impl Send for HeaderMap {}
+unsafe impl Sync for HeaderMap {}
 
 impl Default for HeaderMap {
     #[inline]
@@ -35,8 +57,16 @@ impl Drop for HeaderMap {
         // `self.len` is actually represent the field that `Some`
         // the underlying memory is actually all initialized
         // so we use `self.cap` here
-        unsafe { Vec::from_raw_parts(self.ptr.as_ptr(), self.cap, self.cap) };
+        let cap = self.cap as usize;
+        unsafe { Vec::from_raw_parts(self.fields.as_ptr(), cap, cap) };
     }
+}
+
+const fn new_dangling_ptr<T>() -> NonNull<T> {
+    let mut vec = Vec::<T>::new();
+    let ptr = unsafe { NonNull::new_unchecked(vec.as_mut_ptr()) };
+    let _ = ManuallyDrop::new(vec);
+    ptr
 }
 
 impl HeaderMap {
@@ -45,11 +75,8 @@ impl HeaderMap {
     /// This function does not allocate.
     #[inline]
     pub const fn new() -> Self {
-        let mut vec = Vec::new();
-        let ptr = unsafe { NonNull::new_unchecked(vec.as_mut_ptr()) };
-        let _ = ManuallyDrop::new(vec);
         Self {
-            ptr,
+            fields: new_dangling_ptr(),
             len: 0,
             cap: 0,
         }
@@ -58,40 +85,46 @@ impl HeaderMap {
     /// Create new empty [`HeaderMap`] with at least the specified capacity.
     ///
     /// If the `capacity` is `0`, this function does not allocate.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new capacity exceeds the HeaderMap capacity limit.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         if capacity == 0 {
             return Self::new();
         }
-        Self::with_capacity_unchecked(capacity.next_power_of_two())
+        Self::with_capacity_unchecked(limit_cap(capacity).next_power_of_two())
     }
 
-    fn with_capacity_unchecked(capacity: usize) -> Self {
+    fn with_capacity_unchecked(cap: Size) -> Self {
         // it is required that capacity is power of two,
         // see `fn mask_capacity()`
-        debug_assert!(capacity.is_power_of_two());
+        debug_assert!(cap.is_power_of_two());
 
-        let mut vec = ManuallyDrop::new(vec![None; capacity]);
+        let mut fields = ManuallyDrop::new(vec![None; cap as usize]);
 
-        // `self.len` is actually represent the field that is `Some`
-        // the underlying memory is actually all initialized
+        debug_assert_eq!(fields.capacity(), cap as usize);
+
+        // `self.len` represent the field that is `Some`,
+        // the underlying memory is all initialized
         Self {
-            ptr: unsafe { NonNull::new_unchecked(vec.as_mut_ptr()) },
+            fields: unsafe { NonNull::new_unchecked(fields.as_mut_ptr()) },
             len: 0,
-            cap: vec.capacity(),
+            cap,
         }
     }
 
     /// Returns headers length.
     #[inline]
     pub const fn len(&self) -> usize {
-        self.len
+        self.len as _
     }
 
     /// Returns the total number of elements the map can hold without reallocating.
     #[inline]
     pub const fn capacity(&self) -> usize {
-        self.cap
+        self.cap as _
     }
 
     /// Returns `true` if headers has no element.
@@ -102,11 +135,11 @@ impl HeaderMap {
     }
 }
 
-const fn mask_capacity(cap: usize, hash: Size) -> Size {
+const fn mask_capacity(cap: Size, hash: Size) -> Size {
     // capacity is always a power of two
     // any power of two - 1 will have all the appropriate bit set to mask the hash value
     // the result is always equal to to `hash % capacity`
-    hash & (cap - 1) as Size
+    hash & (cap - 1)
 }
 
 // ===== Lookup =====
@@ -117,6 +150,9 @@ impl HeaderMap {
     /// # Panics
     ///
     /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    ///
+    /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
+    /// constant.
     #[inline]
     pub fn contains_key<K: AsHeaderName>(&self, name: K) -> bool {
         if self.is_empty() {
@@ -151,10 +187,7 @@ impl HeaderMap {
         if self.is_empty() {
             return None;
         }
-        match self.field(name.as_lowercase_str(), name.hash()) {
-            Some(field) => Some(field.value()),
-            None => None,
-        }
+        self.field(name.as_lowercase_str(), name.hash()).map(HeaderField::value)
     }
 
     /// Returns an iterator to all header values corresponding to the given header name.
@@ -184,15 +217,12 @@ impl HeaderMap {
         let mut index = start_index;
 
         loop {
-            match self.get_index(index as usize) {
-                Some(field) => {
-                    if field.eq_hash_and_name(hash, name) {
-                        return Some(field);
-                    }
-                },
-                // this is the base case of the loop, there is always `None`
-                // because the load factor is limited
-                None => return None,
+            // the `?` is the base case of the loop, there is always `None`
+            // because the load factor is capped to less than capacity
+            let field = self.get_index(index as usize)?;
+
+            if field.eq_hash_and_name(hash, name) {
+                return Some(field);
             }
 
             // hash collision, open address linear probing
@@ -200,24 +230,24 @@ impl HeaderMap {
         }
     }
 
-    const fn get_index(&self, index: usize) -> &Option<HeaderField> {
-        unsafe { self.ptr.add(index).as_ref() }
+    const fn get_index(&self, index: usize) -> Option<&HeaderField> {
+        unsafe { self.fields.add(index).as_ref().as_ref() }
     }
 
     const fn get_index_mut(&mut self, index: usize) -> &mut Option<HeaderField> {
-        unsafe { self.ptr.add(index).as_mut() }
+        unsafe { self.fields.add(index).as_mut() }
     }
 
-    // `self.len` is actually represent the field that is `Some`
-    // the underlying memory is actually all initialized
+    // `self.len` represent the field that is `Some`
+    // the underlying memory is all initialized
     // so we use `self.cap` here
 
     pub(crate) const fn fields(&self) -> &[Option<HeaderField>] {
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.cap) }
+        unsafe { std::slice::from_raw_parts(self.fields.as_ptr(), self.cap as usize) }
     }
 
     const fn fields_mut(&mut self) -> &mut [Option<HeaderField>] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.cap) }
+        unsafe { std::slice::from_raw_parts_mut(self.fields.as_ptr(), self.cap as usize) }
     }
 }
 
@@ -247,10 +277,6 @@ impl HeaderMap {
 
         loop {
             let slot = self.get_index_mut(index as usize);
-
-            // LATEST: robin hood hashing
-            // use two allocation for the hash and header field, that way when eviction as of robin hood
-            // hashing happens, only small amount of memory (the hash value) is copied
 
             if slot.as_ref()?.eq_hash_and_name(hash, name) {
                 let Some(field) = slot.take() else {
@@ -302,13 +328,16 @@ impl HeaderMap {
     ///
     /// # Panics
     ///
-    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    /// Panics if the new capacity exceeds the HeaderMap capacity limit.
+    ///
+    /// Additionally, when using static str as the name, it must be valid header name and in
+    /// lowercase, otherwise it panics.
     ///
     /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
     /// constant.
     #[inline]
     pub fn insert<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) -> Option<HeaderValue> {
-        self.try_insert(HeaderField::new(name.into_header_name(), value), false)
+        self.insert_inner(HeaderField::new(name.into_header_name(), value), false)
     }
 
     /// Append a header key and value into the map.
@@ -318,16 +347,23 @@ impl HeaderMap {
     ///
     /// # Panics
     ///
-    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    /// Panics if the new capacity exceeds the HeaderMap capacity limit.
+    ///
+    /// Additionally, when using static str as the name, it must be valid header name and in
+    /// lowercase, otherwise it panics.
     ///
     /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
     /// constant.
     #[inline]
     pub fn append<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) {
-        self.try_insert(HeaderField::new(name.into_header_name(), value), true);
+        self.insert_inner(HeaderField::new(name.into_header_name(), value), true);
     }
 
-    fn try_insert(&mut self, field: HeaderField, append: bool) -> Option<HeaderValue> {
+    fn insert_inner(&mut self, field: HeaderField, append: bool) -> Option<HeaderValue> {
+        // LATEST: robin hood hashing
+        // use two allocation for the hash and header field, that way when eviction as of robin hood
+        // hashing happens, only small amount of memory (the hash value) is copied
+
         self.reserve_one();
 
         let hash = field.cached_hash();
@@ -365,32 +401,48 @@ impl HeaderMap {
     }
 
     fn reserve_one(&mut self) {
-        const LOAD_FACTOR: f64 = 0.7;
+        const DEFAULT_MIN_ALLOC: Size = 4;
 
-        if self.cap == 0 || self.len as f64 / self.cap as f64 >= LOAD_FACTOR {
-            let cap = if self.cap == 0 { 2 } else { self.cap << 1 };
+        // more optimized of `self.len as f64 / self.cap as f64 >= LOAD_FACTOR`
+        // this also handle 0 capacity
+        let is_load_factor_exceeded = self.len * 4 >= self.cap * 3;
+
+        if is_load_factor_exceeded {
+            let cap = if self.cap == 0 {
+                DEFAULT_MIN_ALLOC
+            } else {
+                limit_cap((self.cap as usize) << 1)
+            };
             let mut me = Self::with_capacity_unchecked(cap);
 
             for field in self.fields_mut().iter_mut().filter_map(Option::take) {
-                me.try_insert(field, true);
+                me.insert_inner(field, true);
             }
 
             *self = me;
 
-            debug_assert!((self.len as f64 / self.cap as f64) < LOAD_FACTOR)
+            debug_assert!({
+                const LOAD_FACTOR: f64 = 3.0 / 4.0;
+
+                (self.len as f64 / self.cap as f64) < LOAD_FACTOR
+            })
         }
     }
 
     /// Reserves capacity for at least `additional` more headers.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new capacity exceeds the HeaderMap capacity limit.
     pub fn reserve(&mut self, additional: usize) {
-        if self.cap - self.len > additional {
+        if (self.cap - self.len) as usize > additional {
             return;
         }
 
-        let mut me = Self::with_capacity_unchecked(self.cap << 1);
+        let mut me = Self::with_capacity_unchecked(limit_cap((self.cap as usize) << 1));
 
         for field in self.fields_mut().iter_mut().filter_map(Option::take) {
-            me.try_insert(field, true);
+            me.insert_inner(field, true);
         }
 
         *self = me;
@@ -398,6 +450,9 @@ impl HeaderMap {
 
     /// Clear headers map, removing all the value.
     pub fn clear(&mut self) {
+        if self.is_empty() {
+            return;
+        }
         for _ in self.fields_mut().iter_mut().map(Option::take) { }
         self.len = 0;
     }
@@ -473,7 +528,6 @@ trait Sealed: Sized {
     fn into_header_name(self) -> HeaderName;
 }
 
-// for static data use provided constants, not static str
 impl IntoHeaderName for &'static str {}
 impl Sealed for &'static str {
     #[inline]
@@ -503,7 +557,7 @@ mod test {
         map.insert("content-type", HeaderValue::from_string("FOO"));
         assert!(map.contains_key("content-type"));
 
-        let ptr = map.ptr.as_ptr();
+        let ptr = map.fields.as_ptr();
         let cap = map.capacity();
 
         map.insert("accept", HeaderValue::from_string("BAR"));
@@ -528,7 +582,7 @@ mod test {
 
         map.insert("lea", HeaderValue::from_string("BAR"));
 
-        assert_ne!(ptr, map.ptr.as_ptr());
+        assert_ne!(ptr, map.fields.as_ptr());
         assert_ne!(cap, map.capacity());
 
         assert!(map.contains_key("content-type"));
