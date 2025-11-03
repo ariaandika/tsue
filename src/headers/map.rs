@@ -35,6 +35,10 @@ const fn limit_cap(cap: usize) -> Size {
 // #[not_implemented]
 // Some APIs provide `try_*` variants that returns error instead of panicking when this limit is
 // exceeded.
+//
+// TODO: current optimization such as robin hood hashing or using cryptographic hash function is
+// not implemented, as it is expected that user limit the header length to much lower than the hard
+// limit
 #[derive(Clone)]
 pub struct HeaderMap {
     fields: NonNull<Option<HeaderField>>,
@@ -360,10 +364,6 @@ impl HeaderMap {
     }
 
     fn insert_inner(&mut self, field: HeaderField, append: bool) -> Option<HeaderValue> {
-        // LATEST: robin hood hashing
-        // use two allocation for the hash and header field, that way when eviction as of robin hood
-        // hashing happens, only small amount of memory (the hash value) is copied
-
         self.reserve_one();
 
         let hash = field.cached_hash();
