@@ -115,6 +115,12 @@ impl HeaderName {
             Repr::Arbitrary(bytes) => matches::hash_32(bytes.as_slice()),
         }
     }
+
+    pub(crate) const fn validate_lowercase(s: &[u8]) {
+        if let Err(err) = validate_header_name_lowercase(s) {
+            err.panic_const();
+        }
+    }
 }
 
 // ===== Parser =====

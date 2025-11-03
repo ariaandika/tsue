@@ -486,7 +486,7 @@ impl SealedRef for &'static str {
 
     #[inline]
     fn as_lowercase_str(&self) -> &str {
-        assert!(self.chars().all(|e|!e.is_ascii_uppercase()), "static header name must be in lowercase");
+        HeaderName::validate_lowercase(self.as_bytes());
         self
     }
 }
