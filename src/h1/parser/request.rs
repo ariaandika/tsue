@@ -25,14 +25,14 @@ pub struct Reqline {
 
 impl Reqline {
     #[inline]
-    pub fn matches(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
-        match_reqline(bytes)
+    pub fn parse_chunk(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
+        parse_chunk_reqline(bytes)
     }
 }
 
 // ===== Request Line =====
 
-fn match_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
+fn parse_chunk_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
     let mut reqline = {
         let mut state = bytes.as_slice();
 

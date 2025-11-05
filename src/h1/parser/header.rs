@@ -32,12 +32,12 @@ pub struct Header {
 
 impl Header {
     #[inline]
-    pub fn matches(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError>> {
-        matches_header(bytes)
+    pub fn parse_chunk(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError>> {
+        parse_chunk_header(bytes)
     }
 }
 
-fn matches_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError>> {
+fn parse_chunk_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError>> {
     let mut cursor = bytes.cursor_mut();
 
     match ready!(cursor.next()) {

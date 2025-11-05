@@ -92,7 +92,7 @@ where
 
                     // TODO: send error response before disconnect
 
-                    let reqline = match Reqline::matches(bytes)? {
+                    let reqline = match Reqline::parse_chunk(bytes)? {
                         Poll::Ready(ok) => ok,
                         Poll::Pending => {
                             ready!(io.poll_read(cx)?);
@@ -113,7 +113,7 @@ where
                     loop {
                         let bytes = io.read_buffer_mut();
 
-                        match Header::matches(bytes)? {
+                        match Header::parse_chunk(bytes)? {
                             Poll::Ready(Some(header)) => state_mut.add_header(header)?,
                             Poll::Ready(None) => break,
                             Poll::Pending => {

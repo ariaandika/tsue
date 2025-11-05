@@ -20,7 +20,7 @@ fn test_parse_reqline() {
     macro_rules! test {
         (#[pending] $input:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            match Reqline::matches(&mut bytes) {
+            match Reqline::parse_chunk(&mut bytes) {
                 Poll::Pending => { }
                 Poll::Ready(val) => panic!("expected `Poll::Pending`, but its ready with: {val:?}"),
             }
@@ -28,7 +28,7 @@ fn test_parse_reqline() {
         };
         (#[error] $input:expr) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            match Reqline::matches(&mut bytes) {
+            match Reqline::parse_chunk(&mut bytes) {
                 Poll::Ready(result) => result.unwrap_err(),
                 Poll::Pending => panic!("line {}, unexpected Poll::Pending",line!()),
             }
@@ -40,7 +40,7 @@ fn test_parse_reqline() {
         } => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
 
-            let reqline = ready!(Reqline::matches(&mut bytes)).unwrap();
+            let reqline = ready!(Reqline::parse_chunk(&mut bytes)).unwrap();
 
             assert_eq!(reqline.method, Method::$m);
             assert_eq!(reqline.target.kind, Kind::$k);
@@ -140,7 +140,7 @@ fn test_parse_header() {
     macro_rules! test {
         (#[end] $input:literal, $remain:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            assert!(ready!(Header::matches(&mut bytes)).unwrap().is_none());
+            assert!(ready!(Header::parse_chunk(&mut bytes)).unwrap().is_none());
             assert_eq!(bytes.as_slice(), $remain);
         };
         (#[pending] $input:literal) => {
@@ -161,7 +161,7 @@ fn test_parse_header() {
             $rest:expr
         } => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            let header = ready!(Header::matches(&mut bytes)).unwrap().unwrap();
+            let header = ready!(Header::parse_chunk(&mut bytes)).unwrap().unwrap();
             assert_eq!(&header.name, &$name[..]);
             assert_eq!(&header.value, &$value[..]);
             assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");
