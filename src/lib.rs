@@ -1,11 +1,40 @@
-//! Web Server and Client Toolkit
+//! # Server and Client Toolkit
+//!
+//! This library provide a toolkit for building a server and client for various different
+//! protocols.
+//!
+//! # Library Design
+//!
+//! This library is design so that it can be used as building block for writing a server.
+//! Additionally, it also provide a ready to use API that combine all components to run a server.
+//! It can also be used as an example to use and integrate each available components.
+//!
+//! ## Definitions
 //!
 //! - [`uri`] Uniform Resource Identifier ([RFC3986])
-//! - [`http`] HTTP Semantics ([RFC9110])
 //! - [`headers`] HTTP Header Fields ([RFC9110 Section 5])
+//! - [`http`] HTTP Semantics ([RFC9110])
 //! - [`request`] HTTP Request Message ([RFC9110 Section 6])
-//! - [`response`] HTTP Response Message Fields ([RFC9110 Section 6])
+//! - [`response`] HTTP Response Message ([RFC9110 Section 6])
+//!
+//! ## Behaviors
+//!
+//! - [`proto`] HTTP version agnostic APIs
 //! - [`h1`] HTTP/1.1 ([RFC9112])
+//! - `h2` HTTP/2.0 (RFC9113)
+//!
+//! ## User Abstraction
+//!
+//! - [`service`] abstract user defined logic
+//!
+//! ## Integrations
+//!
+//! - [`server`] all in one API to run a http server
+//!
+//! # Usage
+//!
+//! User can use each APIs individually to build custom server, or use available APIs from
+//! [`server`] to quickly run a server.
 //!
 //! [RFC3986]: <https://www.rfc-editor.org/rfc/rfc3986.html>
 //! [RFC9110]: <https://www.rfc-editor.org/rfc/rfc9110.html>
@@ -16,19 +45,20 @@
 
 mod matches;
 
-// RFC3986
+// definitions
 pub mod uri;
-
-// RFC9110 Section 5
 pub mod headers;
-
-// RFC9110 Section 6
-pub mod request;
-// RFC9110 Section 6
-pub mod response;
-
 pub mod http;
+pub mod request;
+pub mod response;
 pub mod body;
+
+// behavior
+pub mod proto;
 pub mod h1;
-pub mod server;
+
+// user abstraction
 pub mod service;
+
+// integration
+pub mod server;
