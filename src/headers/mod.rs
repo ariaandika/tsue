@@ -5,6 +5,12 @@
 // notably headers with date value which requires comma
 // spec: https://www.rfc-editor.org/rfc/rfc9110.html#name-field-lines-and-combined-fi
 
+// NOTE: should header value be limited to US-ASCII only ?
+
+// NOTE: current header map optimization such as robin hood hashing or using cryptographic hash
+// function is not implemented, as it is expected that user limit the header length to much lower
+// number than the hard limit
+
 mod matches;
 mod name;
 mod value;

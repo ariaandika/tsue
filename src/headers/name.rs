@@ -13,7 +13,14 @@ use super::{matches, error::HeaderError};
 
 /// HTTP Header name.
 ///
-/// Input is normalized to lowercase.
+/// # Case Normalization
+///
+/// Input is normalized to lowercase at construction time. [`from_static`][HeaderName::from_static]
+/// will panic at compile time when name contains uppercase character.
+///
+/// Normalization requires copying the bytes. If the input is known to not contains uppercase
+/// character, use [`from_bytes_lowercase`][HeaderName::from_bytes_lowercase] that does not incur
+/// copy but returns error instead.
 #[derive(Clone)]
 pub struct HeaderName {
     repr: Repr,

@@ -31,14 +31,6 @@ const fn limit_cap(cap: usize) -> Size {
 /// This implementation has a maximum capacity that is lower than the theoretical system limit for
 /// performance reason. The exact limit is sufficient for all realistic HTTP header scenarios, as
 /// even extreme cases rarely approach this boundary.
-//
-// #[not_implemented]
-// Some APIs provide `try_*` variants that returns error instead of panicking when this limit is
-// exceeded.
-//
-// TODO: current optimization such as robin hood hashing or using cryptographic hash function is
-// not implemented, as it is expected that user limit the header length to much lower than the hard
-// limit
 #[derive(Clone)]
 pub struct HeaderMap {
     fields: NonNull<Option<HeaderField>>,
