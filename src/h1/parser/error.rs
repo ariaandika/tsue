@@ -1,19 +1,12 @@
 
 /// HTTP Parsing error.
 #[derive(Debug)]
-pub struct HttpError {
-    kind: ErrorKind,
-}
-
-impl From<ErrorKind> for HttpError {
-    #[inline]
-    fn from(kind: ErrorKind) -> Self {
-        Self { kind }
-    }
+pub struct H1ParseError {
+    kind: H1ParseErrorKind,
 }
 
 #[derive(Debug)]
-pub enum ErrorKind {
+pub enum H1ParseErrorKind {
     /// Request line is too short.
     TooShort,
     /// Request line is too long.
@@ -34,29 +27,47 @@ pub enum ErrorKind {
     MissmatchHost,
 }
 
-impl std::error::Error for HttpError {}
-impl std::fmt::Display for HttpError {
+use H1ParseErrorKind as Kind;
+
+impl From<Kind> for H1ParseError {
+    #[inline]
+    fn from(kind: Kind) -> Self {
+        Self { kind }
+    }
+}
+
+impl std::error::Error for H1ParseError {}
+
+impl std::fmt::Display for H1ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.kind.fmt(f)
+    }
+}
+
+impl std::fmt::Display for H1ParseErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self.kind {
-            ErrorKind::TooShort => f.write_str("request line too short"),
-            ErrorKind::TooLong => f.write_str("request line too long"),
-            ErrorKind::InvalidSeparator => f.write_str("invalid separator"),
-            ErrorKind::UnknownMethod => f.write_str("unknown method"),
-            ErrorKind::InvalidMethod => f.write_str("invalid method"),
-            ErrorKind::InvalidTarget => f.write_str("invalid request target"),
-            ErrorKind::UnsupportedVersion => f.write_str("unsupported version"),
-            ErrorKind::InvalidHeader => f.write_str("invalid header"),
-            ErrorKind::MissmatchHost => f.write_str("missmatch host"),
+        match self {
+            Kind::TooShort => f.write_str("request line too short"),
+            Kind::TooLong => f.write_str("request line too long"),
+            Kind::InvalidSeparator => f.write_str("invalid separator"),
+            Kind::UnknownMethod => f.write_str("unknown method"),
+            Kind::InvalidMethod => f.write_str("invalid method"),
+            Kind::InvalidTarget => f.write_str("invalid request target"),
+            Kind::UnsupportedVersion => f.write_str("unsupported version"),
+            Kind::InvalidHeader => f.write_str("invalid header"),
+            Kind::MissmatchHost => f.write_str("missmatch host"),
         }
     }
 }
 
-impl From<crate::uri::UriError> for HttpError {
+impl From<crate::uri::UriError> for H1ParseError {
     fn from(value: crate::uri::UriError) -> Self {
         use crate::uri::UriError::*;
         match value {
-            TooLong => Self::from(ErrorKind::TooLong),
-            InvalidScheme | InvalidAuthority | InvalidPath => Self::from(ErrorKind::InvalidTarget),
+            TooLong => Self::from(H1ParseErrorKind::TooLong),
+            InvalidScheme | InvalidAuthority | InvalidPath => {
+                Self::from(H1ParseErrorKind::InvalidTarget)
+            }
         }
     }
 }

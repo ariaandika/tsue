@@ -1,7 +1,7 @@
 //! HTTP/1.1 Logic.
 use tcio::bytes::{Bytes, BytesMut};
 
-use super::parser::{Header, Reqline};
+use super::{error::H1Error, parser::{Header, Reqline}};
 use crate::{
     headers::{HeaderMap, HeaderName, HeaderValue},
     http::{Extensions, httpdate_now},
@@ -9,9 +9,13 @@ use crate::{
     uri::HttpScheme,
 };
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
 const MAX_HEADERS: usize = 64;
+
+macro_rules! err {
+    ($variant:ident) => {
+        H1Error::from(super::error::H1ErrorKind::$variant)
+    };
+}
 
 #[derive(Debug)]
 pub struct HttpState {
@@ -41,9 +45,9 @@ impl HttpState {
         }
     }
 
-    pub fn add_header(&mut self, mut header: Header) -> Result<(), BoxError> {
+    pub fn add_header(&mut self, mut header: Header) -> Result<(), H1Error> {
         if self.headers.len() > MAX_HEADERS {
-            return Err("too many headers".into());
+            return Err(err!(TooManyHeaders));
         }
 
         let name = HeaderName::from_slice(header.name)?;
@@ -55,7 +59,7 @@ impl HttpState {
             "content-length" => {
                 match tcio::atou(&value) {
                     Some(ok) => self.content_len = Some(ok),
-                    None => return Err("invalid content-length".into()),
+                    None => return Err(err!(InvalidContentLength)),
                 }
             },
             "host" => {
@@ -74,9 +78,9 @@ impl HttpState {
         self.content_len
     }
 
-    pub fn build_parts(self) -> Result<request::Parts, BoxError> {
+    pub fn build_parts(self) -> Result<request::Parts, H1Error> {
         let Some(host) = self.host else {
-            return Err("missing host header".into());
+            return Err(err!(MissingHost));
         };
 
         let uri = self.reqline.target.build_origin(host, HttpScheme::HTTP)?;

@@ -7,3 +7,4 @@ pub mod parser;
 pub mod proto;
 pub mod io;
 pub mod driver;
+pub mod error;

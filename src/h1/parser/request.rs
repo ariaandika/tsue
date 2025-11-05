@@ -1,16 +1,12 @@
 use std::{slice::from_raw_parts, task::Poll};
 use tcio::bytes::BytesMut;
 
-use super::{
-    Target,
-    error::{HttpError, ErrorKind},
-    matches,
-};
+use super::{Target, error::H1ParseError, matches};
 use crate::http::{Method, Version};
 
 macro_rules! err {
     ($variant:ident) => {
-        Poll::Ready(Err(HttpError::from(ErrorKind::$variant)))
+        Poll::Ready(Err(H1ParseError::from(super::error::H1ParseErrorKind::$variant)))
     };
 }
 
@@ -25,14 +21,14 @@ pub struct Reqline {
 
 impl Reqline {
     #[inline]
-    pub fn parse_chunk(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
+    pub fn parse_chunk(bytes: &mut BytesMut) -> Poll<Result<Reqline, H1ParseError>> {
         parse_chunk_reqline(bytes)
     }
 }
 
 // ===== Request Line =====
 
-fn parse_chunk_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, HttpError>> {
+fn parse_chunk_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, H1ParseError>> {
     let mut reqline = {
         let mut state = bytes.as_slice();
 

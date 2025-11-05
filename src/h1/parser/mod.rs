@@ -18,7 +18,7 @@ mod error;
 pub use request::Reqline;
 pub use target::{Target, Kind};
 pub use header::Header;
-pub use error::HttpError;
+pub use error::H1ParseError;
 
 #[cfg(test)]
 mod test;

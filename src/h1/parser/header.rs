@@ -4,10 +4,7 @@ use tcio::{
     bytes::{Buf, BytesMut},
 };
 
-use super::{
-    error::{HttpError, ErrorKind},
-    matches,
-};
+use super::{error::H1ParseError, matches};
 
 macro_rules! ready {
     ($e:expr) => {
@@ -20,7 +17,7 @@ macro_rules! ready {
 
 macro_rules! err {
     ($variant:ident) => {
-        Poll::Ready(Err(HttpError::from(ErrorKind::$variant)))
+        Poll::Ready(Err(H1ParseError::from(super::error::H1ParseErrorKind::$variant)))
     };
 }
 
@@ -32,12 +29,12 @@ pub struct Header {
 
 impl Header {
     #[inline]
-    pub fn parse_chunk(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError>> {
+    pub fn parse_chunk(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, H1ParseError>> {
         parse_chunk_header(bytes)
     }
 }
 
-fn parse_chunk_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, HttpError>> {
+fn parse_chunk_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, H1ParseError>> {
     let mut cursor = bytes.cursor_mut();
 
     match ready!(cursor.next()) {
