@@ -1,23 +1,23 @@
-use std::task::Poll;
 use tcio::{
     ByteStr,
     bytes::{Buf, BytesMut},
 };
 
 use super::{error::H1ParseError, matches};
+use crate::common::ParseResult;
 
 macro_rules! ready {
     ($e:expr) => {
         match $e {
             Some(ok) => ok,
-            None => return Poll::Pending
+            None => return ParseResult::Pending
         }
     };
 }
 
 macro_rules! err {
     ($variant:ident) => {
-        Poll::Ready(Err(H1ParseError::from(super::error::H1ParseErrorKind::$variant)))
+        ParseResult::Err(H1ParseError::from(super::error::H1ParseErrorKind::$variant))
     };
 }
 
@@ -29,25 +29,25 @@ pub struct Header {
 
 impl Header {
     #[inline]
-    pub fn parse_chunk(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, H1ParseError>> {
+    pub fn parse_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, H1ParseError> {
         parse_chunk_header(bytes)
     }
 }
 
-fn parse_chunk_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, H1ParseError>> {
+fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, H1ParseError> {
     let mut cursor = bytes.cursor_mut();
 
     match ready!(cursor.next()) {
         b'\r' => match ready!(cursor.next()) {
             b'\n' => {
                 cursor.advance_buf();
-                return Poll::Ready(Ok(None));
+                return ParseResult::Ok(None);
             }
             _ => return err!(InvalidSeparator),
         },
         b'\n' => {
             cursor.advance_buf();
-            return Poll::Ready(Ok(None));
+            return ParseResult::Ok(None);
         }
         _ => {}
     }
@@ -61,7 +61,7 @@ fn parse_chunk_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, H1Par
             _ => return err!(InvalidHeader),
         };
         else {
-            return Poll::Pending
+            return ParseResult::Pending
         }
     };
 
@@ -89,8 +89,8 @@ fn parse_chunk_header(bytes: &mut BytesMut) -> Poll<Result<Option<Header>, H1Par
     line.advance(b": ".len());
     line.truncate_off(crlf);
 
-    Poll::Ready(Ok(Some(Header {
+    ParseResult::Ok(Some(Header {
         name,
         value: line,
-    })))
+    }))
 }

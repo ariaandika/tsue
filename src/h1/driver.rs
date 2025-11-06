@@ -5,17 +5,13 @@ use std::{
 };
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
-use super::io::{IoBuffer, BodyWrite};
+use super::{
+    io::{BodyWrite, IoBuffer},
+    parser::{Header, Reqline},
+    proto::{self, HttpState},
+};
 use crate::{
-    body::Body,
-    h1::{
-        parser::{Header, Reqline},
-        proto::{self, HttpState},
-    },
-    headers::HeaderMap,
-    request::Request,
-    response::Response,
-    service::HttpService,
+    body::Body, headers::HeaderMap, request::Request, response::Response, service::HttpService,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -92,13 +88,14 @@ where
 
                     // TODO: send error response before disconnect
 
-                    let reqline = match Reqline::parse_chunk(bytes)? {
+                    let reqline = match Reqline::parse_chunk(bytes).into_poll_result()? {
                         Poll::Ready(ok) => ok,
                         Poll::Pending => {
                             ready!(io.poll_read(cx)?);
                             continue;
                         }
                     };
+
                     let state = match header_map.take() {
                         Some(headers) => HttpState::with_cached_headers(reqline, headers),
                         None => HttpState::new(reqline),
@@ -113,7 +110,7 @@ where
                     loop {
                         let bytes = io.read_buffer_mut();
 
-                        match Header::parse_chunk(bytes)? {
+                        match Header::parse_chunk(bytes).into_poll_result()? {
                             Poll::Ready(Some(header)) => state_mut.add_header(header)?,
                             Poll::Ready(None) => break,
                             Poll::Pending => {

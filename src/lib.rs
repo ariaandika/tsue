@@ -44,6 +44,7 @@
 #![warn(missing_debug_implementations)]
 
 mod matches;
+pub mod common;
 
 // definitions
 pub mod uri;

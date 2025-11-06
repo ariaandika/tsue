@@ -1,14 +1,14 @@
-use std::task::Poll;
 use tcio::bytes::BytesMut;
 
 use super::Kind;
-use crate::http::{Method, Version};
+use crate::{http::{Method, Version}, common::ParseResult};
 
 macro_rules! ready {
     ($e:expr) => {
         match $e {
-            Poll::Ready(ok) => ok,
-            Poll::Pending => panic!("called `Poll::unwrap` on `Poll::Pending`")
+            ParseResult::Ok(ok) => ok,
+            ParseResult::Err(err) => panic!("unexpected `ParseResult::Err`: {err:?}"),
+            ParseResult::Pending => panic!("unexpected `ParseResult::Pending`")
         }
     };
 }
@@ -21,16 +21,18 @@ fn test_parse_reqline() {
         (#[pending] $input:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
             match Reqline::parse_chunk(&mut bytes) {
-                Poll::Pending => { }
-                Poll::Ready(val) => panic!("expected `Poll::Pending`, but its ready with: {val:?}"),
+                ParseResult::Pending => { }
+                ParseResult::Ok(val) => panic!("expected `Poll::Pending`, but its `Ok` with: {val:?}"),
+                ParseResult::Err(val) => panic!("expected `Poll::Pending`, but its `Err` with: {val:?}"),
             }
             assert_eq!(bytes.as_slice(), $input);
         };
         (#[error] $input:expr) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
             match Reqline::parse_chunk(&mut bytes) {
-                Poll::Ready(result) => result.unwrap_err(),
-                Poll::Pending => panic!("line {}, unexpected Poll::Pending",line!()),
+                ParseResult::Ok(ok) => panic!("expected `Err` but returns `Ok` with {ok:?}"),
+                ParseResult::Err(err) => err,
+                ParseResult::Pending => panic!("line {}, unexpected Poll::Pending",line!()),
             }
         };
         {
@@ -40,7 +42,7 @@ fn test_parse_reqline() {
         } => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
 
-            let reqline = ready!(Reqline::parse_chunk(&mut bytes)).unwrap();
+            let reqline = ready!(Reqline::parse_chunk(&mut bytes));
 
             assert_eq!(reqline.method, Method::$m);
             assert_eq!(reqline.target.kind, Kind::$k);
@@ -140,7 +142,7 @@ fn test_parse_header() {
     macro_rules! test {
         (#[end] $input:literal, $remain:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            assert!(ready!(Header::parse_chunk(&mut bytes)).unwrap().is_none());
+            assert!(ready!(Header::parse_chunk(&mut bytes)).is_none());
             assert_eq!(bytes.as_slice(), $remain);
         };
         (#[pending] $input:literal) => {
@@ -161,7 +163,7 @@ fn test_parse_header() {
             $rest:expr
         } => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            let header = ready!(Header::parse_chunk(&mut bytes)).unwrap().unwrap();
+            let header = ready!(Header::parse_chunk(&mut bytes)).unwrap();
             assert_eq!(&header.name, &$name[..]);
             assert_eq!(&header.value, &$value[..]);
             assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");

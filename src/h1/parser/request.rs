@@ -1,12 +1,12 @@
-use std::{slice::from_raw_parts, task::Poll};
+use std::slice::from_raw_parts;
 use tcio::bytes::BytesMut;
 
 use super::{Target, error::H1ParseError, matches};
-use crate::http::{Method, Version};
+use crate::{http::{Method, Version}, common::ParseResult};
 
 macro_rules! err {
     ($variant:ident) => {
-        Poll::Ready(Err(H1ParseError::from(super::error::H1ParseErrorKind::$variant)))
+        ParseResult::Err(H1ParseError::from(super::error::H1ParseErrorKind::$variant))
     };
 }
 
@@ -21,19 +21,19 @@ pub struct Reqline {
 
 impl Reqline {
     #[inline]
-    pub fn parse_chunk(bytes: &mut BytesMut) -> Poll<Result<Reqline, H1ParseError>> {
+    pub fn parse_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, H1ParseError> {
         parse_chunk_reqline(bytes)
     }
 }
 
 // ===== Request Line =====
 
-fn parse_chunk_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, H1ParseError>> {
+fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, H1ParseError> {
     let mut reqline = {
         let mut state = bytes.as_slice();
 
         let delim = matches::split_crlf!(state else {
-            return Poll::Pending
+            return ParseResult::Pending
         });
 
         let crlf = match delim {
@@ -43,7 +43,7 @@ fn parse_chunk_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, H1ParseErro
                     2
                 },
                 Some(_) => return err!(InvalidSeparator),
-                None => return Poll::Pending,
+                None => return ParseResult::Pending,
             },
             b'\n' => 1,
             _ => return err!(InvalidSeparator),
@@ -106,9 +106,9 @@ fn parse_chunk_reqline(bytes: &mut BytesMut) -> Poll<Result<Reqline, H1ParseErro
     }
     let target = Target::new(&method, reqline);
 
-    Poll::Ready(Ok(Reqline {
+    ParseResult::Ok(Reqline {
         method,
         target,
         version,
-    }))
+    })
 }
