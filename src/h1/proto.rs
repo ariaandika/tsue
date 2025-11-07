@@ -107,8 +107,7 @@ impl HttpState {
             _ => {},
         }
 
-        self.headers
-            .insert(name, HeaderValue::from_slice(value)?);
+        self.headers.append(name, HeaderValue::from_slice(value)?);
 
         Ok(())
     }
