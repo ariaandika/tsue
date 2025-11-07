@@ -467,6 +467,28 @@ impl HttpUri {
     pub fn into_parts(self) -> (HttpScheme, Host, Path) {
         (self.scheme, self.host, self.path)
     }
+
+    /// Returns the HTTP port or its default value if it does not exists.
+    ///
+    /// ```not_rust
+    /// example.com:8042
+    ///             \__/
+    ///              |
+    ///             port
+    /// ```
+    #[inline]
+    pub const fn port(&self) -> u16 {
+        match self.host.port() {
+            Some(port) => port,
+            None => {
+                if self.scheme.is_http() {
+                    80
+                } else {
+                    443
+                }
+            }
+        }
+    }
 }
 
 // ===== Formatting =====
