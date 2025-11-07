@@ -86,18 +86,22 @@ where
 
                     let bytes = io.read_buffer_mut();
 
-                    // TODO: send error response before disconnect
+                    // TODO: create custom error type that can generate Response
 
                     let reqline = match Reqline::parse_chunk(bytes).into_poll_result()? {
                         Poll::Ready(ok) => ok,
                         Poll::Pending => {
+                            // WARN: why `io.poll_read()` here while at the start will also read ?
                             ready!(io.poll_read(cx)?);
                             continue;
                         }
                     };
 
                     let state = match header_map.take() {
-                        Some(headers) => HttpState::with_cached_headers(reqline, headers),
+                        Some(headers) => {
+                            debug_assert!(headers.is_empty());
+                            HttpState::with_headers(reqline, headers)
+                        },
                         None => HttpState::new(reqline),
                     };
                     phase.set(Phase::Header(Some(state)));
@@ -111,7 +115,7 @@ where
                         let bytes = io.read_buffer_mut();
 
                         match Header::parse_chunk(bytes).into_poll_result()? {
-                            Poll::Ready(Some(header)) => state_mut.add_header(header)?,
+                            Poll::Ready(Some(header)) => state_mut.insert_header(header)?,
                             Poll::Ready(None) => break,
                             Poll::Pending => {
                                 try_ready!(io.poll_read(cx));
@@ -140,10 +144,10 @@ where
                     let body = Body::from_handle(io.get_handle(), content_len, partial_body);
                     let request = Request::from_parts(parts, body);
 
-                    let f = service.call(request);
-                    phase.set(Phase::Service(f));
+                    let service_future = service.call(request);
+                    phase.set(Phase::Service(service_future));
                 }
-                PhaseProject::Service(f) => match f.poll(cx) {
+                PhaseProject::Service(service_future) => match service_future.poll(cx) {
                     Poll::Ready(Ok(ok)) => {
                         phase.set(Phase::Drain(Some(ok)));
                     }
@@ -170,9 +174,9 @@ where
 
                     phase.set(Phase::Flush(io.write_body(body)));
                 }
-                PhaseProject::Flush(b) => {
+                PhaseProject::Flush(body_writer) => {
                     ready!(io.poll_flush(cx))?;
-                    ready!(b.poll_write(io, cx))?;
+                    ready!(body_writer.poll_write(io, cx))?;
                     phase.set(Phase::Cleanup);
                 }
                 PhaseProject::Cleanup => {
@@ -239,3 +243,4 @@ impl<F> Phase<F> {
         }
     }
 }
+

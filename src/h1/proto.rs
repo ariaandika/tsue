@@ -25,6 +25,46 @@ pub struct HttpState {
     content_len: Option<u64>,
 }
 
+// Connection - keep-alive, close, upgrades
+//
+//     Upgrade - WebSocket, HTTP/2, etc.
+//
+//     TE - transfer-encoding preferences
+//
+// Body Processing
+//
+//     Transfer-Encoding - chunked, gzip, etc.
+//
+//     Expect - 100-continue handling
+//
+//     Content-Encoding - gzip, deflate, brotli
+//
+//     Content-Type - with boundary for multipart
+//
+// Security & Limits
+//
+//     Cookie - session handling
+//
+//     Authorization - authentication schemes
+//
+//     X-Forwarded-* - proxy handling
+//
+//     Range - partial content requests
+//
+// Protocol Semantics
+//
+//     Host - virtual hosting (you mentioned)
+//
+//     Via - proxy tracing
+//
+//     Cache-Control - caching directives
+//
+// Special Handling
+//
+//     Trailer - trailing headers after chunked body
+//
+//     Priority - HTTP/2/3 stream prioritization
+
 impl HttpState {
     pub fn new(reqline: Reqline) -> Self {
         Self {
@@ -35,8 +75,7 @@ impl HttpState {
         }
     }
 
-    pub fn with_cached_headers(reqline: Reqline, headers: HeaderMap) -> Self {
-        debug_assert!(headers.is_empty());
+    pub fn with_headers(reqline: Reqline, headers: HeaderMap) -> Self {
         Self {
             reqline,
             headers,
@@ -45,7 +84,7 @@ impl HttpState {
         }
     }
 
-    pub fn add_header(&mut self, mut header: Header) -> Result<(), H1Error> {
+    pub fn insert_header(&mut self, mut header: Header) -> Result<(), H1Error> {
         if self.headers.len() > MAX_HEADERS {
             return Err(err!(TooManyHeaders));
         }
@@ -74,6 +113,7 @@ impl HttpState {
         Ok(())
     }
 
+    // TODO: limit content length
     pub fn content_len(&self) -> Option<u64> {
         self.content_len
     }
