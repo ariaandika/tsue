@@ -16,15 +16,6 @@ use crate::{
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-macro_rules! try_ready {
-    ($e:expr) => {
-        match ready!($e) {
-            Ok(ok) => ok,
-            Err(err) => return Poll::Ready(Err(err.into())),
-        }
-    };
-}
-
 pub struct Connection<IO, S, F> {
     io: IoBuffer<IO>,
     header_map: Option<HeaderMap>,
@@ -86,13 +77,11 @@ where
 
                     let bytes = io.read_buffer_mut();
 
-                    // TODO: create custom error type that can generate Response
-
                     let reqline = match Reqline::parse_chunk(bytes).into_poll_result()? {
                         Poll::Ready(ok) => ok,
                         Poll::Pending => {
-                            // WARN: why `io.poll_read()` here while at the start will also read ?
-                            ready!(io.poll_read(cx)?);
+                            // WARN: why `io.poll_read()` here while at the start will also `io.poll_read()` ?
+                            // ready!(io.poll_read(cx)?);
                             continue;
                         }
                     };
@@ -107,7 +96,7 @@ where
                     phase.set(Phase::Header(Some(state)));
                 }
                 PhaseProject::Header(state) => {
-                    // TODO: send error response before disconnect
+                    // TODO: create custom error type that can generate Response
 
                     let state_mut = state.as_mut().unwrap();
 
@@ -118,7 +107,8 @@ where
                             Poll::Ready(Some(header)) => state_mut.insert_header(header)?,
                             Poll::Ready(None) => break,
                             Poll::Pending => {
-                                try_ready!(io.poll_read(cx));
+                                // TODO: limit buffer size
+                                ready!(io.poll_read(cx)?);
                                 continue;
                             }
                         }

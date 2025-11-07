@@ -7,6 +7,9 @@
 
 // NOTE: should header value be limited to US-ASCII only ?
 
+// NOTE: maintaining fields order, double allocation strategy where one store hash and index to the
+// other that maintains the order
+
 // NOTE: current header map optimization such as robin hood hashing or using cryptographic hash
 // function is not implemented, as it is expected that user limit the header length to much lower
 // number than the hard limit
