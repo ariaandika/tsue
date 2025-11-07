@@ -126,7 +126,7 @@ where
 
                     // ===== Service =====
 
-                    let content_len = state_mut.content_len().unwrap_or(0);
+                    let content_len = state_mut.try_content_len()?.unwrap_or(0);
                     let partial_body = io.read_buffer_mut().split();
 
                     // buffer is empty, so reserve will not need to copy any data if

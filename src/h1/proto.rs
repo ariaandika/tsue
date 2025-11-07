@@ -1,9 +1,16 @@
 //! HTTP/1.1 Logic.
 use tcio::bytes::{Bytes, BytesMut};
 
-use super::{error::H1Error, parser::{Header, Reqline}};
+use super::{
+    error::H1Error,
+    parser::{Header, Reqline},
+};
 use crate::{
-    headers::{HeaderMap, HeaderName, HeaderValue},
+    headers::{
+        HeaderMap, HeaderName, HeaderValue,
+        error::HeaderError,
+        standard::{CONTENT_LENGTH, HOST},
+    },
     http::{Extensions, httpdate_now},
     request, response,
     uri::HttpScheme,
@@ -21,8 +28,6 @@ macro_rules! err {
 pub struct HttpState {
     reqline: Reqline,
     headers: HeaderMap,
-    host: Option<Bytes>,
-    content_len: Option<u64>,
 }
 
 // Connection - keep-alive, close, upgrades
@@ -67,21 +72,11 @@ pub struct HttpState {
 
 impl HttpState {
     pub fn new(reqline: Reqline) -> Self {
-        Self {
-            reqline,
-            headers: HeaderMap::with_capacity(8),
-            host: None,
-            content_len: None,
-        }
+        Self::with_headers(reqline, HeaderMap::with_capacity(8))
     }
 
     pub fn with_headers(reqline: Reqline, headers: HeaderMap) -> Self {
-        Self {
-            reqline,
-            headers,
-            host: None,
-            content_len: None,
-        }
+        Self { reqline, headers }
     }
 
     pub fn insert_header(&mut self, mut header: Header) -> Result<(), H1Error> {
@@ -89,39 +84,31 @@ impl HttpState {
             return Err(err!(TooManyHeaders));
         }
 
-        let name = HeaderName::from_slice(header.name)?;
-
         header.value.make_ascii_lowercase();
-        let value = header.value.freeze();
 
-        match name.as_str() {
-            "content-length" => {
-                match tcio::atou(&value) {
-                    Some(ok) => self.content_len = Some(ok),
-                    None => return Err(err!(InvalidContentLength)),
-                }
-            },
-            "host" => {
-                self.host = Some(value.clone());
-            },
-            _ => {},
-        }
-
-        self.headers.append(name, HeaderValue::from_slice(value)?);
+        self.headers.append(
+            HeaderName::from_slice(header.name)?,
+            HeaderValue::from_slice(header.value.freeze())?,
+        );
 
         Ok(())
     }
 
-    // TODO: limit content length
-    pub fn content_len(&self) -> Option<u64> {
-        self.content_len
+    pub fn try_content_len(&self) -> Result<Option<u64>, HeaderError> {
+        match self.headers.get(CONTENT_LENGTH) {
+            Some(content_len) => match tcio::atou(content_len.as_bytes()) {
+                Some(ok) => Ok(Some(ok)),
+                None => Err(HeaderError::invalid_value()),
+            },
+            None => Ok(None),
+        }
     }
 
     pub fn build_parts(self) -> Result<request::Parts, H1Error> {
-        let Some(host) = self.host else {
-            return Err(err!(MissingHost));
+        let host = match self.headers.get(HOST) {
+            Some(ok) => Bytes::from(ok.clone()),
+            None => return Err(err!(MissingHost)),
         };
-
         let uri = self.reqline.target.build_origin(host, HttpScheme::HTTP)?;
 
         Ok(request::Parts {

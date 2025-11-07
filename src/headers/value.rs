@@ -218,3 +218,10 @@ impl PartialEq<[u8]> for HeaderValue {
         self.bytes.as_slice() == other
     }
 }
+
+impl From<HeaderValue> for Bytes {
+    #[inline]
+    fn from(value: HeaderValue) -> Self {
+        value.bytes
+    }
+}
