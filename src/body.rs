@@ -12,19 +12,25 @@ use stream::BodyStreamHandle;
 pub use stream::BodyStream;
 pub use collect::Collect;
 
-
+/// HTTP Body
 #[derive(Debug, Default)]
 pub struct Body {
     repr: Repr,
 }
 
-#[derive(Debug, Default)]
+/// [`Body`] can be standalone bytes or holds a handle to an IO stream.
+#[derive(Debug)]
 enum Repr {
-    #[default]
-    Empty,
     Bytes(Bytes),
     Handle(BodyHandle),
     Stream(BodyStreamHandle)
+}
+
+impl Default for Repr {
+    #[inline]
+    fn default() -> Self {
+        Repr::Bytes(Bytes::new())
+    }
 }
 
 // ===== Constructor =====
@@ -41,7 +47,9 @@ impl Body {
     /// Create an empty [`Body`].
     #[inline]
     pub const fn empty() -> Body {
-        Self { repr: Repr::Empty }
+        Self {
+            repr: Repr::Bytes(Bytes::new()),
+        }
     }
 
     #[inline]
@@ -69,7 +77,6 @@ impl Body {
     #[inline]
     pub fn remaining(&self) -> usize {
         match &self.repr {
-            Repr::Empty => 0,
             Repr::Bytes(bytes) => bytes.len(),
             Repr::Handle(handle) => handle.remaining(),
             Repr::Stream(stream) => stream.remaining(),
@@ -85,9 +92,12 @@ impl Body {
 // ===== Read =====
 
 impl Body {
+    /// Tries to read data from the stream and returns the buffer.
+    ///
+    /// If body is exhausted, or no body contained, returns an error. Use [`Body::has_remaining`]
+    /// to check whether there are bytes remaining to read.
     pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<io::Result<Bytes>> {
         match &mut self.repr {
-            Repr::Empty => Poll::Ready(Err(io::ErrorKind::QuotaExceeded.into())),
             Repr::Bytes(b) => Poll::Ready(if b.is_empty() {
                 Err(io::ErrorKind::QuotaExceeded.into())
             } else {

@@ -48,7 +48,6 @@ impl Future for Collect {
         let me = self.get_mut();
 
         match &mut me.body.repr {
-            Repr::Empty => Poll::Ready(Err(io::ErrorKind::QuotaExceeded.into())),
             Repr::Bytes(b) => Poll::Ready(if b.is_empty() {
                 Err(io::ErrorKind::QuotaExceeded.into())
             } else {
