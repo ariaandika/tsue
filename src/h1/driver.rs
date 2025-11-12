@@ -117,21 +117,20 @@ where
                     // ===== Service =====
 
                     let content_len = state_mut.try_content_len()?.unwrap_or(0);
-                    let partial_body = io.read_buffer_mut().split();
-
-                    // buffer is empty, so reserve will not need to copy any data if
-                    // allocation required
-                    io.read_buffer_mut().reserve(content_len as _);
-
-                    // `IoBuffer` remaining is only calculated excluding the already read body
-                    let Some(remaining_body_len) = content_len.checked_sub(partial_body.len() as _)
-                    else {
-                        return Poll::Ready(Err("content-length is less than body".into()));
-                    };
-                    io.set_remaining(remaining_body_len);
-
                     let parts = state.take().unwrap().build_parts()?;
-                    let body = Body::from_handle(io.get_handle(), content_len, partial_body);
+                    let body = if io.read_buffer_mut().len() == content_len as usize {
+                        // all body have been read, use standalone representation
+                        Body::new(io.read_buffer_mut().split())
+                    } else {
+                        // `IoBuffer` remaining is only calculated excluding the already read body
+                        let Some(remaining_body_len) = content_len.checked_sub(io.read_buffer_mut().len() as u64)
+                        else {
+                            return Poll::Ready(Err("content-length is less than body".into()));
+                        };
+                        io.set_remaining(remaining_body_len);
+                        Body::from_handle(io.get_handle(), remaining_body_len)
+                    };
+
                     let request = Request::from_parts(parts, body);
 
                     let service_future = service.call(request);

@@ -53,9 +53,9 @@ impl Body {
     }
 
     #[inline]
-    pub(crate) fn from_handle(handle: IoHandle, remaining: u64, remain: BytesMut) -> Self {
+    pub(crate) fn from_handle(handle: IoHandle, remaining: u64) -> Self {
         Self {
-            repr: Repr::Handle(BodyHandle::new(handle, remaining, remain)),
+            repr: Repr::Handle(BodyHandle::new(handle, remaining)),
         }
     }
 
