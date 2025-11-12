@@ -6,12 +6,16 @@ use std::{
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use super::{
-    io::{BodyWrite, IoBuffer},
+    io::IoBuffer,
     parser::{Header, Reqline},
     proto::{self, HttpState},
 };
 use crate::{
-    body::Body, headers::HeaderMap, request::Request, response::Response, service::HttpService,
+    body::{Body, BodyWrite},
+    headers::HeaderMap,
+    request::Request,
+    response::Response,
+    service::HttpService,
 };
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -161,7 +165,7 @@ where
                     parts.headers.clear();
                     header_map.replace(parts.headers);
 
-                    phase.set(Phase::Flush(io.write_body(body)));
+                    phase.set(Phase::Flush(body.into_writer()));
                 }
                 PhaseProject::Flush(body_writer) => {
                     ready!(io.poll_flush(cx))?;

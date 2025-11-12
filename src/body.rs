@@ -5,12 +5,17 @@ use std::{io, task::Poll};
 mod handle;
 mod stream;
 mod collect;
+mod writer;
+
+// =====
 
 use handle::{BodyHandle, IoHandle};
 use stream::BodyStreamHandle;
 
 pub use stream::BodyStream;
 pub use collect::Collect;
+
+pub(crate) use writer::BodyWrite;
 
 /// HTTP Body
 #[derive(Debug, Default)]
@@ -68,6 +73,11 @@ impl Body {
         Self {
             repr: Repr::Stream(BodyStreamHandle::new(stream)),
         }
+    }
+
+    #[inline]
+    pub(crate) fn into_writer(self) -> BodyWrite {
+        BodyWrite::new(self)
     }
 }
 

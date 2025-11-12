@@ -1,3 +1,6 @@
+//! HTTP/1.1 IO Streaming.
+//!
+//! [`IoBuffer`]
 use std::{
     cmp, io, mem,
     sync::{
@@ -13,8 +16,6 @@ use tcio::{
     bytes::BytesMut,
     io::{AsyncIoRead, AsyncIoWrite},
 };
-
-use crate::body::Body;
 
 pub(crate) struct IoBuffer<IO> {
     io: IO,
@@ -51,10 +52,6 @@ impl<IO> IoBuffer<IO> {
         IoHandle {
             shared: self.shared.clone(),
         }
-    }
-
-    pub(crate) fn write_body(&self, body: Body) -> BodyWrite {
-        BodyWrite::new(body)
     }
 
     pub fn clear_reclaim(&mut self) {
@@ -157,6 +154,14 @@ impl<IO> IoBuffer<IO>
 where
     IO: AsyncIoWrite,
 {
+    pub(crate) fn poll_write(
+        &mut self,
+        buf: &[u8],
+        cx: &mut std::task::Context,
+    ) -> Poll<Result<usize, io::Error>> {
+        self.io.poll_write(buf, cx)
+    }
+
     pub(crate) fn poll_flush(&mut self, cx: &mut std::task::Context) -> Poll<io::Result<()>> {
         if self.write_buffer.is_empty() {
             Poll::Ready(Ok(()))
@@ -169,54 +174,6 @@ where
 impl<IO> std::fmt::Debug for IoBuffer<IO> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("IoBuffer").finish_non_exhaustive()
-    }
-}
-
-// ===== BodyWriteFuture =====
-
-pub(crate) struct BodyWrite {
-    body: Body,
-    phase: Phase,
-}
-
-enum Phase {
-    Read,
-    Write(tcio::bytes::Bytes),
-}
-
-impl BodyWrite {
-    pub fn new(body: Body) -> Self {
-        Self {
-            body,
-            phase: Phase::Read,
-        }
-    }
-
-    pub fn poll_write<IO: AsyncIoWrite>(
-        &mut self,
-        io: &mut IoBuffer<IO>,
-        cx: &mut std::task::Context,
-    ) -> Poll<io::Result<()>> {
-        loop {
-            match &mut self.phase {
-                Phase::Read => {
-                    if self.body.has_remaining() {
-                        let data = ready!(self.body.poll_read(cx))?;
-                        self.phase = Phase::Write(data);
-                    } else {
-                        break;
-                    }
-                }
-                Phase::Write(bytes) => {
-                    ready!(io.io.poll_write(bytes, cx))?;
-                    bytes.clear();
-                    if bytes.is_empty() {
-                        self.phase = Phase::Read;
-                    }
-                }
-            }
-        }
-        Poll::Ready(Ok(()))
     }
 }
 
