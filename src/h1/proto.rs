@@ -1,4 +1,4 @@
-//! HTTP/1.1 Logic.
+//! HTTP/1.1 Semantics.
 use tcio::bytes::{Bytes, BytesMut};
 
 use super::{

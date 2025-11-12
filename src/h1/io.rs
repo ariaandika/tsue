@@ -1,6 +1,4 @@
 //! HTTP/1.1 IO Streaming.
-//!
-//! [`IoBuffer`]
 use std::{
     cmp, io, mem,
     sync::{
