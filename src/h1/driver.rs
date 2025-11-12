@@ -132,7 +132,7 @@ where
                             return Poll::Ready(Err("content-length is less than body".into()));
                         };
                         io.set_remaining(remaining_body_len);
-                        Body::from_handle(io.get_handle(), remaining_body_len)
+                        Body::from_handle(io.handle(), remaining_body_len)
                     };
 
                     let request = Request::from_parts(parts, body);
