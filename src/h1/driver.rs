@@ -148,11 +148,8 @@ where
                         return Poll::Ready(Err(err.into()));
                     }
                     Poll::Pending => {
-                        if ready!(io.poll_io_wants(cx))? {
-                            continue;
-                        } else {
-                            return Poll::Pending;
-                        }
+                        let _ = io.poll_io_wants(cx)?;
+                        return Poll::Pending;
                     }
                 },
                 PhaseProject::Drain(response) => {

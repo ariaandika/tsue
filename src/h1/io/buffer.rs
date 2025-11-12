@@ -99,15 +99,13 @@ where
 
     /// Poll for IO read by [`IoHandle`].
     ///
-    /// Returns `true` if data is available, `Service` should be polled again immediately.
-    ///
-    /// This should be polled at the same time with `Service` which holds [`IoHandle`].
-    pub(crate) fn poll_io_wants(&mut self, cx: &mut std::task::Context) -> Poll<io::Result<bool>> {
+    /// If data is available, waker will be called.
+    pub(crate) fn poll_io_wants(&mut self, cx: &mut std::task::Context) -> Poll<io::Result<()>> {
         use super::WantsFlag;
 
         let Some(wants) = self.shared.wants_flag().load_is_want() else {
             // `IoHandle` have not been called yet
-            return Poll::Ready(Ok(false));
+            return Poll::Ready(Ok(()));
         };
 
         let poll = if WantsFlag::is_want_read(wants) {
@@ -119,7 +117,8 @@ where
 
         ready!(poll)?;
         self.shared.wants_flag().set_available();
-        Poll::Ready(Ok(true))
+        cx.waker().wake_by_ref();
+        Poll::Ready(Ok(()))
     }
 
     pub(crate) fn poll_drain(
