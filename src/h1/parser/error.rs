@@ -1,14 +1,12 @@
 
 /// HTTP Parsing error.
 #[derive(Debug)]
-pub struct H1ParseError {
-    kind: H1ParseErrorKind,
+pub struct ParseError {
+    kind: ParseErrorKind,
 }
 
 #[derive(Debug)]
-pub enum H1ParseErrorKind {
-    /// Request line is too short.
-    TooShort,
+pub enum ParseErrorKind {
     /// Request line is too long.
     TooLong,
     /// Request line have invalid separator
@@ -27,27 +25,26 @@ pub enum H1ParseErrorKind {
     MissmatchHost,
 }
 
-use H1ParseErrorKind as Kind;
+use ParseErrorKind as Kind;
 
-impl From<Kind> for H1ParseError {
+impl From<Kind> for ParseError {
     #[inline]
     fn from(kind: Kind) -> Self {
         Self { kind }
     }
 }
 
-impl std::error::Error for H1ParseError {}
+impl std::error::Error for ParseError {}
 
-impl std::fmt::Display for H1ParseError {
+impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.kind.fmt(f)
     }
 }
 
-impl std::fmt::Display for H1ParseErrorKind {
+impl std::fmt::Display for ParseErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Kind::TooShort => f.write_str("request line too short"),
             Kind::TooLong => f.write_str("request line too long"),
             Kind::InvalidSeparator => f.write_str("invalid separator"),
             Kind::UnknownMethod => f.write_str("unknown method"),
@@ -60,13 +57,13 @@ impl std::fmt::Display for H1ParseErrorKind {
     }
 }
 
-impl From<crate::uri::UriError> for H1ParseError {
+impl From<crate::uri::UriError> for ParseError {
     fn from(value: crate::uri::UriError) -> Self {
         use crate::uri::UriError::*;
         match value {
-            TooLong => Self::from(H1ParseErrorKind::TooLong),
+            TooLong => Self::from(ParseErrorKind::TooLong),
             InvalidScheme | InvalidAuthority | InvalidPath => {
-                Self::from(H1ParseErrorKind::InvalidTarget)
+                Self::from(ParseErrorKind::InvalidTarget)
             }
         }
     }

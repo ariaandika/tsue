@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{h1::parser::H1ParseError, headers::error::HeaderError};
+use crate::{h1::parser::ParseError, headers::error::HeaderError};
 
 #[derive(Debug)]
 pub struct H1Error {
@@ -13,7 +13,7 @@ pub enum H1ErrorKind {
     InvalidContentLength,
     MissingHost,
     HeaderError(HeaderError),
-    ParseError(H1ParseError),
+    ParseError(ParseError),
 }
 
 use H1ErrorKind as Kind;
@@ -52,8 +52,8 @@ impl From<HeaderError> for H1Error {
     }
 }
 
-impl From<H1ParseError> for H1Error {
-    fn from(v: H1ParseError) -> Self {
+impl From<ParseError> for H1Error {
+    fn from(v: ParseError) -> Self {
         Self {
             kind: Kind::ParseError(v),
         }

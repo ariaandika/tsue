@@ -3,7 +3,7 @@ use tcio::{
     bytes::{Buf, BytesMut},
 };
 
-use super::{error::H1ParseError, matches};
+use super::{error::ParseError, matches};
 use crate::common::ParseResult;
 
 macro_rules! ready {
@@ -17,7 +17,7 @@ macro_rules! ready {
 
 macro_rules! err {
     ($variant:ident) => {
-        ParseResult::Err(H1ParseError::from(super::error::H1ParseErrorKind::$variant))
+        ParseResult::Err(ParseError::from(super::error::ParseErrorKind::$variant))
     };
 }
 
@@ -29,12 +29,12 @@ pub struct Header {
 
 impl Header {
     #[inline]
-    pub fn parse_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, H1ParseError> {
+    pub fn parse_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, ParseError> {
         parse_chunk_header(bytes)
     }
 }
 
-fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, H1ParseError> {
+fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, ParseError> {
     let mut cursor = bytes.cursor_mut();
 
     match ready!(cursor.next()) {

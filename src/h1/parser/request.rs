@@ -1,12 +1,12 @@
 use std::slice::from_raw_parts;
 use tcio::bytes::BytesMut;
 
-use super::{Target, error::H1ParseError, matches};
+use super::{Target, error::ParseError, matches};
 use crate::{http::{Method, Version}, common::ParseResult};
 
 macro_rules! err {
     ($variant:ident) => {
-        ParseResult::Err(H1ParseError::from(super::error::H1ParseErrorKind::$variant))
+        ParseResult::Err(ParseError::from(super::error::ParseErrorKind::$variant))
     };
 }
 
@@ -21,14 +21,14 @@ pub struct Reqline {
 
 impl Reqline {
     #[inline]
-    pub fn parse_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, H1ParseError> {
+    pub fn parse_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError> {
         parse_chunk_reqline(bytes)
     }
 }
 
 // ===== Request Line =====
 
-fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, H1ParseError> {
+fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError> {
     let mut reqline = {
         let mut state = bytes.as_slice();
 
