@@ -1,10 +1,7 @@
 //! HTTP/1.1 Semantics.
 use tcio::bytes::{Bytes, BytesMut};
 
-use super::{
-    error::H1Error,
-    parser::{Header, Reqline},
-};
+use super::parser::{Header, Reqline};
 use crate::{
     headers::{
         HeaderMap, HeaderName, HeaderValue,
@@ -16,11 +13,15 @@ use crate::{
     uri::HttpScheme,
 };
 
+mod error;
+
+pub use error::{ProtoError, ProtoErrorKind};
+
 const MAX_HEADERS: usize = 64;
 
 macro_rules! err {
     ($variant:ident) => {
-        H1Error::from(super::error::H1ErrorKind::$variant)
+        ProtoError::from(ProtoErrorKind::$variant)
     };
 }
 
@@ -79,7 +80,7 @@ impl HttpState {
         Self { reqline, headers }
     }
 
-    pub fn insert_header(&mut self, mut header: Header) -> Result<(), H1Error> {
+    pub fn insert_header(&mut self, mut header: Header) -> Result<(), ProtoError> {
         if self.headers.len() > MAX_HEADERS {
             return Err(err!(TooManyHeaders));
         }
@@ -104,7 +105,7 @@ impl HttpState {
         }
     }
 
-    pub fn build_parts(self) -> Result<request::Parts, H1Error> {
+    pub fn build_parts(self) -> Result<request::Parts, ProtoError> {
         let host = match self.headers.get(HOST) {
             Some(ok) => Bytes::from(ok.clone()),
             None => return Err(err!(MissingHost)),

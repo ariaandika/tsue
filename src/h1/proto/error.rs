@@ -1,14 +1,13 @@
-use std::fmt;
-
 use crate::{h1::parser::ParseError, headers::error::HeaderError};
 
+/// HTTP Semantic error.
 #[derive(Debug)]
-pub struct H1Error {
-    kind: H1ErrorKind,
+pub struct ProtoError {
+    kind: ProtoErrorKind,
 }
 
 #[derive(Debug)]
-pub enum H1ErrorKind {
+pub enum ProtoErrorKind {
     TooManyHeaders,
     InvalidContentLength,
     MissingHost,
@@ -16,24 +15,25 @@ pub enum H1ErrorKind {
     ParseError(ParseError),
 }
 
-use H1ErrorKind as Kind;
+use ProtoErrorKind as Kind;
 
-impl From<Kind> for H1Error {
+impl From<Kind> for ProtoError {
+    #[inline]
     fn from(kind: Kind) -> Self {
         Self { kind }
     }
 }
 
-impl std::error::Error for H1Error { }
+impl std::error::Error for ProtoError {}
 
-impl fmt::Display for H1Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ProtoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.kind.fmt(f)
     }
 }
 
-impl fmt::Display for H1ErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ProtoErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Kind::TooManyHeaders => f.write_str("too many headers"),
             Kind::InvalidContentLength => f.write_str("invalid content length"),
@@ -44,19 +44,20 @@ impl fmt::Display for H1ErrorKind {
     }
 }
 
-impl From<HeaderError> for H1Error {
-    fn from(v: HeaderError) -> Self {
+impl From<HeaderError> for ProtoError {
+    #[inline]
+    fn from(value: HeaderError) -> Self {
         Self {
-            kind: Kind::HeaderError(v),
+            kind: Kind::HeaderError(value)
         }
     }
 }
 
-impl From<ParseError> for H1Error {
-    fn from(v: ParseError) -> Self {
+impl From<ParseError> for ProtoError {
+    #[inline]
+    fn from(value: ParseError) -> Self {
         Self {
-            kind: Kind::ParseError(v),
+            kind: Kind::ParseError(value),
         }
     }
 }
-
