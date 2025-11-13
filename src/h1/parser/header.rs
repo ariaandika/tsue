@@ -1,7 +1,4 @@
-use tcio::{
-    ByteStr,
-    bytes::{Buf, BytesMut},
-};
+use tcio::bytes::{Buf, BytesMut};
 
 use super::{error::ParseError, matches};
 use crate::common::ParseResult;
@@ -23,7 +20,7 @@ macro_rules! err {
 
 #[derive(Debug)]
 pub struct Header {
-    pub name: ByteStr,
+    pub name: BytesMut,
     pub value: BytesMut,
 }
 
@@ -82,9 +79,7 @@ fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, Parse
     };
 
     let mut line = cursor.split_to();
-
-    // SAFETY: `match_header_name!` checks for valid ASCII
-    let name = unsafe { ByteStr::from_utf8_unchecked(line.split_to(offset).freeze()) };
+    let name = line.split_to(offset);
 
     line.advance(b": ".len());
     line.truncate_off(crlf);
