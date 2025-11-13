@@ -19,7 +19,6 @@
 //!
 //! ## Behaviors
 //!
-//! - [`proto`] HTTP version agnostic APIs
 //! - [`h1`] HTTP/1.1 ([RFC9112])
 //! - `h2` HTTP/2.0 (RFC9113)
 //!
@@ -54,8 +53,7 @@ pub mod request;
 pub mod response;
 pub mod body;
 
-// behavior
-pub mod proto;
+// HTTP protocol
 pub mod h1;
 
 // user abstraction

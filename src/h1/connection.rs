@@ -8,7 +8,7 @@ use tcio::io::{AsyncIoRead, AsyncIoWrite};
 use super::{
     io::IoBuffer,
     parser::{Header, Reqline},
-    proto::{self, HttpState},
+    spec::{self, HttpState},
 };
 use crate::{
     body::{Body, BodyWrite},
@@ -157,7 +157,7 @@ where
 
                     let (mut parts, body) = response.take().unwrap().into_parts();
 
-                    proto::write_response(&parts, io.write_buffer_mut(), body.remaining() as _);
+                    spec::write_response(&parts, io.write_buffer_mut(), body.remaining() as _);
 
                     parts.headers.clear();
                     header_map.replace(parts.headers);
