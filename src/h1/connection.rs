@@ -35,7 +35,7 @@ type ConnectionProject<'a, IO, F, S> = (
 );
 
 enum Phase<F> {
-    Reqline,
+    Reqline { is_parse_pending: bool },
     Header(Option<HttpState>),
     Service(F),
     Drain(Option<Response>),
@@ -44,7 +44,7 @@ enum Phase<F> {
 }
 
 enum PhaseProject<'a, F> {
-    Reqline,
+    Reqline { is_parse_pending: &'a mut bool },
     Header(&'a mut Option<HttpState>),
     Service(Pin<&'a mut F>),
     Drain(&'a mut Option<Response>),
@@ -60,7 +60,7 @@ where
         Self {
             header_map: None,
             io: IoBuffer::new(io),
-            phase: Phase::Reqline,
+            phase: Phase::Reqline { is_parse_pending: false },
             service,
         }
     }
@@ -73,10 +73,18 @@ where
 
         loop {
             match phase.as_mut().project() {
-                PhaseProject::Reqline => {
-                    let read = ready!(io.poll_read(cx)?);
-                    if read == 0 {
-                        return Poll::Ready(Ok(()));
+                PhaseProject::Reqline { is_parse_pending } => {
+                    // it is possible that subsequent request bytes may already in buffer when
+                    // reading request body because of request pipelining
+                    //
+                    // but if `parse_chunk` returns pending, it will also put bytes in buffer
+                    //
+                    // thus `is_parse_pending` flag is necessary
+                    if io.read_buffer_mut().is_empty() | *is_parse_pending {
+                        let read = ready!(io.poll_read(cx)?);
+                        if read == 0 {
+                            return Poll::Ready(Ok(()));
+                        }
                     }
 
                     let bytes = io.read_buffer_mut();
@@ -84,8 +92,7 @@ where
                     let reqline = match Reqline::parse_chunk(bytes).into_poll_result()? {
                         Poll::Ready(ok) => ok,
                         Poll::Pending => {
-                            // WARN: why `io.poll_read()` here while at the start will also `io.poll_read()` ?
-                            // ready!(io.poll_read(cx)?);
+                            *is_parse_pending = true;
                             continue;
                         }
                     };
@@ -112,7 +119,10 @@ where
                             Poll::Ready(None) => break,
                             Poll::Pending => {
                                 // TODO: limit buffer size
-                                ready!(io.poll_read(cx)?);
+                                let read = ready!(io.poll_read(cx)?);
+                                if read == 0 {
+                                    return Poll::Ready(Ok(()));
+                                }
                                 continue;
                             }
                         }
@@ -173,7 +183,7 @@ where
                     // this phase exists to ensure all shared bytes is dropped, thus can be
                     // reclaimed
                     io.clear_reclaim();
-                    phase.set(Phase::Reqline);
+                    phase.set(Phase::Reqline { is_parse_pending: false });
                 }
             }
         }
@@ -223,7 +233,7 @@ impl<F> Phase<F> {
         // SAFETY: self is pinned, no custom Drop and Unpin
         unsafe {
             match self.get_unchecked_mut() {
-                Self::Reqline => PhaseProject::Reqline,
+                Self::Reqline { is_parse_pending } => PhaseProject::Reqline { is_parse_pending },
                 Self::Header(h) => PhaseProject::Header(h),
                 Self::Service(f) => PhaseProject::Service(Pin::new_unchecked(f)),
                 Self::Drain(r) => PhaseProject::Drain(r),
