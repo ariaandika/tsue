@@ -1,42 +1,48 @@
 use std::{
     pin::Pin,
     sync::Arc,
-    task::{Poll, ready},
+    task::{ready, Poll},
 };
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use super::{
     io::IoBuffer,
     parser::{Header, Reqline},
-    spec::{self, HttpState},
+    spec,
 };
 use crate::{
     body::{Body, BodyWrite},
-    headers::HeaderMap,
+    headers::{HeaderMap, HeaderName, HeaderValue},
     request::Request,
     response::Response,
     service::HttpService,
 };
 
+macro_rules! err {
+    ($variant:ident) => {
+        spec::ProtoError::from(spec::ProtoErrorKind::$variant)
+    };
+}
+
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 pub struct Connection<IO, S, F> {
     io: IoBuffer<IO>,
-    header_map: Option<HeaderMap>,
+    header_map: HeaderMap,
     phase: Phase<F>,
     service: Arc<S>,
 }
 
 type ConnectionProject<'a, IO, F, S> = (
     &'a mut IoBuffer<IO>,
-    &'a mut Option<HeaderMap>,
+    &'a mut HeaderMap,
     Pin<&'a mut Phase<F>>,
     &'a mut Arc<S>,
 );
 
 enum Phase<F> {
     Reqline { is_parse_pending: bool },
-    Header(Option<HttpState>),
+    Header(Option<Reqline>),
     Service(F),
     Drain(Option<Response>),
     Flush(BodyWrite),
@@ -45,7 +51,7 @@ enum Phase<F> {
 
 enum PhaseProject<'a, F> {
     Reqline { is_parse_pending: &'a mut bool },
-    Header(&'a mut Option<HttpState>),
+    Header(&'a mut Option<Reqline>),
     Service(Pin<&'a mut F>),
     Drain(&'a mut Option<Response>),
     Flush(&'a mut BodyWrite),
@@ -58,7 +64,7 @@ where
 {
     pub fn new(io: IO, service: Arc<S>) -> Self {
         Self {
-            header_map: None,
+            header_map: HeaderMap::new(),
             io: IoBuffer::new(io),
             phase: Phase::Reqline { is_parse_pending: false },
             service,
@@ -97,25 +103,27 @@ where
                         }
                     };
 
-                    let state = match header_map.take() {
-                        Some(headers) => {
-                            debug_assert!(headers.is_empty());
-                            HttpState::with_headers(reqline, headers)
-                        },
-                        None => HttpState::new(reqline),
-                    };
-                    phase.set(Phase::Header(Some(state)));
+                    header_map.reserve(16);
+                    phase.set(Phase::Header(Some(reqline)));
                 }
-                PhaseProject::Header(state) => {
+                PhaseProject::Header(reqline) => {
                     // TODO: create custom error type that can generate Response
-
-                    let state_mut = state.as_mut().unwrap();
 
                     loop {
                         let bytes = io.read_buffer_mut();
 
                         match Header::parse_chunk(bytes).into_poll_result()? {
-                            Poll::Ready(Some(header)) => state_mut.insert_header(header)?,
+                            Poll::Ready(Some(mut header)) => {
+                                if header_map.len() >= spec::MAX_HEADERS {
+                                    return Poll::Ready(Err(err!(TooManyHeaders).into()));
+                                }
+
+                                header.name.make_ascii_lowercase();
+                                header_map.append(
+                                    HeaderName::from_slice(header.name)?,
+                                    HeaderValue::from_slice(header.value.freeze())?,
+                                );
+                            },
                             Poll::Ready(None) => break,
                             Poll::Pending => {
                                 // TODO: limit buffer size
@@ -130,8 +138,8 @@ where
 
                     // ===== Service =====
 
-                    let content_len = state_mut.try_content_len()?.unwrap_or(0);
-                    let parts = state.take().unwrap().build_parts()?;
+                    let content_len: u64 = todo!();
+                    let parts = todo!();
                     let body = if io.read_buffer_mut().len() == content_len as usize {
                         // all body have been read, use standalone representation
                         Body::new(io.read_buffer_mut().split())
@@ -170,7 +178,7 @@ where
                     spec::write_response(&parts, io.write_buffer_mut(), body.remaining() as _);
 
                     parts.headers.clear();
-                    header_map.replace(parts.headers);
+                    *header_map = parts.headers;
 
                     phase.set(Phase::Flush(body.into_writer()));
                 }

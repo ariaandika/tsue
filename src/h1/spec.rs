@@ -19,7 +19,7 @@ mod error;
 pub use context::HttpContext;
 pub use error::{ProtoError, ProtoErrorKind};
 
-const MAX_HEADERS: usize = 64;
+pub(crate) const MAX_HEADERS: usize = 64;
 
 macro_rules! err {
     ($variant:ident) => {
