@@ -13,8 +13,10 @@ use crate::{
     uri::HttpScheme,
 };
 
+mod context;
 mod error;
 
+pub use context::HttpContext;
 pub use error::{ProtoError, ProtoErrorKind};
 
 const MAX_HEADERS: usize = 64;
@@ -30,46 +32,6 @@ pub struct HttpState {
     reqline: Reqline,
     headers: HeaderMap,
 }
-
-// Connection - keep-alive, close, upgrades
-//
-//     Upgrade - WebSocket, HTTP/2, etc.
-//
-//     TE - transfer-encoding preferences
-//
-// Body Processing
-//
-//     Transfer-Encoding - chunked, gzip, etc.
-//
-//     Expect - 100-continue handling
-//
-//     Content-Encoding - gzip, deflate, brotli
-//
-//     Content-Type - with boundary for multipart
-//
-// Security & Limits
-//
-//     Cookie - session handling
-//
-//     Authorization - authentication schemes
-//
-//     X-Forwarded-* - proxy handling
-//
-//     Range - partial content requests
-//
-// Protocol Semantics
-//
-//     Host - virtual hosting (you mentioned)
-//
-//     Via - proxy tracing
-//
-//     Cache-Control - caching directives
-//
-// Special Handling
-//
-//     Trailer - trailing headers after chunked body
-//
-//     Priority - HTTP/2/3 stream prioritization
 
 impl HttpState {
     pub fn new(reqline: Reqline) -> Self {

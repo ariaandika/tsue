@@ -11,6 +11,7 @@ pub enum ProtoErrorKind {
     TooManyHeaders,
     InvalidContentLength,
     MissingHost,
+    InvalidConnectionOption,
     HeaderError(HeaderError),
     ParseError(ParseError),
 }
@@ -38,6 +39,7 @@ impl std::fmt::Display for ProtoErrorKind {
             Kind::TooManyHeaders => f.write_str("too many headers"),
             Kind::InvalidContentLength => f.write_str("invalid content length"),
             Kind::MissingHost => f.write_str("missing host header"),
+            Kind::InvalidConnectionOption => f.write_str("invalid connection option"),
             Kind::HeaderError(err) => write!(f, "header error: {err}"),
             Kind::ParseError(err) => write!(f, "parse error: {err}"),
         }
