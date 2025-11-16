@@ -14,18 +14,13 @@ use crate::{
 };
 
 mod context;
+mod body;
 mod error;
 
 pub use context::HttpContext;
-pub use error::{ProtoError, ProtoErrorKind};
+pub use error::ProtoError;
 
 pub(crate) const MAX_HEADERS: usize = 64;
-
-macro_rules! err {
-    ($variant:ident) => {
-        ProtoError::from(ProtoErrorKind::$variant)
-    };
-}
 
 #[derive(Debug)]
 pub struct HttpState {
@@ -44,14 +39,14 @@ impl HttpState {
 
     pub fn insert_header(&mut self, mut header: Header) -> Result<(), ProtoError> {
         if self.headers.len() > MAX_HEADERS {
-            return Err(err!(TooManyHeaders));
+            return Err(ProtoError::TooManyHeaders);
         }
 
         header.value.make_ascii_lowercase();
 
         self.headers.append(
-            HeaderName::from_slice(header.name)?,
-            HeaderValue::from_slice(header.value.freeze())?,
+            HeaderName::from_slice(header.name).expect("TODO"),
+            HeaderValue::from_slice(header.value.freeze()).expect("TODO"),
         );
 
         Ok(())
@@ -61,7 +56,7 @@ impl HttpState {
         match self.headers.get(CONTENT_LENGTH) {
             Some(content_len) => match tcio::atou(content_len.as_bytes()) {
                 Some(ok) => Ok(Some(ok)),
-                None => Err(HeaderError::invalid_value()),
+                None => todo!("to be removed"),
             },
             None => Ok(None),
         }
@@ -70,7 +65,7 @@ impl HttpState {
     pub fn build_parts(self) -> Result<request::Parts, ProtoError> {
         let host = match self.headers.get(HOST) {
             Some(ok) => Bytes::from(ok.clone()),
-            None => return Err(err!(MissingHost)),
+            None => return Err(ProtoError::MissingHost),
         };
         let uri = self.reqline.target.build_origin(host, HttpScheme::HTTP)?;
 
