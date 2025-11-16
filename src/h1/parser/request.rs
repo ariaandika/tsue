@@ -4,12 +4,6 @@ use tcio::bytes::BytesMut;
 use super::{Target, error::ParseError, matches};
 use crate::{http::{Method, Version}, common::ParseResult};
 
-macro_rules! err {
-    ($variant:ident) => {
-        ParseResult::Err(ParseError::from(super::error::ParseErrorKind::$variant))
-    };
-}
-
 const VERSION_SIZE: usize = b"HTTP/1.1".len();
 
 #[derive(Debug)]
@@ -29,6 +23,8 @@ impl Reqline {
 // ===== Request Line =====
 
 fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError> {
+    use ParseResult as Result;
+
     let mut reqline = {
         let mut state = bytes.as_slice();
 
@@ -42,11 +38,11 @@ fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError>
                     state = rest;
                     2
                 },
-                Some(_) => return err!(InvalidSeparator),
-                None => return ParseResult::Pending,
+                Some(_) => return Result::Err(ParseError::InvalidSeparator),
+                None => return Result::Pending,
             },
             b'\n' => 1,
-            _ => return err!(InvalidSeparator),
+            _ => return Result::Err(ParseError::InvalidSeparator),
         };
 
         let mut reqline = bytes.split_to_ptr(state.as_ptr());
@@ -65,7 +61,7 @@ fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError>
                     target = rest;
                     break;
                 } else {
-                    return err!(InvalidMethod);
+                    return Result::Err(ParseError::InvalidMethod);
                 }
             }
             state = rest;
@@ -81,20 +77,20 @@ fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError>
             Some(ok) => {
                 ok
             },
-            _ => return err!(UnknownMethod),
+            _ => return Result::Err(ParseError::UnknownMethod),
         }
     };
 
     let version = {
         let Some(([rest @ .., b' '], version)) = target.split_last_chunk::<VERSION_SIZE>() else {
-            return err!(InvalidSeparator)
+            return Result::Err(ParseError::InvalidSeparator);
         };
 
         target = rest;
 
         match Version::from_bytes(version) {
             Some(ok) => ok,
-            None => return err!(UnsupportedVersion),
+            None => return Result::Err(ParseError::UnsupportedVersion),
         }
     };
 

@@ -10,7 +10,7 @@ pub enum ProtoError {
     MissingHost,
     /// Invalid `Connection` header value.
     InvalidConnectionOption,
-    /// Invalid Content-Length value.
+    /// Invalid or duplicate Content-Length value.
     InvalidContentLength,
     /// Invalid `Transfer-Encoding` header value.
     InvalidCodings,

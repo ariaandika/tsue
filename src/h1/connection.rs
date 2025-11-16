@@ -8,7 +8,7 @@ use tcio::io::{AsyncIoRead, AsyncIoWrite};
 use super::{
     io::IoBuffer,
     parser::{Header, Reqline},
-    spec,
+    spec::{self, ProtoError},
 };
 use crate::{
     body::{Body, BodyWrite},
@@ -17,12 +17,6 @@ use crate::{
     response::Response,
     service::HttpService,
 };
-
-macro_rules! err {
-    ($variant:ident) => {
-        spec::ProtoError::from(spec::ProtoErrorKind::$variant)
-    };
-}
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -115,7 +109,7 @@ where
                         match Header::parse_chunk(bytes).into_poll_result()? {
                             Poll::Ready(Some(mut header)) => {
                                 if header_map.len() >= spec::MAX_HEADERS {
-                                    return Poll::Ready(Err(err!(TooManyHeaders).into()));
+                                    return Poll::Ready(Err(ProtoError::TooManyHeaders.into()));
                                 }
 
                                 header.name.make_ascii_lowercase();

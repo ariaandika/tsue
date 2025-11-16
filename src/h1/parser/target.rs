@@ -1,10 +1,8 @@
 use tcio::bytes::{Bytes, BytesMut};
 
-use super::{ParseError, error::ParseErrorKind};
-use crate::{
-    http::Method,
-    uri::{Host, HttpScheme, HttpUri, Path},
-};
+use super::ParseError;
+use crate::http::Method;
+use crate::uri::{Host, HttpScheme, HttpUri, Path};
 
 #[derive(Debug)]
 pub struct Target {
@@ -52,7 +50,7 @@ impl Target {
             Kind::Absolute => {
                 let uri = HttpUri::from_bytes(self.value)?;
                 if uri.host().as_bytes() == host.as_slice() {
-                    return Err(ParseErrorKind::MissmatchHost.into());
+                    return Err(ParseError::MissmatchHost);
                 }
                 return Ok(uri);
             }
@@ -62,7 +60,7 @@ impl Target {
             }
             Kind::Authority => {
                 if self.value != host {
-                    return Err(ParseErrorKind::MissmatchHost.into());
+                    return Err(ParseError::MissmatchHost);
                 }
                 uri_host = Host::from_bytes(self.value)?;
                 path = Path::from_static(b"");

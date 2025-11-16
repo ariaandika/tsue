@@ -12,12 +12,6 @@ macro_rules! ready {
     };
 }
 
-macro_rules! err {
-    ($variant:ident) => {
-        ParseResult::Err(ParseError::from(super::error::ParseErrorKind::$variant))
-    };
-}
-
 #[derive(Debug)]
 pub struct Header {
     pub name: BytesMut,
@@ -32,19 +26,21 @@ impl Header {
 }
 
 fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, ParseError> {
+    use ParseResult as Result;
+
     let mut cursor = bytes.cursor_mut();
 
     match ready!(cursor.next()) {
         b'\r' => match ready!(cursor.next()) {
             b'\n' => {
                 cursor.advance_buf();
-                return ParseResult::Ok(None);
+                return Result::Ok(None);
             }
-            _ => return err!(InvalidSeparator),
+            _ => return Result::Err(ParseError::InvalidSeparator),
         },
         b'\n' => {
             cursor.advance_buf();
-            return ParseResult::Ok(None);
+            return Result::Ok(None);
         }
         _ => {}
     }
@@ -55,7 +51,7 @@ fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, Parse
         cursor;
         |val,nth| match val {
             b':' => nth,
-            _ => return err!(InvalidHeader),
+            _ => return Result::Err(ParseError::InvalidHeader),
         };
         else {
             return ParseResult::Pending
@@ -64,7 +60,7 @@ fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, Parse
 
     match ready!(cursor.next()) {
         b' ' => { }
-        _ => return err!(InvalidSeparator),
+        _ => return Result::Err(ParseError::InvalidSeparator),
     }
 
     matches::match_header_value!(cursor);
@@ -72,10 +68,10 @@ fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, Parse
     let crlf = match ready!(cursor.next()) {
         b'\r' => match ready!(cursor.next()) {
             b'\n' => 2,
-            _ => return err!(InvalidSeparator),
+            _ => return Result::Err(ParseError::InvalidSeparator),
         },
         b'\n' => 1,
-        _ => return err!(InvalidHeader),
+        _ => return Result::Err(ParseError::InvalidHeader),
     };
 
     let mut line = cursor.split_to();
