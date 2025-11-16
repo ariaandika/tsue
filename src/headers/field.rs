@@ -150,6 +150,10 @@ pub struct GetAll<'a> {
 }
 
 impl<'a> GetAll<'a> {
+    pub(crate) const fn empty() -> Self {
+        Self { entry: None }
+    }
+
     pub(crate) const fn new(field: &'a HeaderField) -> Self {
         Self {
             entry: Some(&field.entry),

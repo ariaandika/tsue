@@ -188,6 +188,8 @@ impl HeaderMap {
 
     /// Returns an iterator to all header values corresponding to the given header name.
     ///
+    /// Note that this is the result of duplicate header fields, *NOT* comma separated list.
+    ///
     /// # Panics
     ///
     /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
@@ -195,11 +197,14 @@ impl HeaderMap {
     /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
     /// constant.
     #[inline]
-    pub fn get_all<K: AsHeaderName>(&self, name: K) -> Option<GetAll<'_>> {
+    pub fn get_all<K: AsHeaderName>(&self, name: K) -> GetAll<'_> {
         if self.is_empty() {
-            return None;
+            return GetAll::empty();
         }
-        self.field(name.as_lowercase_str(), name.hash()).map(GetAll::new)
+        match self.field(name.as_lowercase_str(), name.hash()) {
+            Some(field) => GetAll::new(field),
+            None => GetAll::empty(),
+        }
     }
 
     /// Returns an iterator over headers as name and value pair.
@@ -596,7 +601,7 @@ mod test {
         assert!(map.contains_key("referer"));
         assert!(map.contains_key("rim"));
 
-        let mut all = map.get_all("content-length").unwrap();
+        let mut all = map.get_all("content-length");
         assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("LEN"))));
         assert!(matches!(all.next(), Some(v) if matches!(v.try_as_str(),Ok("BAR"))));
         assert!(all.next().is_none());
