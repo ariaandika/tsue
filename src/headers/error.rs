@@ -10,6 +10,7 @@ enum Kind {
     TooLong,
     InvalidHeaderName,
     InvalidHeaderValue,
+    Duplicate,
     // /// Only when constructing HeaderValue with utf8 promise.
     // NonUtf8HeaderValue,
 }
@@ -42,6 +43,7 @@ impl HeaderError {
             Kind::TooLong => "header too long",
             Kind::InvalidHeaderName => "invalid header name",
             Kind::InvalidHeaderValue => "invalid header value",
+            Kind::Duplicate => "invalid duplicate header",
         }
     }
 

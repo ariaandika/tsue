@@ -154,6 +154,23 @@ impl<'a> GetAll<'a> {
         Self { entry: None }
     }
 
+    /// Returns `Some` if there is only single value for given name in the map.
+    ///
+    /// This method exists because it is common that duplicate header is forbidden.
+    #[inline]
+    pub fn as_single(self) -> Option<&'a HeaderValue> {
+        match self.entry {
+            Some(current) => {
+                if current.next.is_some() {
+                    None
+                } else {
+                    Some(&current.value)
+                }
+            }
+            None => None,
+        }
+    }
+
     pub(crate) const fn new(field: &'a HeaderField) -> Self {
         Self {
             entry: Some(&field.entry),
