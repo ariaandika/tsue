@@ -1,67 +1,42 @@
+use super::HeaderNameError;
+use super::HeaderValueError;
 
-/// Header name/value parsing error.
-pub struct HeaderError {
-    kind: Kind,
-}
-
+/// An error that can occur in header related operations.
 #[derive(Debug)]
-enum Kind {
-    Empty,
-    TooLong,
-    InvalidHeaderName,
-    InvalidHeaderValue,
-    Duplicate,
-    // /// Only when constructing HeaderValue with utf8 promise.
-    // NonUtf8HeaderValue,
+pub enum HeaderError {
+    /// Header name parsing error.
+    Name(HeaderNameError),
+    /// Header value parsing error.
+    Value(HeaderValueError),
 }
 
 impl HeaderError {
-    pub(crate) const fn invalid_name() -> Self {
-        Self {
-            kind: Kind::InvalidHeaderName,
+    pub(crate) const fn message(&self) -> &'static str {
+        match self {
+            Self::Name(err) => err.message(),
+            Self::Value(err) => err.message(),
         }
     }
+}
 
-    pub(crate) const fn invalid_value() -> Self {
-        Self {
-            kind: Kind::InvalidHeaderValue,
-        }
+impl From<HeaderNameError> for HeaderError {
+    #[inline]
+    fn from(v: HeaderNameError) -> Self {
+        Self::Name(v)
     }
+}
 
-    pub(crate) const fn invalid_len(len: usize) -> Self {
-        Self {
-            kind: match len {
-                0 => Kind::Empty,
-                _ => Kind::TooLong,
-            },
-        }
-    }
-
-    pub(crate) const fn msg(&self) -> &'static str {
-        match self.kind {
-            Kind::Empty => "header cannot be empty",
-            Kind::TooLong => "header too long",
-            Kind::InvalidHeaderName => "invalid header name",
-            Kind::InvalidHeaderValue => "invalid header value",
-            Kind::Duplicate => "invalid duplicate header",
-        }
-    }
-
-    pub(crate) const fn panic_const(&self) -> ! {
-        panic!("{}", self.msg())
+impl From<HeaderValueError> for HeaderError {
+    #[inline]
+    fn from(v: HeaderValueError) -> Self {
+        Self::Value(v)
     }
 }
 
 impl std::error::Error for HeaderError {}
 
-impl std::fmt::Debug for HeaderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("HeaderError").field(&self.kind).finish()
-    }
-}
-
 impl std::fmt::Display for HeaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.msg().fmt(f)
+        self.message().fmt(f)
     }
 }

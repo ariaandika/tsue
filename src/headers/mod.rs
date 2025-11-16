@@ -23,8 +23,8 @@ mod iter;
 
 pub mod error;
 
-pub use name::{HeaderName, standard};
-pub use value::HeaderValue;
+pub use name::{HeaderName, HeaderNameError, standard};
+pub use value::{HeaderValue, HeaderValueError};
 pub use field::{HeaderField, GetAll};
 pub use map::{HeaderMap, AsHeaderName, IntoHeaderName};
 pub use iter::Iter;

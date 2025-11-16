@@ -1,15 +1,13 @@
+use std::fmt;
 use tcio::bytes::Bytes;
 
-use super::{matches, error::HeaderError};
+use super::matches;
 
-// HeaderName is optimized towards predefined standard headers
-//
-// Optimized operations is:
-// - validation, must contains valid
-// - hashing, for header map lookup
-//
-// predefined headers skip validation and returns precomputed hash
-// while arbitrary headers must pass validation and compute hashing when required
+// ===== Sections =====
+// Parser
+// Standard Header
+// Error [`HeaderNameError`]
+
 
 /// HTTP Header name.
 ///
@@ -21,6 +19,15 @@ use super::{matches, error::HeaderError};
 /// Normalization requires copying the bytes. If the input is known to not contains uppercase
 /// character, use [`from_bytes_lowercase`][HeaderName::from_bytes_lowercase] that does not incur
 /// copy but returns error instead.
+//
+// HeaderName is optimized towards predefined standard headers
+//
+// Optimized operations is:
+// - validation, must contains valid bytes
+// - hashing, for header map lookup
+//
+// predefined headers skip validation and returns precomputed hash
+// while arbitrary headers must pass validation and compute hash on demand
 #[derive(Clone)]
 pub struct HeaderName {
     repr: Repr,
@@ -68,7 +75,7 @@ impl HeaderName {
     /// Returns error if the input is not a valid header name or contains ASCII uppercase
     /// characters.
     #[inline]
-    pub fn from_bytes_lowercase<B: Into<Bytes>>(name: B) -> Result<Self, HeaderError> {
+    pub fn from_bytes_lowercase<B: Into<Bytes>>(name: B) -> Result<Self, HeaderNameError> {
         let name = name.into();
         match validate_header_name_lowercase(name.as_slice()) {
             Ok(()) => Ok(Self {
@@ -86,7 +93,7 @@ impl HeaderName {
     ///
     /// Returns error if the input is not a valid header name.
     #[inline]
-    pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
+    pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderNameError> {
         copy_as_header_name(name.as_ref())
     }
 
@@ -136,23 +143,28 @@ const MAX_HEADER_NAME_LEN: usize = 1 << 10;  // 1KB
 
 /// token       = 1*tchar
 /// field-name  = token
-const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderError> {
+const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderNameError> {
+    use HeaderNameError as Error;
+
     if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
-        return Err(HeaderError::invalid_len(bytes.len()));
+        return Err(Error::invalid_len(bytes.len()));
     }
     while let [byte, rest @ ..] = bytes {
         if matches::is_token_lowercase(*byte) {
             bytes = rest;
         } else {
-            return Err(HeaderError::invalid_name())
+            return Err(Error::Invalid)
         }
     }
+
     Ok(())
 }
 
-fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
+fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderNameError> {
+    use HeaderNameError as Error;
+
     if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
-        return Err(HeaderError::invalid_len(bytes.len()));
+        return Err(Error::invalid_len(bytes.len()));
     }
     let mut result = 0;
     let mut name = vec![0; bytes.len()];
@@ -168,7 +180,7 @@ fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
         0 => Ok(HeaderName {
                 repr: Repr::Arbitrary(name.into()),
             }),
-        _ => Err(HeaderError::invalid_name()),
+        _ => Err(Error::Invalid),
     }
 }
 
@@ -652,3 +664,46 @@ macro_rules! standard_header {
 }
 
 use standard_header;
+
+// ===== Error =====
+
+/// An error that can occur when parsing [`HeaderName`].
+#[derive(Debug)]
+pub enum HeaderNameError {
+    /// Header name empty.
+    Empty,
+    /// Header name too long.
+    TooLong,
+    /// Header name contains invalid character.
+    Invalid,
+}
+
+impl HeaderNameError {
+    pub(crate) const fn message(&self) -> &'static str {
+        match self {
+            Self::Empty => "cannot be empty",
+            Self::TooLong => "too long",
+            Self::Invalid => "invalid name",
+        }
+    }
+
+    const fn invalid_len(len: usize) -> Self {
+        match len {
+            0 => Self::Empty,
+            _ => Self::TooLong,
+        }
+    }
+
+    const fn panic_const(self) -> ! {
+        panic!("{}",self.message())
+    }
+}
+
+impl std::error::Error for HeaderNameError { }
+
+impl fmt::Display for HeaderNameError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
