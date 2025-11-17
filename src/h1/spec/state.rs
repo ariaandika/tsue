@@ -2,6 +2,7 @@ use tcio::bytes::{Bytes, BytesMut};
 
 use super::ProtoError;
 use crate::h1::parser::{Header, Reqline};
+use crate::h1::spec::{HttpContext, MessageBody};
 use crate::headers::error::HeaderError;
 use crate::headers::standard::{CONTENT_LENGTH, HOST};
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
@@ -50,6 +51,14 @@ impl HttpState {
             },
             None => Ok(None),
         }
+    }
+
+    pub fn build_context(&self) -> Result<HttpContext, ProtoError> {
+        HttpContext::new(&self.reqline, &self.headers)
+    }
+
+    pub fn build_body(&self) -> Result<MessageBody, ProtoError> {
+        MessageBody::new(&self.headers)
     }
 
     pub fn build_parts(self) -> Result<request::Parts, ProtoError> {
