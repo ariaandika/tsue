@@ -1,3 +1,4 @@
+#![deny(clippy::cast_possible_truncation)]
 //! HTTP/1.1 Semantics.
 //!
 //! - [`HttpContext`] per request context
@@ -22,6 +23,6 @@ mod error;
 
 pub(crate) use state::MAX_HEADERS;
 pub use context::HttpContext;
-pub use body::{MessageBody, Coding, Chunked, Encoding};
+pub use body::{MessageBody, Coding, BodyError};
 pub use state::{HttpState, write_response};
 pub use error::ProtoError;

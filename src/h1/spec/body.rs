@@ -1,10 +1,9 @@
-use super::ProtoError;
-use crate::headers::{
-    HeaderMap,
-    standard::{CONTENT_LENGTH, TRANSFER_ENCODING},
-};
+use std::fmt;
+use tcio::bytes::BytesMut;
 
-const MAX_CODING: usize = 4;
+use super::ProtoError;
+use crate::headers::HeaderMap;
+use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
 
 #[derive(Debug)]
 pub struct MessageBody {
@@ -13,89 +12,27 @@ pub struct MessageBody {
 
 #[derive(Clone, Debug)]
 pub enum Coding {
-    None,
-    Chunked(Chunked),
-    ContentLength(u64),
-}
-
-#[derive(Clone, Debug)]
-pub struct Chunked {
-    slots: [Encoding; MAX_CODING],
-    len: u8,
-}
-
-/// www.rfc-editor.org/rfc/rfc9110.html#name-content-codings
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Encoding {
+    Empty,
     Chunked,
-    Compress,
-    Deflate,
-    Gzip,
-}
-
-impl Encoding {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let mut buffer = [0u8; 8];
-        buffer.get_mut(..bytes.len())?.copy_from_slice(bytes);
-        buffer.make_ascii_lowercase();
-        match &buffer {
-            b"chunked\0" => Some(Self::Chunked),
-            b"compress" => Some(Self::Compress),
-            b"deflate\0" => Some(Self::Deflate),
-            b"gzip\0\0\0\0" => Some(Self::Gzip),
-            _ => None
-        }
-    }
-}
-
-impl Chunked {
-    const fn new() -> Self {
-        Self {
-            slots: [Encoding::Chunked; MAX_CODING],
-            len: 0,
-        }
-    }
-
-    fn push(&mut self, encoding: Encoding) -> Option<()> {
-        let slot_mut = self.slots.get_mut(self.len as usize)?;
-        *slot_mut = encoding;
-        self.len += 1;
-        Some(())
-    }
-
-    fn as_slice(&self) -> &[Encoding] {
-        unsafe { std::slice::from_raw_parts(self.slots.as_ptr(), self.len as usize) }
-    }
+    ContentLength(u64),
 }
 
 impl MessageBody {
     pub fn new(headers: &HeaderMap) -> Result<Self, ProtoError> {
         let mut content_lengths = headers.get_all(CONTENT_LENGTH);
-        let transfer_encodings = headers.get_all(TRANSFER_ENCODING);
+        let mut transfer_encodings = headers.get_all(TRANSFER_ENCODING);
 
         let coding = match (content_lengths.next(), transfer_encodings.has_remaining()) {
             (None, false) => Coding::ContentLength(0),
             (None, true) => {
-                let mut chunked = Chunked::new();
+                // TODO: support compressed transfer-encodings
 
-                for encoding in transfer_encodings
-                    .flat_map(|e| e.as_bytes().split(|&e| e == b','))
-                    .map(<[u8]>::trim_ascii)
-                {
-                    let Some(encoding) = Encoding::from_bytes(encoding) else {
-                        return Err(ProtoError::InvalidCodings);
-                    };
-                    let Some(()) = chunked.push(encoding) else {
-                        return Err(ProtoError::TooManyEncodings);
-                    };
+                let ok = transfer_encodings.all(|e|e.as_bytes().eq_ignore_ascii_case(b"chunked"));
+                if !ok {
+                    return Err(ProtoError::UnknownCodings);
                 }
 
-                match chunked.as_slice().last() {
-                    Some(encoding) if encoding == &Encoding::Chunked => {}
-                    None | Some(_) => return Err(ProtoError::InvalidCodings),
-                }
-
-                Coding::Chunked(chunked)
+                Coding::Chunked
             }
             (Some(length), false) => {
                 if content_lengths.has_remaining() {
@@ -109,6 +46,63 @@ impl MessageBody {
             (Some(_), true) => return Err(ProtoError::InvalidCodings),
         };
         Ok(Self { coding })
+    }
+
+    pub(crate) fn read_chunk(&mut self, buffer: &mut BytesMut) -> Result<BytesMut, BodyError> {
+        match &mut self.coding {
+            Coding::Empty => Err(BodyError::Exhausted),
+            Coding::Chunked => todo!(),
+            Coding::ContentLength(remaining_mut) => {
+                let remaining = *remaining_mut;
+                match remaining.checked_sub(buffer.len() as u64) {
+                    // buffer contains exact or larger than expected content
+                    None | Some(0) => {
+                        self.coding = Coding::Empty;
+                        #[allow(
+                            clippy::cast_possible_truncation,
+                            reason = "remaining <= buffer.len() which is usize"
+                        )]
+                        Ok(buffer.split_to(remaining as usize))
+                    }
+                    // buffer does not contains all expected content
+                    Some(leftover) => {
+                        *remaining_mut = leftover;
+                        Ok(buffer.split())
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ===== Error =====
+
+/// A semantic error when reading message body.
+#[derive(Debug)]
+pub enum BodyError {
+    /// User error where it tries to read empty body.
+    Exhausted,
+    /// Client error where chunked format is invalid.
+    InvalidChunked,
+    /// Client error where chunked length is too large.
+    ChunkTooLarge,
+}
+
+impl BodyError {
+    const fn message(&self) -> &'static str {
+        match self {
+            Self::Exhausted => "message body exhausted",
+            Self::InvalidChunked => "invalid chunked format",
+            Self::ChunkTooLarge => "chunk too large",
+        }
+    }
+}
+
+impl std::error::Error for BodyError { }
+
+impl fmt::Display for BodyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.message())
     }
 }
 

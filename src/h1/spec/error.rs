@@ -12,8 +12,10 @@ pub enum ProtoError {
     InvalidConnectionOption,
     /// Invalid or duplicate Content-Length value.
     InvalidContentLength,
-    /// Invalid `Transfer-Encoding` header value.
+    /// Invalid message body codings.
     InvalidCodings,
+    /// Unknown or unsupported `Transfer-Encoding` codings.
+    UnknownCodings,
     /// Too many `Transfer-Encoding` values.
     TooManyEncodings,
     /// Header parsing error.
@@ -32,6 +34,7 @@ impl std::fmt::Display for ProtoError {
             Self::MissingHost => f.write_str("missing host header"),
             Self::InvalidConnectionOption => f.write_str("invalid connection option"),
             Self::InvalidCodings => f.write_str("invalid message body codings"),
+            Self::UnknownCodings => f.write_str("unknown or unsupported message body codings"),
             Self::TooManyEncodings => f.write_str("too many chunked encodings"),
             Self::HeaderError(err) => write!(f, "header error: {err}"),
             Self::ParseError(err) => write!(f, "parse error: {err}"),
