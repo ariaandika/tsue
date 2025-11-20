@@ -1,7 +1,9 @@
 use std::fmt;
+use std::task::Poll;
 use tcio::bytes::BytesMut;
 
 use super::ProtoError;
+use super::chunked::ChunkedDecoder;
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
 
@@ -13,7 +15,7 @@ pub struct MessageBody {
 #[derive(Clone, Debug)]
 pub enum Coding {
     Empty,
-    Chunked,
+    Chunked(ChunkedDecoder),
     ContentLength(u64),
 }
 
@@ -32,7 +34,7 @@ impl MessageBody {
                     return Err(ProtoError::UnknownCodings);
                 }
 
-                Coding::Chunked
+                Coding::Chunked(ChunkedDecoder::new())
             }
             (Some(length), false) => {
                 if content_lengths.has_remaining() {
@@ -48,10 +50,11 @@ impl MessageBody {
         Ok(Self { coding })
     }
 
-    pub(crate) fn read_chunk(&mut self, buffer: &mut BytesMut) -> Result<BytesMut, BodyError> {
+    /// Returns Poll::Pending if more data read is required.
+    pub(crate) fn poll_read(&mut self, buffer: &mut BytesMut) -> Poll<Result<Option<BytesMut>, BodyError>> {
         match &mut self.coding {
-            Coding::Empty => Err(BodyError::Exhausted),
-            Coding::Chunked => todo!(),
+            Coding::Empty => Poll::Ready(Err(BodyError::Exhausted)),
+            Coding::Chunked(decoder) => decoder.poll_chunk(buffer),
             Coding::ContentLength(remaining_mut) => {
                 let remaining = *remaining_mut;
                 match remaining.checked_sub(buffer.len() as u64) {
@@ -62,12 +65,12 @@ impl MessageBody {
                             clippy::cast_possible_truncation,
                             reason = "remaining <= buffer.len() which is usize"
                         )]
-                        Ok(buffer.split_to(remaining as usize))
+                        Poll::Ready(Ok(Some(buffer.split_to(remaining as usize))))
                     }
                     // buffer does not contains all expected content
                     Some(leftover) => {
                         *remaining_mut = leftover;
-                        Ok(buffer.split())
+                        Poll::Ready(Ok(Some(buffer.split())))
                     }
                 }
             }
