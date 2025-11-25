@@ -8,5 +8,4 @@
 pub mod parser;
 pub mod spec;
 pub mod io;
-pub mod io_v2;
 pub mod connection;
