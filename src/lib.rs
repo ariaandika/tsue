@@ -56,6 +56,7 @@ pub mod body;
 
 // HTTP protocol
 pub mod h1;
+pub mod h2;
 
 // user abstraction
 pub mod service;
