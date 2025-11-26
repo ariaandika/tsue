@@ -3,14 +3,21 @@
 // in the future i would like to explore more different approach
 use std::io::BufRead;
 
+#[derive(Debug)]
 enum Tree {
     Branch(Branch),
     Leaf(Leaf),
 }
 
+#[derive(Debug)]
 struct Branch {
     left: Option<Box<Tree>>,
     right: Option<Box<Tree>>,
+}
+
+#[derive(Debug)]
+struct Leaf {
+    byte: u8,
 }
 
 impl Branch {
@@ -19,27 +26,27 @@ impl Branch {
     }
 }
 
-struct Leaf {
-    byte: u8,
-}
-
 impl Tree {
     fn new() -> Self {
         Self::Branch(Branch { left: None, right: None })
     }
 
     fn get_branch_left(&mut self) -> &mut Tree {
-        let Self::Branch(branch) = self else {
+        let Tree::Branch(branch) = self else {
             panic!("conflicting leaf")
         };
-        branch.left.get_or_insert_with(||Box::new(Self::Branch(Branch::new())))
+        let left = branch.left.get_or_insert_with(||Box::new(Self::Branch(Branch::new())));
+        assert!(left.is_branch());
+        left
     }
 
     fn get_branch_right(&mut self) -> &mut Tree {
-        let Self::Branch(branch) = self else {
+        let Tree::Branch(branch) = self else {
             panic!("conflicting leaf")
         };
-        branch.right.get_or_insert_with(||Box::new(Self::Branch(Branch::new())))
+        let right = branch.right.get_or_insert_with(||Box::new(Self::Branch(Branch::new())));
+        assert!(right.is_branch());
+        right
     }
 
     fn replace_as_leaf(&mut self, leaf: Leaf) {
@@ -47,10 +54,14 @@ impl Tree {
             panic!("conflicting leaf");
         };
         assert!(branch.left.is_none() && branch.right.is_none(), "conflicting leaf");
-
         *self = Self::Leaf(leaf);
     }
 
+    fn is_branch(&self) -> bool {
+        matches!(self, Self::Branch(..))
+    }
+
+    #[cfg(test)]
     fn assert_branch_left(&self) -> &Tree {
         let Self::Branch(branch) = self else {
             panic!("conflicting leaf")
@@ -58,6 +69,7 @@ impl Tree {
         branch.left.as_ref().unwrap()
     }
 
+    #[cfg(test)]
     fn assert_branch_right(&self) -> &Tree {
         let Self::Branch(branch) = self else {
             panic!("conflicting leaf")
@@ -65,19 +77,43 @@ impl Tree {
         branch.right.as_ref().unwrap()
     }
 
+    #[cfg(test)]
     fn assert_leaf(&self) -> &Leaf {
         let Self::Leaf(leaf) = self else {
-            panic!("conflicting leaf")
+            panic!("expected leaf, found branch")
         };
         leaf
+    }
+
+    #[allow(unused)]
+    fn debug_print(&self, buffer: &mut Vec<u8>) {
+        match self {
+            Tree::Branch(branch) => {
+                buffer.push(b'0');
+                if let Some(left_tree) = branch.left.as_deref() {
+                    left_tree.debug_print(buffer);
+                }
+                *buffer.last_mut().unwrap() = b'1';
+                if let Some(right_tree) = branch.right.as_deref() {
+                    right_tree.debug_print(buffer);
+                }
+                buffer.remove(buffer.len() - 1);
+            }
+            Tree::Leaf(leaf) => {
+                print!("{: <32}",str::from_utf8(buffer).unwrap());
+                println!("{}",leaf.byte);
+            }
+        }
     }
 }
 
 fn main() {
-    gen_decoder();
+    let tree = gen_decoder();
+    let mut buffer = Vec::new();
+    tree.debug_print(&mut buffer);
 }
 
-fn gen_decoder() {
+fn gen_decoder() -> Tree {
     let mut root = Tree::new();
 
     let lines = TABLE_STRING.lines().skip(1).map(Result::unwrap);
@@ -85,12 +121,7 @@ fn gen_decoder() {
     for line in lines {
         let mut current = &mut root;
 
-        // 15..49 is the bits column
-        //
-        // 48 is included so that space is detected as end of bits
-        let bits = &line.as_bytes()[15..49];
-
-        for byte in bits {
+        for byte in &line.as_bytes()[14..48] {
             match byte {
                 b'0' => {
                     current = current.get_branch_left();
@@ -98,40 +129,41 @@ fn gen_decoder() {
                 b'1' => {
                     current = current.get_branch_right();
                 }
-                b' ' => {
-                    if &line[8..11] == "256" {
-                        // TODO: handle EOS
-                        break;
-                    }
-                    current.replace_as_leaf(Leaf {
-                        byte: line[8..11].trim_start().parse().unwrap(),
-                    });
-                    break
-                }
-                b'|' => {}
+                b'|' | b' ' => {}
                 _ => panic!("invalid byte in bit column")
             }
         }
+
+        if &line[8..11] == "256" {
+            // TODO: handle EOS
+            continue;
+        }
+
+        assert_eq!(line.as_bytes()[48], b' ');
+        current.replace_as_leaf(Leaf {
+            byte: line[8..11].trim_start().parse().unwrap(),
+        });
     }
 
-    test(root);
+    root
 }
 
-fn test(tree: Tree) {
+#[test]
+fn test() {
     const TEST_BITS: &[u8] = b"111111111111100";
     const TEST_VALUE: u8 = b'<';
+
+    let tree = gen_decoder();
     let mut current = &tree;
+
     for bit in TEST_BITS {
         current = match bit {
-            b'0' => tree.assert_branch_left(),
-            b'1' => tree.assert_branch_right(),
-            b' ' => {
-                assert_eq!(current.assert_leaf().byte, TEST_VALUE);
-                break;
-            }
+            b'0' => current.assert_branch_left(),
+            b'1' => current.assert_branch_right(),
             _ => unreachable!()
         }
     }
+    assert_eq!(current.assert_leaf().byte, TEST_VALUE);
 }
 
 /// https://www.rfc-editor.org/rfc/rfc7541.html#appendix-B
