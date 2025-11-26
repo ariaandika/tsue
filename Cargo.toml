@@ -17,4 +17,4 @@ itoa = "1.0.15"
 log = ["dep:log"]
 
 [workspace]
-members = [".", "example"]
+members = [".", "codegen", "example"]
