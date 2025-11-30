@@ -1,121 +1,11 @@
 // This codegen is fully inspired by the h2 crate
 //
 // in the future i would like to explore more different approach
-use std::io::BufRead;
+use huffman::Table;
+use tree::{Tree, Leaf};
 
-use self::helper::Table;
-
-#[derive(Debug)]
-enum Tree {
-    Branch(Branch),
-    Leaf(Leaf),
-}
-
-#[derive(Debug)]
-struct Branch {
-    left: Option<Box<Tree>>,
-    right: Option<Box<Tree>>,
-}
-
-#[derive(Debug)]
-struct Leaf {
-    byte: u8,
-}
-
-impl Branch {
-    fn new() -> Self {
-        Self { left: None, right: None }
-    }
-}
-
-impl Tree {
-    fn new() -> Self {
-        Self::Branch(Branch { left: None, right: None })
-    }
-
-    fn get_branch_left(&mut self) -> &mut Tree {
-        let Tree::Branch(branch) = self else {
-            panic!("conflicting leaf")
-        };
-        let left = branch.left.get_or_insert_with(||Box::new(Self::Branch(Branch::new())));
-        assert!(left.is_branch());
-        left
-    }
-
-    fn get_branch_right(&mut self) -> &mut Tree {
-        let Tree::Branch(branch) = self else {
-            panic!("conflicting leaf")
-        };
-        let right = branch.right.get_or_insert_with(||Box::new(Self::Branch(Branch::new())));
-        assert!(right.is_branch());
-        right
-    }
-
-    fn replace_as_leaf(&mut self, leaf: Leaf) {
-        let Self::Branch(branch) = self else {
-            panic!("conflicting leaf");
-        };
-        assert!(branch.left.is_none() && branch.right.is_none(), "conflicting leaf");
-        *self = Self::Leaf(leaf);
-    }
-
-    fn is_branch(&self) -> bool {
-        matches!(self, Self::Branch(..))
-    }
-
-    fn get(&self, bits: &[bool]) -> &Leaf {
-        let mut current = self;
-        for bit in bits {
-            current = match bit {
-                false => current.assert_branch_left(),
-                true => current.assert_branch_right(),
-            }
-        }
-        current.assert_leaf()
-    }
-
-    fn assert_branch_left(&self) -> &Tree {
-        let Self::Branch(branch) = self else {
-            panic!("conflicting leaf")
-        };
-        branch.left.as_ref().unwrap()
-    }
-
-    fn assert_branch_right(&self) -> &Tree {
-        let Self::Branch(branch) = self else {
-            panic!("conflicting leaf")
-        };
-        branch.right.as_ref().unwrap()
-    }
-
-    fn assert_leaf(&self) -> &Leaf {
-        let Self::Leaf(leaf) = self else {
-            panic!("expected leaf, found branch")
-        };
-        leaf
-    }
-
-    #[allow(unused)]
-    fn debug_print(&self, buffer: &mut Vec<u8>) {
-        match self {
-            Tree::Branch(branch) => {
-                buffer.push(b'0');
-                if let Some(left_tree) = branch.left.as_deref() {
-                    left_tree.debug_print(buffer);
-                }
-                *buffer.last_mut().unwrap() = b'1';
-                if let Some(right_tree) = branch.right.as_deref() {
-                    right_tree.debug_print(buffer);
-                }
-                buffer.remove(buffer.len() - 1);
-            }
-            Tree::Leaf(leaf) => {
-                print!("{: <32}",str::from_utf8(buffer).unwrap());
-                println!("{}",leaf.byte);
-            }
-        }
-    }
-}
+mod huffman;
+mod tree;
 
 struct DecodeTable {
     entries: Vec<[Entry; 16]>,
@@ -126,6 +16,7 @@ struct Entry {
     next_state: Option<usize>,
     byte: u8,
     flags: u8,
+    mutated: bool,
 }
 
 const FLAG_MAYBE_EOS: u8    = 0b001;
@@ -140,6 +31,7 @@ impl Entry {
                 next_state: None,
                 byte: 0,
                 flags: FLAG_ERROR,
+                mutated: false,
             });
         }
         entries.try_into().unwrap()
@@ -169,10 +61,10 @@ impl DecodeTable {
 
     fn debug_print(&self) {
         println!("[{}]",self.entries.len());
-        for (i, entries) in self.entries[..6].iter().enumerate() {
+        for (i, entries) in self.entries.iter().enumerate()/* .skip(28) *//* .take(5) */ {
             println!("{i} [");
-            for (i, Entry { next_state, byte, flags }) in entries.iter().enumerate() {
-                print!("  [0b{:0>4b}] next_state: {next_state:?},",i);
+            for (i, Entry { next_state, byte, flags, mutated }) in entries.iter().enumerate() {
+                print!("  [0b{:0>4b};{mutated}] next_state: {next_state:?},",i);
                 print!("  flags: 0b{flags:0>3b}");
                 print!("  byte: {:?},", *byte as char);
                 println!();
@@ -194,34 +86,23 @@ fn main() {
 
 fn gen_tree() -> Tree {
     let mut root = Tree::new();
+    let table = Table::new(TABLE_STRING);
 
-    let lines = TABLE_STRING.lines().skip(1).map(Result::unwrap);
-
-    for line in lines {
+    for table_entry in table {
         let mut current = &mut root;
 
-        for byte in &line.as_bytes()[15..48] {
-            match byte {
-                b'0' => {
-                    current = current.get_branch_left();
-                }
-                b'1' => {
-                    current = current.get_branch_right();
-                }
-                b'|' | b' ' => {}
-                _ => panic!("invalid byte in bit column")
+        for bit in table_entry.bits() {
+            match bit {
+                false => current = current.left_branch(),
+                true => current = current.right_branch(),
             }
         }
 
-        if &line[8..11] == "256" {
-            // TODO: handle EOS
+        let Some(byte) = table_entry.byte() else {
+            // EOS
             continue;
-        }
-
-        assert_eq!(line.as_bytes()[48], b' ');
-        current.replace_as_leaf(Leaf {
-            byte: line[8..11].trim_start().parse().unwrap(),
-        });
+        };
+        current.replace_as_leaf(Leaf::new(byte));
     }
 
     root
@@ -232,10 +113,23 @@ fn gen_decode_table() -> DecodeTable {
 
     // first id of decode table is filled
     // let mut id = 2;
-    let table = Table::new();
+    let table = Table::new(TABLE_STRING);
+
+    // # 1
+    // 1. generate trees from original bits
+    // 2. create variant with original bits right shifted
+    //
+    // cons: will generate dead branch
+    //
+    // add step for dead branch elimination ?
+
+    // # 2
+    // 1. generate trees from original bits
+    // 2. on the last remain bits, generate all possible remaining bits
+    //
+    // how to known what bits value may represent for the remain bits ?
 
     for entry in table {
-        // currently only bits that have no remaining previous bits is calculated
         let Some(byte) = entry.byte() else {
             // EOS
             continue;
@@ -254,6 +148,7 @@ fn gen_decode_table() -> DecodeTable {
         let last_state = decode.len();
         let first_entry = decode.first_mut();
         let decode_entry = &mut first_entry[bits as usize];
+        decode_entry.mutated = true;
         decode_entry.flags &= !FLAG_ERROR;
 
         let mut next_state = match decode_entry.next_state {
@@ -264,7 +159,7 @@ fn gen_decode_table() -> DecodeTable {
                 last_state
             }
         };
-        let mut remaining_bits = bits_len.strict_sub(4);
+        let mut remaining_bits_len = bits_len.strict_sub(4);
 
         // next 1-4 bit chunk
         loop {
@@ -287,19 +182,45 @@ fn gen_decode_table() -> DecodeTable {
             }
 
             let decode_entry = &mut current_entries[id as usize];
+            decode_entry.mutated = true;
             decode_entry.flags &= !FLAG_ERROR;
 
-            if remaining_bits <= 4 {
+            if remaining_bits_len <= 4 {
                 decode_entry.byte = byte;
                 decode_entry.flags |= FLAG_DECODED;
-                let eos_bits = 0b1111 >> remaining_bits;
-                if (id | eos_bits) == eos_bits {
-                    decode_entry.flags |= FLAG_MAYBE_EOS;
-                }
+
+                let eos_bits = 0b1111 >> remaining_bits_len;
+                assert_eq!(id & eos_bits, 0);
+
+                // note that if the remaining_bits is 4,
+                // EOS will be true, and this is correct
+                //
+                // MAYBE_EOS flag determine whether this is maybe the last coded value,
+                // not just about is there any EOS bits
+                // if (id & eos_bits) == eos_bits {
+                //     decode_entry.flags |= FLAG_MAYBE_EOS;
+                // }
+                // let remain_bits = id | eos_bits;
+                // if remaining_bits_len == 4 {
+                //     assert!(decode_entry.next_state.replace(0).is_none());
+                //
+                // } else {
+                //     // currently only bits that have no remaining previous bits is calculated
+                //     let variants = BitVariant::new(id, remaining_bits_len);
+                //     for id_variant in variants {
+                //         let decode_entry = &mut current_entries[id as usize];
+                //         decode_entry.mutated = true;
+                //         decode_entry.flags &= !FLAG_ERROR;
+                //     }
+                // }
+
                 break;
             }
 
-            remaining_bits = remaining_bits.strict_sub(4);
+            assert_eq!(decode_entry.byte, 0);
+            assert_eq!(decode_entry.flags & FLAG_DECODED, 0);
+
+            remaining_bits_len = remaining_bits_len.strict_sub(4);
             next_state = match decode_entry.next_state {
                 Some(ok) => ok,
                 None => {
@@ -326,18 +247,22 @@ fn test() {
 
     for bit in TEST_BITS {
         current = match bit {
-            b'0' => current.assert_branch_left(),
-            b'1' => current.assert_branch_right(),
+            b'0' => current.assert_left_branch(),
+            b'1' => current.assert_right_branch(),
             _ => unreachable!()
         }
     }
-    assert_eq!(current.assert_leaf().byte, TEST_VALUE);
+    assert_eq!(current.assert_leaf().byte(), TEST_VALUE);
 }
 
-// ===== Helpers =====
+// ===== Sources =====
+
+const BYTE_RANGE: std::ops::Range<usize> = 8..11;
+const BITS_RANGE: std::ops::Range<usize> = 15..49;
+const BITS_LEN_RANGE: std::ops::Range<usize> = 65..67;
 
 /// https://www.rfc-editor.org/rfc/rfc7541.html#appendix-B
-const TABLE_STRING: &[u8] = br##"
+const TABLE_STRING: &str = r##"
        (  0)  |11111111|11000                             1ff8  [13]
        (  1)  |11111111|11111111|1011000                7fffd8  [23]
        (  2)  |11111111|11111111|11111110|0010         fffffe2  [28]
@@ -595,60 +520,3 @@ const TABLE_STRING: &[u8] = br##"
        (254)  |11111111|11111111|11111110|000          7fffff0  [27]
        (255)  |11111111|11111111|11111011|10           3ffffee  [26]
    EOS (256)  |11111111|11111111|11111111|111111      3fffffff  [30]"##;
-
-
-mod helper {
-    use std::io::BufRead;
-
-    pub struct Table {
-        iter: Box<dyn Iterator<Item = Vec<u8>>>,
-    }
-
-    #[derive(Clone)]
-    pub struct TableEntry {
-        line: Vec<u8>,
-    }
-
-    impl TableEntry {
-        fn new(line: Vec<u8>) -> Self {
-            Self { line }
-        }
-
-        pub fn bits_len(&self) -> usize {
-            str::from_utf8(self.line[65..67].trim_ascii_start()).unwrap().parse().unwrap()
-        }
-
-        pub fn bits(&self) -> impl Iterator<Item = bool> {
-            self.line[15..49].iter().filter_map(|b| match b {
-                b'0' | b'1' => Some(matches!(b, b'1')),
-                b'|' | b' ' => None,
-                _ => panic!("invalid byte in bit column"),
-            })
-        }
-
-        pub fn byte(&self) -> Option<u8> {
-            str::from_utf8(&self.line[8..11]).unwrap().parse().ok()
-        }
-    }
-
-    impl Table {
-        pub fn new() -> Self {
-            Self {
-                iter: Box::new(
-                    super::TABLE_STRING
-                        .lines()
-                        .skip(1)
-                        .map(|e| e.unwrap().into_bytes()),
-                ),
-            }
-        }
-    }
-
-    impl Iterator for Table {
-        type Item = TableEntry;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.iter.next().map(TableEntry::new)
-        }
-    }
-}
