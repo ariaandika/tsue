@@ -3,6 +3,8 @@
 // in the future i would like to explore more different approach
 use std::io::BufRead;
 
+use self::helper::Table;
+
 #[derive(Debug)]
 enum Tree {
     Branch(Branch),
@@ -61,7 +63,17 @@ impl Tree {
         matches!(self, Self::Branch(..))
     }
 
-    #[cfg(test)]
+    fn get(&self, bits: &[bool]) -> &Leaf {
+        let mut current = self;
+        for bit in bits {
+            current = match bit {
+                false => current.assert_branch_left(),
+                true => current.assert_branch_right(),
+            }
+        }
+        current.assert_leaf()
+    }
+
     fn assert_branch_left(&self) -> &Tree {
         let Self::Branch(branch) = self else {
             panic!("conflicting leaf")
@@ -69,7 +81,6 @@ impl Tree {
         branch.left.as_ref().unwrap()
     }
 
-    #[cfg(test)]
     fn assert_branch_right(&self) -> &Tree {
         let Self::Branch(branch) = self else {
             panic!("conflicting leaf")
@@ -77,7 +88,6 @@ impl Tree {
         branch.right.as_ref().unwrap()
     }
 
-    #[cfg(test)]
     fn assert_leaf(&self) -> &Leaf {
         let Self::Leaf(leaf) = self else {
             panic!("expected leaf, found branch")
@@ -107,13 +117,82 @@ impl Tree {
     }
 }
 
-fn main() {
-    let tree = gen_decoder();
-    let mut buffer = Vec::new();
-    tree.debug_print(&mut buffer);
+struct DecodeTable {
+    entries: Vec<[Entry; 16]>,
 }
 
-fn gen_decoder() -> Tree {
+#[derive(Clone, Debug)]
+struct Entry {
+    next_state: Option<usize>,
+    byte: u8,
+    flags: u8,
+}
+
+const FLAG_MAYBE_EOS: u8    = 0b001;
+const FLAG_DECODED: u8      = 0b010;
+const FLAG_ERROR: u8        = 0b100;
+
+impl Entry {
+    fn new_entries() -> [Self; 16] {
+        let mut entries = Vec::with_capacity(16);
+        for _ in 0..16 {
+            entries.push(Self {
+                next_state: None,
+                byte: 0,
+                flags: FLAG_ERROR,
+            });
+        }
+        entries.try_into().unwrap()
+    }
+}
+
+impl DecodeTable {
+    fn new() -> Self {
+        Self { entries: vec![Entry::new_entries()] }
+    }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn first_mut(&mut self) -> &mut [Entry; 16] {
+        self.entries.first_mut().unwrap()
+    }
+
+    fn entries_mut(&mut self, state: usize) -> &mut [Entry; 16] {
+        &mut self.entries[state]
+    }
+
+    fn push_entry(&mut self) {
+        self.entries.push(Entry::new_entries());
+    }
+
+    fn debug_print(&self) {
+        println!("[{}]",self.entries.len());
+        for (i, entries) in self.entries[..6].iter().enumerate() {
+            println!("{i} [");
+            for (i, Entry { next_state, byte, flags }) in entries.iter().enumerate() {
+                print!("  [0b{:0>4b}] next_state: {next_state:?},",i);
+                print!("  flags: 0b{flags:0>3b}");
+                print!("  byte: {:?},", *byte as char);
+                println!();
+            }
+            println!("]");
+        }
+    }
+}
+
+fn main() {
+    let tree = gen_tree();
+    let mut buffer = Vec::new();
+    if std::env::var("DEBUG_PRINT").is_ok() {
+        tree.debug_print(&mut buffer);
+    }
+    let decode_table = gen_decode_table();
+    decode_table.debug_print();
+}
+
+fn gen_tree() -> Tree {
     let mut root = Tree::new();
 
     let lines = TABLE_STRING.lines().skip(1).map(Result::unwrap);
@@ -121,7 +200,7 @@ fn gen_decoder() -> Tree {
     for line in lines {
         let mut current = &mut root;
 
-        for byte in &line.as_bytes()[14..48] {
+        for byte in &line.as_bytes()[15..48] {
             match byte {
                 b'0' => {
                     current = current.get_branch_left();
@@ -148,12 +227,101 @@ fn gen_decoder() -> Tree {
     root
 }
 
+fn gen_decode_table() -> DecodeTable {
+    let mut decode = DecodeTable::new();
+
+    // first id of decode table is filled
+    // let mut id = 2;
+    let table = Table::new();
+
+    for entry in table {
+        // currently only bits that have no remaining previous bits is calculated
+        let Some(byte) = entry.byte() else {
+            // EOS
+            continue;
+        };
+        let mut bits_iter = entry.bits();
+        let bits_len = entry.bits_len();
+        let mut bits = 0u8;
+
+        // first 4 bit
+        bits |= (bits_iter.next().unwrap() as u8) << 3;
+        bits |= (bits_iter.next().unwrap() as u8) << 2;
+        bits |= (bits_iter.next().unwrap() as u8) << 1;
+        bits |= bits_iter.next().unwrap() as u8;
+
+        // store first 4 bit
+        let last_state = decode.len();
+        let first_entry = decode.first_mut();
+        let decode_entry = &mut first_entry[bits as usize];
+        decode_entry.flags &= !FLAG_ERROR;
+
+        let mut next_state = match decode_entry.next_state {
+            Some(ok) => ok,
+            None => {
+                decode_entry.next_state = Some(last_state);
+                decode.push_entry();
+                last_state
+            }
+        };
+        let mut remaining_bits = bits_len.strict_sub(4);
+
+        // next 1-4 bit chunk
+        loop {
+            let last_state = decode.len();
+            let current_entries = decode.entries_mut(next_state);
+
+            let mut id = 0u8;
+
+            if let Some(bit) = bits_iter.next() {
+                id |= (bit as u8) << 3;
+            }
+            if let Some(bit) = bits_iter.next() {
+                id |= (bit as u8) << 2;
+            }
+            if let Some(bit) = bits_iter.next() {
+                id |= (bit as u8) << 1;
+            }
+            if let Some(bit) = bits_iter.next() {
+                id |= bit as u8;
+            }
+
+            let decode_entry = &mut current_entries[id as usize];
+            decode_entry.flags &= !FLAG_ERROR;
+
+            if remaining_bits <= 4 {
+                decode_entry.byte = byte;
+                decode_entry.flags |= FLAG_DECODED;
+                let eos_bits = 0b1111 >> remaining_bits;
+                if (id | eos_bits) == eos_bits {
+                    decode_entry.flags |= FLAG_MAYBE_EOS;
+                }
+                break;
+            }
+
+            remaining_bits = remaining_bits.strict_sub(4);
+            next_state = match decode_entry.next_state {
+                Some(ok) => ok,
+                None => {
+                    decode_entry.next_state = Some(last_state);
+                    decode.push_entry();
+                    last_state
+                }
+            };
+        }
+
+        // ..
+    }
+
+    decode
+}
+
 #[test]
 fn test() {
     const TEST_BITS: &[u8] = b"111111111111100";
     const TEST_VALUE: u8 = b'<';
 
-    let tree = gen_decoder();
+    let tree = gen_tree();
     let mut current = &tree;
 
     for bit in TEST_BITS {
@@ -165,6 +333,8 @@ fn test() {
     }
     assert_eq!(current.assert_leaf().byte, TEST_VALUE);
 }
+
+// ===== Helpers =====
 
 /// https://www.rfc-editor.org/rfc/rfc7541.html#appendix-B
 const TABLE_STRING: &[u8] = br##"
@@ -426,3 +596,59 @@ const TABLE_STRING: &[u8] = br##"
        (255)  |11111111|11111111|11111011|10           3ffffee  [26]
    EOS (256)  |11111111|11111111|11111111|111111      3fffffff  [30]"##;
 
+
+mod helper {
+    use std::io::BufRead;
+
+    pub struct Table {
+        iter: Box<dyn Iterator<Item = Vec<u8>>>,
+    }
+
+    #[derive(Clone)]
+    pub struct TableEntry {
+        line: Vec<u8>,
+    }
+
+    impl TableEntry {
+        fn new(line: Vec<u8>) -> Self {
+            Self { line }
+        }
+
+        pub fn bits_len(&self) -> usize {
+            str::from_utf8(self.line[65..67].trim_ascii_start()).unwrap().parse().unwrap()
+        }
+
+        pub fn bits(&self) -> impl Iterator<Item = bool> {
+            self.line[15..49].iter().filter_map(|b| match b {
+                b'0' | b'1' => Some(matches!(b, b'1')),
+                b'|' | b' ' => None,
+                _ => panic!("invalid byte in bit column"),
+            })
+        }
+
+        pub fn byte(&self) -> Option<u8> {
+            str::from_utf8(&self.line[8..11]).unwrap().parse().ok()
+        }
+    }
+
+    impl Table {
+        pub fn new() -> Self {
+            Self {
+                iter: Box::new(
+                    super::TABLE_STRING
+                        .lines()
+                        .skip(1)
+                        .map(|e| e.unwrap().into_bytes()),
+                ),
+            }
+        }
+    }
+
+    impl Iterator for Table {
+        type Item = TableEntry;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.iter.next().map(TableEntry::new)
+        }
+    }
+}
