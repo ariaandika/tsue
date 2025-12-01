@@ -3,76 +3,11 @@
 // in the future i would like to explore more different approach
 use huffman::Table;
 use tree::{Tree, Leaf};
+use decode::DecodeTable;
 
 mod huffman;
 mod tree;
-
-struct DecodeTable {
-    entries: Vec<[Entry; 16]>,
-}
-
-#[derive(Clone, Debug)]
-struct Entry {
-    next_state: Option<usize>,
-    byte: u8,
-    flags: u8,
-    mutated: bool,
-}
-
-const FLAG_MAYBE_EOS: u8    = 0b001;
-const FLAG_DECODED: u8      = 0b010;
-const FLAG_ERROR: u8        = 0b100;
-
-impl Entry {
-    fn new_entries() -> [Self; 16] {
-        let mut entries = Vec::with_capacity(16);
-        for _ in 0..16 {
-            entries.push(Self {
-                next_state: None,
-                byte: 0,
-                flags: FLAG_ERROR,
-                mutated: false,
-            });
-        }
-        entries.try_into().unwrap()
-    }
-}
-
-impl DecodeTable {
-    fn new() -> Self {
-        Self { entries: vec![Entry::new_entries()] }
-    }
-
-    fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    fn first_mut(&mut self) -> &mut [Entry; 16] {
-        self.entries.first_mut().unwrap()
-    }
-
-    fn entries_mut(&mut self, state: usize) -> &mut [Entry; 16] {
-        &mut self.entries[state]
-    }
-
-    fn push_entry(&mut self) {
-        self.entries.push(Entry::new_entries());
-    }
-
-    fn debug_print(&self) {
-        println!("[{}]",self.entries.len());
-        for (i, entries) in self.entries.iter().enumerate()/* .skip(28) *//* .take(5) */ {
-            println!("{i} [");
-            for (i, Entry { next_state, byte, flags, mutated }) in entries.iter().enumerate() {
-                print!("  [0b{:0>4b};{mutated}] next_state: {next_state:?},",i);
-                print!("  flags: 0b{flags:0>3b}");
-                print!("  byte: {:?},", *byte as char);
-                println!();
-            }
-            println!("]");
-        }
-    }
-}
+mod decode;
 
 fn main() {
     let tree = gen_tree();
@@ -110,24 +45,7 @@ fn gen_tree() -> Tree {
 
 fn gen_decode_table() -> DecodeTable {
     let mut decode = DecodeTable::new();
-
-    // first id of decode table is filled
-    // let mut id = 2;
     let table = Table::new(TABLE_STRING);
-
-    // # 1
-    // 1. generate trees from original bits
-    // 2. create variant with original bits right shifted
-    //
-    // cons: will generate dead branch
-    //
-    // add step for dead branch elimination ?
-
-    // # 2
-    // 1. generate trees from original bits
-    // 2. on the last remain bits, generate all possible remaining bits
-    //
-    // how to known what bits value may represent for the remain bits ?
 
     for entry in table {
         let Some(byte) = entry.byte() else {
@@ -135,28 +53,33 @@ fn gen_decode_table() -> DecodeTable {
             continue;
         };
         let mut bits_iter = entry.bits();
-        let bits_len = entry.bits_len();
-        let mut bits = 0u8;
 
         // first 4 bit
-        bits |= (bits_iter.next().unwrap() as u8) << 3;
-        bits |= (bits_iter.next().unwrap() as u8) << 2;
-        bits |= (bits_iter.next().unwrap() as u8) << 1;
-        bits |= bits_iter.next().unwrap() as u8;
+        let bits_len = entry.bits_len();
+        let bits = {
+            let mut bits = 0u8;
+            bits |= (bits_iter.next().unwrap() as u8) << 3;
+            bits |= (bits_iter.next().unwrap() as u8) << 2;
+            bits |= (bits_iter.next().unwrap() as u8) << 1;
+            bits |= bits_iter.next().unwrap() as u8;
+            bits
+        };
 
         // store first 4 bit
-        let last_state = decode.len();
-        let first_entry = decode.first_mut();
-        let decode_entry = &mut first_entry[bits as usize];
-        decode_entry.mutated = true;
-        decode_entry.flags &= !FLAG_ERROR;
+        let mut next_state = {
+            let last_state = decode.len();
+            let first_entry = decode.first_mut();
+            let decode_entry = &mut first_entry[bits as usize];
+            decode_entry.unset_error();
 
-        let mut next_state = match decode_entry.next_state {
-            Some(ok) => ok,
-            None => {
-                decode_entry.next_state = Some(last_state);
-                decode.push_entry();
-                last_state
+            match decode_entry.next_state() {
+                Some(ok) => ok,
+                None => {
+                    *decode_entry.next_state_mut() = Some(last_state);
+                    decode_entry.set_byte(byte);
+                    decode.push_entry();
+                    last_state
+                }
             }
         };
         let mut remaining_bits_len = bits_len.strict_sub(4);
@@ -167,7 +90,6 @@ fn gen_decode_table() -> DecodeTable {
             let current_entries = decode.entries_mut(next_state);
 
             let mut id = 0u8;
-
             if let Some(bit) = bits_iter.next() {
                 id |= (bit as u8) << 3;
             }
@@ -182,53 +104,27 @@ fn gen_decode_table() -> DecodeTable {
             }
 
             let decode_entry = &mut current_entries[id as usize];
-            decode_entry.mutated = true;
-            decode_entry.flags &= !FLAG_ERROR;
+            decode_entry.unset_error();
 
             if remaining_bits_len <= 4 {
-                decode_entry.byte = byte;
-                decode_entry.flags |= FLAG_DECODED;
+                decode_entry.set_decoded(byte);
 
                 let eos_bits = 0b1111 >> remaining_bits_len;
                 assert_eq!(id & eos_bits, 0);
 
-                // note that if the remaining_bits is 4,
-                // EOS will be true, and this is correct
-                //
-                // MAYBE_EOS flag determine whether this is maybe the last coded value,
-                // not just about is there any EOS bits
-                // if (id & eos_bits) == eos_bits {
-                //     decode_entry.flags |= FLAG_MAYBE_EOS;
-                // }
-                // let remain_bits = id | eos_bits;
-                // if remaining_bits_len == 4 {
-                //     assert!(decode_entry.next_state.replace(0).is_none());
-                //
-                // } else {
-                //     // currently only bits that have no remaining previous bits is calculated
-                //     let variants = BitVariant::new(id, remaining_bits_len);
-                //     for id_variant in variants {
-                //         let decode_entry = &mut current_entries[id as usize];
-                //         decode_entry.mutated = true;
-                //         decode_entry.flags &= !FLAG_ERROR;
-                //     }
-                // }
-
                 break;
+
+            } else {
+                remaining_bits_len = remaining_bits_len.strict_sub(4);
+                next_state = match decode_entry.next_state() {
+                    Some(ok) => ok,
+                    None => {
+                        *decode_entry.next_state_mut() = Some(last_state);
+                        decode.push_entry();
+                        last_state
+                    }
+                };
             }
-
-            assert_eq!(decode_entry.byte, 0);
-            assert_eq!(decode_entry.flags & FLAG_DECODED, 0);
-
-            remaining_bits_len = remaining_bits_len.strict_sub(4);
-            next_state = match decode_entry.next_state {
-                Some(ok) => ok,
-                None => {
-                    decode_entry.next_state = Some(last_state);
-                    decode.push_entry();
-                    last_state
-                }
-            };
         }
 
         // ..
