@@ -16,7 +16,10 @@ fn main() {
         tree.debug_print(&mut buffer);
     }
     let decode_table = gen_decode_table();
-    decode_table.debug_print();
+    if std::env::var("DEBUG_PRINT").is_ok() {
+        decode_table.debug_print();
+    }
+    let _decode_v2 = gen_decode_table_v2();
 }
 
 fn gen_tree() -> Tree {
@@ -128,6 +131,49 @@ fn gen_decode_table() -> DecodeTable {
         }
 
         // ..
+    }
+
+    decode
+}
+
+fn gen_decode_table_v2() -> decode::v2::DecodeTree {
+    use decode::v2::DecodeTree;
+
+    let mut decode = DecodeTree::new();
+    let table = Table::new(TABLE_STRING);
+
+    for entry in table {
+        let Some(byte) = entry.byte() else {
+            // EOS
+            continue;
+        };
+
+        let mut bits_iter = entry.bits();
+
+        // first 4 bit
+        let bits_4 = bits_iter.assert_4();
+        let mut current_entries = decode.first_mut().by_id_mut(bits_4).as_partial();
+
+        // next 1-4 bit chunk
+        loop {
+            let remaining = bits_iter.remaining();
+            let id = bits_iter.take_4();
+
+            if remaining <= 4 {
+                let eos_bits = 0b1111 >> remaining;
+                assert_eq!(id & eos_bits, 0);
+
+                let is_maybe_eos = id & eos_bits == eos_bits;
+                current_entries.by_id_mut(id).as_decoded(byte, is_maybe_eos);
+
+                break;
+
+            } else {
+                current_entries = current_entries.by_id_mut(id).as_partial();
+            }
+        }
+
+        // ...
     }
 
     decode

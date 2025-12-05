@@ -1,3 +1,4 @@
+pub mod v2;
 
 pub struct DecodeTable {
     entries: Vec<[DecodeEntry; 16]>,
