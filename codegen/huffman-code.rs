@@ -3,7 +3,7 @@
 // in the future i would like to explore more different approach
 use huffman::Table;
 use tree::{Tree, Leaf};
-use decode::DecodeTable;
+use decode::{DecodeEntry, Meta};
 
 mod huffman;
 mod tree;
@@ -16,10 +16,10 @@ fn main() {
         tree.debug_print(&mut buffer);
     }
     let decode_table = gen_decode_table();
-    if std::env::var("DEBUG_PRINT").is_ok() {
-        decode_table.debug_print();
-    }
-    let _decode_v2 = gen_decode_table_v2();
+    println!("{:#?}",decode_table);
+    // if std::env::var("DEBUG_PRINT").is_ok() {
+    //     decode_table.debug_print();
+    // }
 }
 
 fn gen_tree() -> Tree {
@@ -46,8 +46,8 @@ fn gen_tree() -> Tree {
     root
 }
 
-fn gen_decode_table() -> DecodeTable {
-    let mut decode = DecodeTable::new();
+fn gen_decode_table() -> Vec<[DecodeEntry; 16]> {
+    let mut decode: Vec<[DecodeEntry; 16]> = vec![DecodeEntry::new_entries()];
     let table = Table::new(TABLE_STRING);
 
     for entry in table {
@@ -55,104 +55,33 @@ fn gen_decode_table() -> DecodeTable {
             // EOS
             continue;
         };
+        let mut next_idx = decode.len();
         let mut bits_iter = entry.bits();
 
         // first 4 bit
-        let bits_len = entry.bits_len();
-        let bits = {
-            let mut bits = 0u8;
-            bits |= (bits_iter.next().unwrap() as u8) << 3;
-            bits |= (bits_iter.next().unwrap() as u8) << 2;
-            bits |= (bits_iter.next().unwrap() as u8) << 1;
-            bits |= bits_iter.next().unwrap() as u8;
-            bits
-        };
+        let next_entries = {
+            let bits_4 = bits_iter.assert_4();
 
-        // store first 4 bit
-        let mut next_state = {
-            let last_state = decode.len();
-            let first_entry = decode.first_mut();
-            let decode_entry = &mut first_entry[bits as usize];
-            decode_entry.unset_error();
+            let entry = &mut decode.first_mut().unwrap()[bits_4 as usize];
 
-            match decode_entry.next_state() {
-                Some(ok) => ok,
-                None => {
-                    *decode_entry.next_state_mut() = Some(last_state);
-                    decode_entry.set_byte(byte);
-                    decode.push_entry();
-                    last_state
+            match &entry {
+                DecodeEntry::None => {
+                    entry.set(DecodeEntry::partial(Meta::new(byte), Some(next_idx)));
+                    next_idx += 1;
+                    decode.push(DecodeEntry::new_entries());
+                    decode.last_mut().unwrap()
+                },
+                DecodeEntry::Partial { next, .. } => {
+                    let next = next.expect("first partial should have defined `next`");
+                    &mut decode[next]
                 }
+                DecodeEntry::Decoded { .. } |
+                DecodeEntry::Error => unreachable!(),
             }
         };
-        let mut remaining_bits_len = bits_len.strict_sub(4);
 
-        // next 1-4 bit chunk
-        loop {
-            let last_state = decode.len();
-            let current_entries = decode.entries_mut(next_state);
-
-            let mut id = 0u8;
-            if let Some(bit) = bits_iter.next() {
-                id |= (bit as u8) << 3;
-            }
-            if let Some(bit) = bits_iter.next() {
-                id |= (bit as u8) << 2;
-            }
-            if let Some(bit) = bits_iter.next() {
-                id |= (bit as u8) << 1;
-            }
-            if let Some(bit) = bits_iter.next() {
-                id |= bit as u8;
-            }
-
-            let decode_entry = &mut current_entries[id as usize];
-            decode_entry.unset_error();
-
-            if remaining_bits_len <= 4 {
-                decode_entry.set_decoded(byte);
-
-                let eos_bits = 0b1111 >> remaining_bits_len;
-                assert_eq!(id & eos_bits, 0);
-
-                break;
-
-            } else {
-                remaining_bits_len = remaining_bits_len.strict_sub(4);
-                next_state = match decode_entry.next_state() {
-                    Some(ok) => ok,
-                    None => {
-                        *decode_entry.next_state_mut() = Some(last_state);
-                        decode.push_entry();
-                        last_state
-                    }
-                };
-            }
-        }
-
-        // ..
-    }
-
-    decode
-}
-
-fn gen_decode_table_v2() -> decode::v2::DecodeTree {
-    use decode::v2::DecodeTree;
-
-    let mut decode = DecodeTree::new();
-    let table = Table::new(TABLE_STRING);
-
-    for entry in table {
-        let Some(byte) = entry.byte() else {
-            // EOS
-            continue;
-        };
-
-        let mut bits_iter = entry.bits();
-
-        // first 4 bit
-        let bits_4 = bits_iter.assert_4();
-        let mut current_entries = decode.first_mut().by_id_mut(bits_4).as_partial();
+        let mut decode_len = next_idx;
+        let mut current_entries = next_entries;
 
         // next 1-4 bit chunk
         loop {
@@ -164,16 +93,35 @@ fn gen_decode_table_v2() -> decode::v2::DecodeTree {
                 assert_eq!(id & eos_bits, 0);
 
                 let is_maybe_eos = id & eos_bits == eos_bits;
-                current_entries.by_id_mut(id).as_decoded(byte, is_maybe_eos);
+
+                current_entries[id as usize].set(DecodeEntry::decoded(
+                    byte,
+                    is_maybe_eos,
+                    if remaining == 4 { Some(0) } else { None },
+                ));
 
                 break;
-
             } else {
-                current_entries = current_entries.by_id_mut(id).as_partial();
+                current_entries = match &current_entries[id as usize] {
+                    DecodeEntry::None => {
+                        current_entries[id as usize].set(DecodeEntry::partial(Meta::new(byte), Some(decode_len)));
+                        decode_len += 1;
+                        decode.push(DecodeEntry::new_entries());
+                        decode.last_mut().unwrap()
+                    }
+                    DecodeEntry::Partial { next, .. } => {
+                        let next = next.expect("");
+                        &mut decode[next]
+                    }
+                    DecodeEntry::Decoded { .. } |
+                    DecodeEntry::Error => panic!("conflicting branch"),
+                };
             }
         }
 
-        // ...
+        // TODO: fill empty slot by shifting original bits
+
+        // ..
     }
 
     decode
