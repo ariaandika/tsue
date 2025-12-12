@@ -1,151 +1,225 @@
-// This codegen is fully inspired by the h2 crate
+// This implementation is highly inspired by the h2 crate
 //
-// in the future i would like to explore more different approach
-use huffman::Table;
-use tree::{Tree, Leaf};
-use decode::{DecodeEntry, Meta};
+// in the future it will be interesting to explore different approaches
+use huffman::{TableParser, Bits};
+use decode::{DecodeEntry, EntryData};
 
 mod huffman;
-mod tree;
 mod decode;
 
+type DecodeTable = Vec<[DecodeEntry; 16]>;
+
 fn main() {
-    let tree = gen_tree();
-    let mut buffer = Vec::new();
-    if std::env::var("DEBUG_PRINT").is_ok() {
-        tree.debug_print(&mut buffer);
+    let decode = gen_decode_table();
+    if matches!(std::env::var("PRETTY").ok().as_deref(), Some("1")) {
+        print_decode_pretty(decode);
+    } else {
+        print_decode(decode);
     }
-    let decode_table = gen_decode_table();
-    println!("{:#?}",decode_table);
-    // if std::env::var("DEBUG_PRINT").is_ok() {
-    //     decode_table.debug_print();
-    // }
 }
 
-fn gen_tree() -> Tree {
-    let mut root = Tree::new();
-    let table = Table::new(TABLE_STRING);
-
-    for table_entry in table {
-        let mut current = &mut root;
-
-        for bit in table_entry.bits() {
-            match bit {
-                false => current = current.left_branch(),
-                true => current = current.right_branch(),
-            }
-        }
-
-        let Some(byte) = table_entry.byte() else {
-            // EOS
-            continue;
-        };
-        current.replace_as_leaf(Leaf::new(byte));
-    }
-
-    root
+#[derive(Debug)]
+struct Lookup {
+    /// the shifted leading bits
+    untagged_bits: u8,
+    shifted: usize,
+    next: usize,
 }
 
-fn gen_decode_table() -> Vec<[DecodeEntry; 16]> {
-    let mut decode: Vec<[DecodeEntry; 16]> = vec![DecodeEntry::new_entries()];
-    let table = Table::new(TABLE_STRING);
+fn gen_decode_table() -> DecodeTable {
+    let mut decode: DecodeTable = vec![DecodeEntry::new_entries()];
+    let mut lookup = vec![];
 
-    for entry in table {
-        let Some(byte) = entry.byte() else {
-            // EOS
-            continue;
+    for entry in table_iter() {
+        let byte = entry.byte();
+        let bits = entry.bits();
+        let data = EntryData {
+            byte,
+            shifted: 0,
         };
-        let mut next_idx = decode.len();
-        let mut bits_iter = entry.bits();
+        let initial = 0;
+        process_entry(data, bits, initial, &mut decode, &mut lookup);
+    }
 
-        // first 4 bit
-        let next_entries = {
-            let bits_4 = bits_iter.assert_4();
+    for shift_bits in [b"0" as &[u8], b"00", b"000"] {
+        for entry in table_iter() {
+            let byte = entry.byte();
 
-            let entry = &mut decode.first_mut().unwrap()[bits_4 as usize];
+            let mut bits = entry.bits().shifted(shift_bits);
 
-            match &entry {
-                DecodeEntry::None => {
-                    entry.set(DecodeEntry::partial(Meta::new(byte), Some(next_idx)));
-                    next_idx += 1;
-                    decode.push(DecodeEntry::new_entries());
-                    decode.last_mut().unwrap()
-                },
-                DecodeEntry::Partial { next, .. } => {
-                    let next = next.expect("first partial should have defined `next`");
-                    &mut decode[next]
-                }
-                DecodeEntry::Decoded { .. } |
-                DecodeEntry::Error => unreachable!(),
-            }
-        };
+            let shifted = shift_bits.len();
+            let untagged_bits = bits.take_4() & (0b1111 >> shifted);
 
-        let mut decode_len = next_idx;
-        let mut current_entries = next_entries;
+            let Some(next) = lookup.iter().find_map(|e|{
+                let ok = e.shifted == shifted
+                && e.untagged_bits == untagged_bits;
+                ok.then_some(e.next)
+            }) else {
+                continue;
+            };
 
-        // next 1-4 bit chunk
-        loop {
-            let remaining = bits_iter.remaining();
-            let id = bits_iter.take_4();
-
-            if remaining <= 4 {
-                let eos_bits = 0b1111 >> remaining;
-                assert_eq!(id & eos_bits, 0);
-
-                let is_maybe_eos = id & eos_bits == eos_bits;
-
-                current_entries[id as usize].set(DecodeEntry::decoded(
-                    byte,
-                    is_maybe_eos,
-                    if remaining == 4 { Some(0) } else { None },
-                ));
-
-                break;
-            } else {
-                current_entries = match &current_entries[id as usize] {
-                    DecodeEntry::None => {
-                        current_entries[id as usize].set(DecodeEntry::partial(Meta::new(byte), Some(decode_len)));
-                        decode_len += 1;
-                        decode.push(DecodeEntry::new_entries());
-                        decode.last_mut().unwrap()
-                    }
-                    DecodeEntry::Partial { next, .. } => {
-                        let next = next.expect("");
-                        &mut decode[next]
-                    }
-                    DecodeEntry::Decoded { .. } |
-                    DecodeEntry::Error => panic!("conflicting branch"),
-                };
-            }
+            let data = EntryData {
+                byte,
+                shifted: shift_bits.len(),
+            };
+            process_entry(data, bits, next, &mut decode, &mut lookup);
         }
-
-        // TODO: fill empty slot by shifting original bits
-
-        // ..
     }
 
     decode
 }
 
-#[test]
-fn test() {
-    const TEST_BITS: &[u8] = b"111111111111100";
-    const TEST_VALUE: u8 = b'<';
+fn process_entry(
+    data: EntryData,
+    mut bits_iter: Bits<'_, impl Iterator<Item = u8>>,
+    initial: usize,
+    decode: &mut Vec<[DecodeEntry; 16]>,
+    lookup: &mut Vec<Lookup>,
+) {
+    let mut decode_len = decode.len();
+    let mut current_index = initial;
 
-    let tree = gen_tree();
-    let mut current = &tree;
+    // next 1-4 bit chunk
+    loop {
+        let remaining = bits_iter.remaining();
+        let id = bits_iter.take_4();
 
-    for bit in TEST_BITS {
-        current = match bit {
-            b'0' => current.assert_left_branch(),
-            b'1' => current.assert_right_branch(),
-            _ => unreachable!()
+        // traverse or create new branches
+        if remaining > 4 {
+            let maybe_eos = id == 0b1111;
+            let entry = &mut decode[current_index][id as usize];
+
+            current_index = match entry {
+                setter @ DecodeEntry::None => {
+                    let new_index = decode_len;
+                    setter.set(DecodeEntry::partial(data, maybe_eos, new_index));
+                    decode_len += 1;
+                    decode.push(DecodeEntry::new_entries());
+                    new_index
+                }
+                DecodeEntry::Partial { next, .. } => *next,
+                _ => unreachable!("conflicting branch"),
+            };
+
+            continue;
         }
+
+        // ===== padded / partial bits =====
+
+        let eos_bit_mask = 0b1111 >> remaining;
+        let untagged_len = 4 - remaining;
+
+        // shuffled untagged id into also as decoded
+        for shuffled_id in 0..1 << untagged_len {
+            let id = shuffled_id | id;
+
+            let next = if remaining == 4 {
+                0
+            } else {
+                let shifted = remaining;
+                let untagged_bit_mask = id & eos_bit_mask;
+
+                // see if the *next id* after *decoded entry* already created
+                let found = lookup.iter().find(|lookup|{
+                    lookup.untagged_bits == untagged_bit_mask
+                    && lookup.shifted == shifted
+                });
+
+                match found {
+                    Some(e) => e.next,
+                    None => {
+                        let next = decode_len;
+                        lookup.push(Lookup {
+                            untagged_bits: untagged_bit_mask,
+                            shifted,
+                            next,
+                        });
+                        decode.push(DecodeEntry::new_entries());
+                        decode_len += 1;
+                        next
+                    },
+                }
+            };
+
+            let maybe_eos = (id & eos_bit_mask) == eos_bit_mask;
+            let tagged_bit_mask = !eos_bit_mask & 0b1111;
+
+            decode[current_index][id as usize].set(DecodeEntry::decoded(
+                data,
+                maybe_eos,
+                next,
+                tagged_bit_mask,
+            ));
+        }
+
+        break;
     }
-    assert_eq!(current.assert_leaf().byte(), TEST_VALUE);
+}
+
+fn print_decode(decode: DecodeTable) {
+    println!("// autogenerated by codegen/huffman-code.rs");
+    println!("#![cfg_attr(rustfmt, rustfmt_skip)]");
+    println!("pub const DECODE_TABLE:[[(usize,u8,u8);16];256]=[");
+
+    for entries in decode {
+        print!("[");
+        for entry in entries {
+            match entry {
+                DecodeEntry::None => {
+                    print!("(0,0,0b100),");
+                }
+                DecodeEntry::Partial { next, maybe_eos, .. } => {
+                    print!("({},0,0b0{}0),", next, maybe_eos as u8);
+                }
+                DecodeEntry::Decoded { byte, maybe_eos, next, .. } => {
+                    print!("({next},{byte},0b0{}1),", maybe_eos as u8);
+                }
+                DecodeEntry::Error => unreachable!(),
+            }
+        }
+        println!("],");
+    }
+    println!("];");
+}
+
+fn print_decode_pretty(decode: DecodeTable) {
+    println!("// (next id, byte, flags[error, maybe_eos, is_decoded])");
+    println!("pub const DECODE_TABLE: [[(usize, u8, u8); 16]; 256] = [");
+
+    for (i, entries) in decode.into_iter().enumerate() {
+        println!("    [ // {i}");
+        for (i, entry) in entries.into_iter().enumerate() {
+            match entry {
+                DecodeEntry::None => {
+                    println!("        (  0,    0, 0b100), // ERROR");
+                }
+                DecodeEntry::Partial { next, .. } => {
+                    println!("        ({: >3},    0, 0b000), // {:0>4b} Partial", next, i);
+                }
+                DecodeEntry::Decoded { byte, maybe_eos, next, tagged_bit_mask: t, .. } => {
+                    print!("        ({: >3}, ",next);
+                    if byte.is_ascii_graphic() {
+                        print!("b'{}', ",byte as char);
+                    } else {
+                        print!("{byte: >4}, ");
+                    }
+                    print!("0b0{}", maybe_eos as u8);
+                    println!("1), // {:0>4b} Decoded({t:0>4b})", i);
+                }
+                DecodeEntry::Error => unreachable!(),
+            }
+        }
+        println!("    ],");
+    }
+
+    println!("];");
 }
 
 // ===== Sources =====
+
+fn table_iter() -> TableParser {
+    TableParser::new(TABLE_STRING)
+}
 
 const BYTE_RANGE: std::ops::Range<usize> = 8..11;
 const BITS_RANGE: std::ops::Range<usize> = 15..49;

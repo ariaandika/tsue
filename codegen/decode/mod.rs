@@ -1,37 +1,27 @@
 
-#[derive(Clone, Debug)]
-pub struct Meta {
-    byte: u8,
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum DecodeEntry {
     None,
     Partial {
-        meta: Meta,
-        next: Option<usize>,
+        next: usize,
+        maybe_eos: bool,
+        shifted: usize,
     },
     Decoded {
-        meta: Meta,
         byte: u8,
-        is_maybe_eos: bool,
-        next: Option<usize>,
+        shifted: usize,
+        maybe_eos: bool,
+        next: usize,
+        tagged_bit_mask: u8,
     },
+    #[allow(dead_code)]
     Error,
 }
 
-const FLAG_MAYBE_EOS: u8 = 0b001;
-const FLAG_DECODED: u8 = 0b010;
-const FLAG_ERROR: u8 = 0b100;
-
-impl Meta {
-    pub const fn new(byte: u8) -> Self {
-        Self { byte }
-    }
-
-    pub const fn none() -> Self {
-        Self { byte: u8::MAX }
-    }
+#[derive(Clone, Copy, Debug)]
+pub struct EntryData {
+    pub byte: u8,
+    pub shifted: usize,
 }
 
 impl DecodeEntry {
@@ -39,30 +29,68 @@ impl DecodeEntry {
         Self::None
     }
 
-    pub const fn partial(meta: Meta, next: Option<usize>) -> Self {
+    pub fn partial(data: EntryData, maybe_eos: bool, next: usize) -> Self {
         Self::Partial {
-            meta,
             next,
+            maybe_eos,
+            shifted: data.shifted,
         }
     }
 
-    pub const fn decoded(byte: u8, is_maybe_eos: bool, next: Option<usize>) -> Self {
+    pub const fn decoded(data: EntryData, maybe_eos: bool, next: usize, tagged_bit_mask: u8) -> Self {
         Self::Decoded {
-            meta: Meta::none(),
-            byte,
-            is_maybe_eos,
+            byte: data.byte,
+            shifted: data.shifted,
+            maybe_eos,
             next,
+            tagged_bit_mask,
         }
     }
 
-    pub fn new_entries() -> [Self; 16] {
+    pub const fn new_entries() -> [Self; 16] {
         [const { Self::none() }; 16]
     }
 
+    /// Current entry must be `None`, otherwise panic.
     pub fn set(&mut self, me: Self) {
-        match &self {
-            Self::None => *self = me,
-            _ => panic!("duplicate assignment on DecodeEntry: {self:?} for {me:?}"),
+        assert!(
+            matches!(self, Self::None),
+            "duplicate assignment on DecodeEntry: {self:?} for {me:?}"
+        );
+        *self = me;
+    }
+}
+
+impl std::fmt::Debug for DecodeEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Partial {
+                next,
+                maybe_eos,
+                shifted,
+            } => f
+                .debug_struct("Partial")
+                .field("next", next)
+                .field("maybe_eos", maybe_eos)
+                .field("shifted", shifted)
+                .finish(),
+            Self::Decoded {
+                byte,
+                maybe_eos,
+                next,
+                tagged_bit_mask,
+                shifted,
+            } => f
+                .debug_struct("Decoded")
+                .field("byte", &(*byte as char))
+                .field("maybe_eos", maybe_eos)
+                .field("next", next)
+                .field("tagged_bit_mask", &format_args!("{tagged_bit_mask:0>4b}"))
+                .field("shifted", shifted)
+                .finish(),
+            Self::Error => write!(f, "Error"),
         }
     }
 }
+
