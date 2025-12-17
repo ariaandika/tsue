@@ -1,14 +1,22 @@
+// rfc-editor.org/rfc/rfc9110.html#name-representation-data-and-met
+//
+// Content-Type - with boundary for multipart
+// Content-Encoding - gzip, deflate, brotli
+// Content-Length
+// Transfer-Encoding - chunked, gzip, etc.
+
 use std::fmt;
 use std::task::Poll;
 use tcio::bytes::BytesMut;
 
 use super::ProtoError;
-use super::chunked::ChunkedDecoder;
+use super::ChunkedDecoder;
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
+use crate::body::Body;
 
 #[derive(Debug)]
-pub struct MessageBody {
+pub struct BodyDecoder {
     coding: Coding,
 }
 
@@ -19,7 +27,7 @@ pub enum Coding {
     ContentLength(u64),
 }
 
-impl MessageBody {
+impl BodyDecoder {
     pub fn new(headers: &HeaderMap) -> Result<Self, ProtoError> {
         let mut content_lengths = headers.get_all(CONTENT_LENGTH);
         let mut transfer_encodings = headers.get_all(TRANSFER_ENCODING);
@@ -48,6 +56,32 @@ impl MessageBody {
             (Some(_), true) => return Err(ProtoError::InvalidCodings),
         };
         Ok(Self { coding })
+    }
+
+    pub fn build_body(&self, buffer: &mut BytesMut, handle: &crate::h1::io::IoHandle) -> Body {
+        // let body = if io.read_buffer_mut().len() == content_len as usize {
+        //     // all body have been read, use standalone representation
+        //     Body::new(io.read_buffer_mut().split())
+        // } else {
+        //     // `IoBuffer` remaining is only calculated excluding the already read body
+        //     let Some(remaining_body_len) = content_len.checked_sub(io.read_buffer_mut().len() as u64)
+        //     else {
+        //         return Poll::Ready(Err("content-length is less than body".into()));
+        //     };
+        //     io.set_remaining(remaining_body_len);
+        //     Body::from_handle(io.handle(), remaining_body_len)
+        // };
+        match &self.coding {
+            Coding::Empty | Coding::ContentLength(0) => Body::empty(),
+            Coding::Chunked(chunked) => todo!(),
+            Coding::ContentLength(len) => {
+                if buffer.len() as u64 == *len {
+                    Body::new(buffer.split())
+                } else {
+                    todo!()
+                }
+            }
+        }
     }
 
     /// Returns Poll::Pending if more data read is required.

@@ -3,17 +3,9 @@
 // Range - partial content requests
 // Trailer - trailing headers after chunked body
 // Priority - HTTP/2/3 stream prioritization
-use crate::{
-    h1::{parser::Reqline, spec::ProtoError},
-    headers::{HeaderMap, standard::CONNECTION},
-    http::{Method, Version},
-};
-
-// macro_rules! err {
-//     ($variant:ident) => {
-//         super::ProtoError::from(super::ProtoErrorKind::$variant)
-//     };
-// }
+use crate::h1::{parser::Reqline, spec::ProtoError};
+use crate::headers::{HeaderMap, standard::CONNECTION};
+use crate::http::{Method, Version};
 
 // TODO: protocol upgrade www.rfc-editor.org/rfc/rfc9110.html#name-upgrade
 
@@ -49,12 +41,3 @@ impl HttpContext {
         })
     }
 }
-
-// ===== Body =====
-
-// rfc-editor.org/rfc/rfc9110.html#name-representation-data-and-met
-//
-// Content-Type - with boundary for multipart
-// Content-Encoding - gzip, deflate, brotli
-// Content-Length
-// Transfer-Encoding - chunked, gzip, etc.

@@ -1,8 +1,8 @@
 use tcio::bytes::{Bytes, BytesMut};
 
 use super::ProtoError;
+use super::{HttpContext, BodyDecoder};
 use crate::h1::parser::{Header, Reqline};
-use crate::h1::spec::{HttpContext, MessageBody};
 use crate::headers::error::HeaderError;
 use crate::headers::standard::{CONTENT_LENGTH, HOST};
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
@@ -20,11 +20,7 @@ pub struct HttpState {
 }
 
 impl HttpState {
-    pub fn new(reqline: Reqline) -> Self {
-        Self::with_headers(reqline, HeaderMap::with_capacity(8))
-    }
-
-    pub fn with_headers(reqline: Reqline, headers: HeaderMap) -> Self {
+    pub fn new(reqline: Reqline, headers: HeaderMap) -> Self {
         Self { reqline, headers }
     }
 
@@ -57,8 +53,8 @@ impl HttpState {
         HttpContext::new(&self.reqline, &self.headers)
     }
 
-    pub fn build_body(&self) -> Result<MessageBody, ProtoError> {
-        MessageBody::new(&self.headers)
+    pub fn build_decoder(&self) -> Result<BodyDecoder, ProtoError> {
+        BodyDecoder::new(&self.headers)
     }
 
     pub fn build_parts(self) -> Result<request::Parts, ProtoError> {

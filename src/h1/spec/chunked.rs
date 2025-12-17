@@ -7,11 +7,11 @@ const MAX_CHUNKED_SIZE: u64 = 64 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct ChunkedDecoder {
-    state: ChunkedState,
+    phase: Phase,
 }
 
 #[derive(Clone, Debug)]
-enum ChunkedState {
+enum Phase {
     Header,
     Chunk(NonZeroU64),
     Eof,
@@ -20,8 +20,12 @@ enum ChunkedState {
 impl ChunkedDecoder {
     pub(crate) fn new() -> Self {
         Self {
-            state: ChunkedState::Header,
+            phase: Phase::Header,
         }
+    }
+
+    pub fn is_eof(&self) -> bool {
+        matches!(self.phase, Phase::Eof)
     }
 
     /// Poll for chunked body, returns `None` it end of chunks found.
@@ -29,8 +33,8 @@ impl ChunkedDecoder {
         &mut self,
         buffer: &mut BytesMut,
     ) -> Poll<Result<Option<BytesMut>, BodyError>> {
-        match &mut self.state {
-            ChunkedState::Header => {
+        match &mut self.phase {
+            Phase::Header => {
                 let Some(digits_len) = buffer.iter().position(|e| !e.is_ascii_hexdigit()) else {
                     return Poll::Pending;
                 };
@@ -61,13 +65,13 @@ impl ChunkedDecoder {
 
                 match NonZeroU64::new(chunk_len) {
                     Some(nonzero_len) => {
-                        self.state = ChunkedState::Chunk(nonzero_len);
+                        self.phase = Phase::Chunk(nonzero_len);
                         // advance
                         self.poll_chunk(buffer)
                     }
                     None => match buffer.first_chunk::<2>() {
                         Some(b"\r\n") => {
-                            self.state = ChunkedState::Eof;
+                            self.phase = Phase::Eof;
                             buffer.advance(2);
                             Poll::Ready(Ok(None))
                         }
@@ -76,7 +80,7 @@ impl ChunkedDecoder {
                     }
                 }
             }
-            ChunkedState::Chunk(remaining_mut) => {
+            Phase::Chunk(remaining_mut) => {
                 let remaining = remaining_mut.get();
                 match remaining
                     .checked_sub(buffer.len() as u64)
@@ -97,7 +101,7 @@ impl ChunkedDecoder {
                         let body = buffer.split_to(remaining);
                         match buffer.first_chunk::<2>() {
                             Some(b"\r\n") => {
-                                self.state = ChunkedState::Header;
+                                self.phase = Phase::Header;
                                 buffer.advance(2);
                             }
                             Some(_) => return Poll::Ready(Err(BodyError::InvalidChunked)),
@@ -107,7 +111,7 @@ impl ChunkedDecoder {
                     }
                 }
             }
-            ChunkedState::Eof => Poll::Ready(Err(BodyError::Exhausted)),
+            Phase::Eof => Poll::Ready(Err(BodyError::Exhausted)),
         }
     }
 }

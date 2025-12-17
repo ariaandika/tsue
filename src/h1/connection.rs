@@ -1,22 +1,18 @@
-use std::{
-    pin::Pin,
-    sync::Arc,
-    task::{ready, Poll},
-};
+use std::mem;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Poll, ready};
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
-use super::{
-    io::IoBuffer,
-    parser::{Header, Reqline},
-    spec::{self, ProtoError},
-};
-use crate::{
-    body::{Body, BodyWrite},
-    headers::{HeaderMap, HeaderName, HeaderValue},
-    request::Request,
-    response::Response,
-    service::HttpService,
-};
+use super::io::IoBuffer;
+use super::parser::{Header, Reqline};
+use super::spec::{self, ProtoError};
+use crate::body::{Body, BodyWrite};
+use crate::h1::spec::{HttpContext, HttpState};
+use crate::headers::{HeaderMap, HeaderName, HeaderValue};
+use crate::request::Request;
+use crate::response::Response;
+use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -36,18 +32,24 @@ type ConnectionProject<'a, IO, F, S> = (
 
 enum Phase<F> {
     Reqline { is_parse_pending: bool },
-    Header(Option<Reqline>),
-    Service(F),
-    Drain(Option<Response>),
+    Header(Reqline),
+    Service { context: HttpContext, service: F },
+    Drain(Response),
     Flush(BodyWrite),
     Cleanup,
+    Placeholder,
 }
 
 enum PhaseProject<'a, F> {
-    Reqline { is_parse_pending: &'a mut bool },
-    Header(&'a mut Option<Reqline>),
-    Service(Pin<&'a mut F>),
-    Drain(&'a mut Option<Response>),
+    Reqline {
+        is_parse_pending: &'a mut bool,
+    },
+    Header(&'a mut Reqline),
+    Service {
+        context: &'a mut HttpContext,
+        service: Pin<&'a mut F>,
+    },
+    Drain(&'a mut Response),
     Flush(&'a mut BodyWrite),
     Cleanup,
 }
@@ -98,24 +100,22 @@ where
                     };
 
                     header_map.reserve(16);
-                    phase.set(Phase::Header(Some(reqline)));
+                    phase.set(Phase::Header(reqline));
                 }
-                PhaseProject::Header(reqline) => {
+                PhaseProject::Header(_) => {
                     // TODO: create custom error type that can generate Response
 
                     loop {
                         let bytes = io.read_buffer_mut();
-
                         match Header::parse_chunk(bytes).into_poll_result()? {
                             Poll::Ready(Some(mut header)) => {
                                 if header_map.len() >= spec::MAX_HEADERS {
                                     return Poll::Ready(Err(ProtoError::TooManyHeaders.into()));
                                 }
-
                                 header.name.make_ascii_lowercase();
                                 header_map.append(
-                                    HeaderName::from_slice(header.name)?,
-                                    HeaderValue::from_slice(header.value.freeze())?,
+                                    HeaderName::from_bytes_lowercase(header.name)?,
+                                    HeaderValue::from_bytes(header.value)?,
                                 );
                             },
                             Poll::Ready(None) => break,
@@ -132,29 +132,27 @@ where
 
                     // ===== Service =====
 
-                    let content_len: u64 = todo!();
-                    let parts = todo!();
-                    let body = if io.read_buffer_mut().len() == content_len as usize {
-                        // all body have been read, use standalone representation
-                        Body::new(io.read_buffer_mut().split())
-                    } else {
-                        // `IoBuffer` remaining is only calculated excluding the already read body
-                        let Some(remaining_body_len) = content_len.checked_sub(io.read_buffer_mut().len() as u64)
-                        else {
-                            return Poll::Ready(Err("content-length is less than body".into()));
-                        };
-                        io.set_remaining(remaining_body_len);
-                        Body::from_handle(io.handle(), remaining_body_len)
+                    let Phase::Header(reqline) = phase.as_mut().take() else {
+                        // SAFETY: pattern matched
+                        unsafe { std::hint::unreachable_unchecked() }
                     };
+
+                    let state = HttpState::new(reqline, mem::take(header_map));
+                    let context = state.build_context()?;
+                    let decoder = state.build_decoder()?;
+                    let parts = state.build_parts()?;
+
+                    let handle = io.handle();
+                    let body = decoder.build_body(io.read_buffer_mut(), &handle);
 
                     let request = Request::from_parts(parts, body);
 
-                    let service_future = service.call(request);
-                    phase.set(Phase::Service(service_future));
+                    let service = service.call(request);
+                    phase.set(Phase::Service { context, service });
                 }
-                PhaseProject::Service(service_future) => match service_future.poll(cx) {
+                PhaseProject::Service { context: _, service } => match service.poll(cx) {
                     Poll::Ready(Ok(ok)) => {
-                        phase.set(Phase::Drain(Some(ok)));
+                        phase.set(Phase::Drain(ok));
                     }
                     Poll::Ready(Err(err)) => {
                         return Poll::Ready(Err(err.into()));
@@ -164,10 +162,15 @@ where
                         return Poll::Pending;
                     }
                 },
-                PhaseProject::Drain(response) => {
+                PhaseProject::Drain(_) => {
                     ready!(io.poll_drain(cx)?);
 
-                    let (mut parts, body) = response.take().unwrap().into_parts();
+                    let Phase::Drain(response) = phase.as_mut().take() else {
+                        // SAFETY: pattern matched
+                        unsafe { std::hint::unreachable_unchecked() }
+                    };
+
+                    let (mut parts, body) = response.into_parts();
 
                     spec::write_response(&parts, io.write_buffer_mut(), body.remaining() as _);
 
@@ -237,12 +240,21 @@ impl<F> Phase<F> {
             match self.get_unchecked_mut() {
                 Self::Reqline { is_parse_pending } => PhaseProject::Reqline { is_parse_pending },
                 Self::Header(h) => PhaseProject::Header(h),
-                Self::Service(f) => PhaseProject::Service(Pin::new_unchecked(f)),
+                Self::Service { context, service } => PhaseProject::Service {
+                    context,
+                    service: Pin::new_unchecked(service),
+                },
                 Self::Drain(r) => PhaseProject::Drain(r),
                 Self::Flush(b) => PhaseProject::Flush(b),
                 Self::Cleanup => PhaseProject::Cleanup,
+                Self::Placeholder => unreachable!(),
             }
         }
+    }
+
+    fn take(self: Pin<&mut Self>) -> Self {
+        // SAFETY: self is pinned, no custom Drop and Unpin
+        unsafe { mem::replace(self.get_unchecked_mut(), Self::Placeholder) }
     }
 }
 
