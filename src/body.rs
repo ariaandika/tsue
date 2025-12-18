@@ -2,6 +2,7 @@
 use tcio::bytes::{Bytes, BytesMut};
 use std::{io, task::Poll};
 
+mod frame;
 mod handle;
 mod stream;
 mod collect;
@@ -12,6 +13,8 @@ mod writer;
 use handle::{BodyHandle, IoHandle};
 use stream::BodyStreamHandle;
 
+
+pub use frame::Frame;
 pub use stream::BodyStream;
 pub use collect::Collect;
 
