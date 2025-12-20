@@ -1,12 +1,13 @@
 use std::io;
-use tcio::fmt::lossy;
+use tcio::{bytes::Bytes, fmt::lossy};
 use tokio::{net::TcpListener, runtime::Runtime};
 use tsue::{
-    body::Body,
+    body::Incoming,
     request::Request,
     response::{Parts, Response},
     server::Http1Server,
     service::from_fn,
+    body::Full,
 };
 
 fn main() -> io::Result<()> {
@@ -21,7 +22,7 @@ fn main() -> io::Result<()> {
     })
 }
 
-async fn handle(req: Request) -> Response {
+async fn handle(req: Request<Incoming>) -> Response<Full<Bytes>> {
     let parts = req.parts();
     dbg!(parts);
 
@@ -30,5 +31,5 @@ async fn handle(req: Request) -> Response {
         println!("{}", lossy(&body.as_slice()));
     }
 
-    Response::from_parts(Parts::default(), Body::new("Hello"))
+    Response::from_parts(Parts::default(), Full::new(Bytes::from_static(b"Hello")))
 }

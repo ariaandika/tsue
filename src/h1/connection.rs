@@ -16,31 +16,31 @@ use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-pub struct Connection<IO, S, F> {
+pub struct Connection<IO, S, B, F> {
     io: IoBuffer<IO>,
     header_map: HeaderMap,
-    phase: Phase<F>,
+    phase: Phase<B, F>,
     service: Arc<S>,
 }
 
-type ConnectionProject<'a, IO, F, S> = (
+type ConnectionProject<'a, IO, S, B, F> = (
     &'a mut IoBuffer<IO>,
     &'a mut HeaderMap,
-    Pin<&'a mut Phase<F>>,
+    Pin<&'a mut Phase<B, F>>,
     &'a mut Arc<S>,
 );
 
-enum Phase<F> {
+enum Phase<B, F> {
     Reqline { is_parse_pending: bool },
     Header(Reqline),
     Service { context: HttpContext, service: F },
-    Drain(Response),
-    Flush(BodyWrite),
+    Drain(Response<B>),
+    Flush(B),
     Cleanup,
     Placeholder,
 }
 
-enum PhaseProject<'a, F> {
+enum PhaseProject<'a, B, F> {
     Reqline {
         is_parse_pending: &'a mut bool,
     },
@@ -49,14 +49,14 @@ enum PhaseProject<'a, F> {
         context: &'a mut HttpContext,
         service: Pin<&'a mut F>,
     },
-    Drain(&'a mut Response),
-    Flush(&'a mut BodyWrite),
+    Drain(&'a mut Response<B>),
+    Flush(Pin<&'a mut B>),
     Cleanup,
 }
 
-impl<IO, S> Connection<IO, S, S::Future>
+impl<IO, S, B> Connection<IO, S, B, S::Future>
 where
-    S: HttpService<Error: Into<BoxError>>,
+    S: HttpService<ResBody = B, Error: Into<BoxError>>,
 {
     pub fn new(io: IO, service: Arc<S>) -> Self {
         Self {
@@ -70,6 +70,8 @@ where
     fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<(), BoxError>>
     where
         IO: AsyncIoRead + AsyncIoWrite,
+        B: Body,
+        B::Error: std::error::Error + Send + Sync + 'static,
     {
         let (io, header_map, mut phase, service) = self.project();
 
@@ -163,6 +165,7 @@ where
                     }
                 },
                 PhaseProject::Drain(_) => {
+                    // TODO: drain only if the body is an a treshold
                     ready!(io.poll_drain(cx)?);
 
                     let Phase::Drain(response) = phase.as_mut().take() else {
@@ -172,16 +175,22 @@ where
 
                     let (mut parts, body) = response.into_parts();
 
-                    spec::write_response(&parts, io.write_buffer_mut(), body.remaining() as _);
+                    // spec::write_response(&parts, io.write_buffer_mut(), body.remaining() as _);
+                    todo!();
 
                     parts.headers.clear();
                     *header_map = parts.headers;
 
-                    phase.set(Phase::Flush(body.into_writer()));
+                    phase.set(Phase::Flush(body));
                 }
-                PhaseProject::Flush(body_writer) => {
+                PhaseProject::Flush(body) => {
                     ready!(io.poll_flush(cx))?;
-                    ready!(body_writer.poll_write(io, cx))?;
+
+                    // ready!(body.poll_write(io, cx))?;
+                    ready!(Body::poll_data(body, cx)?);
+                    todo!();
+                    // Body::poll_data(self: std::pin::Pin<&mut Self>, cx)
+
                     phase.set(Phase::Cleanup);
                 }
                 PhaseProject::Cleanup => {
@@ -195,10 +204,12 @@ where
     }
 }
 
-impl<IO, S> Future for Connection<IO, S, S::Future>
+impl<IO, S, B> Future for Connection<IO, S, B, S::Future>
 where
     IO: AsyncIoRead + AsyncIoWrite,
-    S: HttpService<Error: Into<BoxError>>,
+    S: HttpService<ResBody = B, Error: Into<BoxError>>,
+    B: Body,
+    B::Error: std::error::Error + Send + Sync + 'static,
 {
     type Output = ();
 
@@ -210,7 +221,7 @@ where
     }
 }
 
-impl<IO, S, F> std::fmt::Debug for Connection<IO, S, F> {
+impl<IO, S, B, F> std::fmt::Debug for Connection<IO, S, B, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Connection").finish_non_exhaustive()
     }
@@ -218,8 +229,8 @@ impl<IO, S, F> std::fmt::Debug for Connection<IO, S, F> {
 
 // ===== Projection =====
 
-impl<IO, S, F> Connection<IO, S, F> {
-    fn project(self: Pin<&mut Self>) -> ConnectionProject<'_, IO, F, S> {
+impl<IO, S, B, F> Connection<IO, S, B, F> {
+    fn project(self: Pin<&mut Self>) -> ConnectionProject<'_, IO, S, B, F> {
         // SAFETY: self is pinned, no custom Drop and Unpin
         unsafe {
             let me = self.get_unchecked_mut();
@@ -233,8 +244,8 @@ impl<IO, S, F> Connection<IO, S, F> {
     }
 }
 
-impl<F> Phase<F> {
-    fn project(self: Pin<&mut Self>) -> PhaseProject<'_, F> {
+impl<B, F> Phase<B, F> {
+    fn project(self: Pin<&mut Self>) -> PhaseProject<'_, B, F> {
         // SAFETY: self is pinned, no custom Drop and Unpin
         unsafe {
             match self.get_unchecked_mut() {
@@ -245,7 +256,7 @@ impl<F> Phase<F> {
                     service: Pin::new_unchecked(service),
                 },
                 Self::Drain(r) => PhaseProject::Drain(r),
-                Self::Flush(b) => PhaseProject::Flush(b),
+                Self::Flush(b) => PhaseProject::Flush(Pin::new_unchecked(b)),
                 Self::Cleanup => PhaseProject::Cleanup,
                 Self::Placeholder => unreachable!(),
             }

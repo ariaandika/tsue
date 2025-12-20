@@ -1,6 +1,5 @@
 //! HTTP Request
 use crate::{
-    body::Body,
     headers::HeaderMap,
     http::{Extensions, Method, Version},
     uri::{Host, HttpScheme, HttpUri, Path},
@@ -34,21 +33,21 @@ impl Default for Parts {
 
 /// HTTP Request.
 #[derive(Debug, Default)]
-pub struct Request {
+pub struct Request<T> {
     parts: Parts,
-    body: Body,
+    body: T,
 }
 
 /// Constructor
-impl Request {
-    /// Create [`Request`] from [`Parts`] and [`Body`].
+impl<T> Request<T> {
+    /// Create [`Request`] from [`Parts`] and body.
     #[inline]
-    pub fn from_parts(parts: Parts, body: Body) -> Self {
+    pub fn from_parts(parts: Parts, body: T) -> Self {
         Self { parts, body  }
     }
 }
 
-impl Request {
+impl<T> Request<T> {
     /// Returns shared reference to [`Parts`].
     #[inline]
     pub fn parts(&self) -> &Parts {
@@ -83,30 +82,30 @@ impl Request {
         headers_mut() -> HeaderMap;
     }
 
-    /// Returns shared reference to [`Body`].
+    /// Returns shared reference to body.
     #[inline]
-    pub fn body(&self) -> &Body {
+    pub fn body(&self) -> &T {
         &self.body
     }
 
-    /// Returns mutable reference to [`Body`].
+    /// Returns mutable reference to body.
     #[inline]
-    pub fn body_mut(&mut self) -> &mut Body {
+    pub fn body_mut(&mut self) -> &mut T {
         &mut self.body
     }
 }
 
 /// Destructor
-impl Request {
-    /// Destruct request into [`Parts`] and [`Body`].
+impl<T> Request<T> {
+    /// Destruct request into [`Parts`] and body.
     #[inline]
-    pub fn into_parts(self) -> (Parts, Body) {
+    pub fn into_parts(self) -> (Parts, T) {
         (self.parts, self.body)
     }
 
     /// Destruct request into [`Body`].
     #[inline]
-    pub fn into_body(self) -> Body {
+    pub fn into_body(self) -> T {
         self.body
     }
 }

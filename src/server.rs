@@ -65,11 +65,13 @@ pub mod driver {
     #[derive(Debug)]
     pub struct Http1;
 
-    impl<IO, S> Driver<IO, S> for Http1
+    impl<IO, S, B> Driver<IO, S> for Http1
     where
-        S: HttpService,
+        S: HttpService<ResBody = B>,
+        B: crate::body::Body,
+        B::Error: std::error::Error + Send + Sync + 'static,
     {
-        type Future = Connection<IO, S, S::Future>;
+        type Future = Connection<IO, S, B, S::Future>;
 
         fn call(io: IO, service: Arc<S>) -> Self::Future {
             Connection::new(io, service)

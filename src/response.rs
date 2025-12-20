@@ -1,6 +1,5 @@
 //! HTTP Response
 use crate::{
-    body::Body,
     headers::HeaderMap,
     http::{Extensions, StatusCode, Version},
 };
@@ -16,21 +15,21 @@ pub struct Parts {
 
 /// HTTP Response.
 #[derive(Debug, Default)]
-pub struct Response {
+pub struct Response<T> {
     parts: Parts,
-    body: Body,
+    body: T,
 }
 
 /// Constructor
-impl Response {
-    /// Create [`Response`] from [`Parts`] and [`Body`].
+impl<T> Response<T> {
+    /// Create [`Response`] from [`Parts`] and body.
     #[inline]
-    pub fn from_parts(parts: Parts, body: Body) -> Self {
-        Self { parts, body  }
+    pub fn from_parts(parts: Parts, body: T) -> Self {
+        Self { parts, body }
     }
 }
 
-impl Response {
+impl<T> Response<T> {
     /// Returns shared reference to [`Parts`].
     #[inline]
     pub fn parts(&self) -> &Parts {
@@ -60,30 +59,30 @@ impl Response {
         headers_mut() -> HeaderMap;
     }
 
-    /// Returns shared reference to [`Body`].
+    /// Returns shared reference to [`Incoming`].
     #[inline]
-    pub fn body(&self) -> &Body {
+    pub fn body(&self) -> &T {
         &self.body
     }
 
-    /// Returns mutable reference to [`Body`].
+    /// Returns mutable reference to [`Incoming`].
     #[inline]
-    pub fn body_mut(&mut self) -> &mut Body {
+    pub fn body_mut(&mut self) -> &mut T {
         &mut self.body
     }
 }
 
 /// Destructor
-impl Response {
-    /// Destruct response into [`Parts`] and [`Body`].
+impl<T> Response<T> {
+    /// Destruct response into [`Parts`] and body.
     #[inline]
-    pub fn into_parts(self) -> (Parts, Body) {
+    pub fn into_parts(self) -> (Parts, T) {
         (self.parts, self.body)
     }
 
-    /// Destruct response into [`Body`].
+    /// Destruct response into [`Incoming`].
     #[inline]
-    pub fn into_body(self) -> Body {
+    pub fn into_body(self) -> T {
         self.body
     }
 }

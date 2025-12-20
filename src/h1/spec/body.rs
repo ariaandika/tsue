@@ -13,7 +13,7 @@ use super::ProtoError;
 use super::ChunkedDecoder;
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
-use crate::body::Body;
+use crate::body::Incoming;
 
 #[derive(Debug)]
 pub struct BodyDecoder {
@@ -58,7 +58,7 @@ impl BodyDecoder {
         Ok(Self { coding })
     }
 
-    pub fn build_body(&self, buffer: &mut BytesMut, handle: &crate::h1::io::IoHandle) -> Body {
+    pub fn build_body(&self, buffer: &mut BytesMut, handle: &crate::h1::io::IoHandle) -> Incoming {
         // let body = if io.read_buffer_mut().len() == content_len as usize {
         //     // all body have been read, use standalone representation
         //     Body::new(io.read_buffer_mut().split())
@@ -72,11 +72,11 @@ impl BodyDecoder {
         //     Body::from_handle(io.handle(), remaining_body_len)
         // };
         match &self.coding {
-            Coding::Empty | Coding::ContentLength(0) => Body::empty(),
+            Coding::Empty | Coding::ContentLength(0) => Incoming::empty(),
             Coding::Chunked(chunked) => todo!(),
             Coding::ContentLength(len) => {
                 if buffer.len() as u64 == *len {
-                    Body::new(buffer.split())
+                    Incoming::new(buffer.split())
                 } else {
                     todo!()
                 }

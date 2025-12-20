@@ -9,30 +9,28 @@ pub use crate::h1::io::IoHandle;
 #[derive(Debug)]
 pub struct BodyHandle {
     handle: IoHandle,
-    remaining: u64,
+    size_hint: Option<u64>,
 }
 
 impl BodyHandle {
-    pub fn new(handle: IoHandle, remaining: u64) -> Self {
+    pub fn new(handle: IoHandle, size_hint: Option<u64>) -> Self {
         Self {
             handle,
-            remaining,
+            size_hint,
         }
     }
 
-    pub fn remaining(&self) -> usize {
-        self.remaining as usize
+    pub const fn size_hint(&self) -> Option<u64> {
+        self.size_hint
     }
 
-    pub fn has_remaining(&self) -> bool {
-        self.remaining() != 0
-    }
-
-    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<io::Result<BytesMut>> {
+    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<io::Result<BytesMut>>> {
         let data = ready!(self.handle.poll_read(cx)?);
 
-        self.remaining -= u64::try_from(data.len()).unwrap_or(u64::MAX);
+        if let Some(size_hint) = &mut self.size_hint {
+            *size_hint -= data.len() as u64;
+        }
 
-        Poll::Ready(Ok(data))
+        Poll::Ready(Some(Ok(data)))
     }
 }
