@@ -2,9 +2,9 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Poll, ready};
+use tcio::bytes::BytesMut;
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
-use super::io::IoBuffer;
 use super::parser::{Header, Reqline};
 use super::spec::{self, ProtoError};
 use crate::body::{Body, BodyWrite};
@@ -16,15 +16,21 @@ use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+const DEFAULT_BUFFER_CAP: usize = 512;
+
 pub struct Connection<IO, S, B, F> {
-    io: IoBuffer<IO>,
+    io: IO,
+    read_buffer: BytesMut,
+    write_buffer: BytesMut,
     header_map: HeaderMap,
     phase: Phase<B, F>,
     service: Arc<S>,
 }
 
 type ConnectionProject<'a, IO, S, B, F> = (
-    &'a mut IoBuffer<IO>,
+    &'a mut IO,
+    &'a mut BytesMut,
+    &'a mut BytesMut,
     &'a mut HeaderMap,
     Pin<&'a mut Phase<B, F>>,
     &'a mut Arc<S>,
@@ -61,7 +67,9 @@ where
     pub fn new(io: IO, service: Arc<S>) -> Self {
         Self {
             header_map: HeaderMap::new(),
-            io: IoBuffer::new(io),
+            io,
+            read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
+            write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             phase: Phase::Reqline { is_parse_pending: false },
             service,
         }
@@ -73,7 +81,7 @@ where
         B: Body,
         B::Error: std::error::Error + Send + Sync + 'static,
     {
-        let (io, header_map, mut phase, service) = self.project();
+        let (io, read_buffer, write_buffer, header_map, mut phase, service) = self.project();
 
         loop {
             match phase.as_mut().project() {
@@ -84,16 +92,14 @@ where
                     // but if `parse_chunk` returns pending, it will also put bytes in buffer
                     //
                     // thus `is_parse_pending` flag is necessary
-                    if io.read_buffer_mut().is_empty() | *is_parse_pending {
-                        let read = ready!(io.poll_read(cx)?);
+                    if read_buffer.is_empty() | *is_parse_pending {
+                        let read = ready!(io.poll_read_buf(read_buffer, cx)?);
                         if read == 0 {
                             return Poll::Ready(Ok(()));
                         }
                     }
 
-                    let bytes = io.read_buffer_mut();
-
-                    let reqline = match Reqline::parse_chunk(bytes).into_poll_result()? {
+                    let reqline = match Reqline::parse_chunk(read_buffer).into_poll_result()? {
                         Poll::Ready(ok) => ok,
                         Poll::Pending => {
                             *is_parse_pending = true;
@@ -108,8 +114,7 @@ where
                     // TODO: create custom error type that can generate Response
 
                     loop {
-                        let bytes = io.read_buffer_mut();
-                        match Header::parse_chunk(bytes).into_poll_result()? {
+                        match Header::parse_chunk(read_buffer).into_poll_result()? {
                             Poll::Ready(Some(mut header)) => {
                                 if header_map.len() >= spec::MAX_HEADERS {
                                     return Poll::Ready(Err(ProtoError::TooManyHeaders.into()));
@@ -123,7 +128,7 @@ where
                             Poll::Ready(None) => break,
                             Poll::Pending => {
                                 // TODO: limit buffer size
-                                let read = ready!(io.poll_read(cx)?);
+                                let read = ready!(io.poll_read_buf(read_buffer, cx)?);
                                 if read == 0 {
                                     return Poll::Ready(Ok(()));
                                 }
@@ -144,13 +149,16 @@ where
                     let decoder = state.build_decoder()?;
                     let parts = state.build_parts()?;
 
-                    let handle = io.handle();
-                    let body = decoder.build_body(io.read_buffer_mut(), &handle);
+                    // FIXME: create shared Handle where Incoming 
+                    // let handle = io.handle();
+                    // let body = decoder.build_body(io.read_buffer_mut(), &handle);
 
-                    let request = Request::from_parts(parts, body);
+                    // let request = Request::from_parts(parts, body);
+                    //
+                    // let service = service.call(request);
+                    // phase.set(Phase::Service { context, service });
 
-                    let service = service.call(request);
-                    phase.set(Phase::Service { context, service });
+                    todo!()
                 }
                 PhaseProject::Service { context: _, service } => match service.poll(cx) {
                     Poll::Ready(Ok(ok)) => {
@@ -160,13 +168,14 @@ where
                         return Poll::Ready(Err(err.into()));
                     }
                     Poll::Pending => {
-                        let _ = io.poll_io_wants(cx)?;
-                        return Poll::Pending;
+                        todo!()
+                        // let _ = io.poll_io_wants(cx)?;
+                        // return Poll::Pending;
                     }
                 },
                 PhaseProject::Drain(_) => {
                     // TODO: drain only if the body is an a treshold
-                    ready!(io.poll_drain(cx)?);
+                    // ready!(io.poll_drain(cx)?);
 
                     let Phase::Drain(response) = phase.as_mut().take() else {
                         // SAFETY: pattern matched
@@ -184,7 +193,7 @@ where
                     phase.set(Phase::Flush(body));
                 }
                 PhaseProject::Flush(body) => {
-                    ready!(io.poll_flush(cx))?;
+                    // ready!(io.poll_flush(cx))?;
 
                     // ready!(body.poll_write(io, cx))?;
                     ready!(Body::poll_data(body, cx)?);
@@ -196,7 +205,16 @@ where
                 PhaseProject::Cleanup => {
                     // this phase exists to ensure all shared bytes is dropped, thus can be
                     // reclaimed
-                    io.clear_reclaim();
+
+                    // `reserve` will try to reclaim buffer, but if the underlying buffer is grow
+                    // thus reallocated, and the new allocated capacity is not at least
+                    // DEFAULT_BUFFER_CAP, reclaiming does not work, so another reallocation
+                    // required
+                    //
+                    // `clear()` will also ensure this allocation does not need to copy any data
+                    read_buffer.clear();
+                    read_buffer.reserve(DEFAULT_BUFFER_CAP);
+
                     phase.set(Phase::Reqline { is_parse_pending: false });
                 }
             }
@@ -236,6 +254,8 @@ impl<IO, S, B, F> Connection<IO, S, B, F> {
             let me = self.get_unchecked_mut();
             (
                 &mut me.io,
+                &mut me.read_buffer,
+                &mut me.write_buffer,
                 &mut me.header_map,
                 Pin::new_unchecked(&mut me.phase),
                 &mut me.service,
