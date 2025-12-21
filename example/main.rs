@@ -3,8 +3,8 @@ use tcio::{bytes::Bytes, fmt::lossy};
 use tokio::{net::TcpListener, runtime::Runtime};
 use tsue::{
     body::Incoming,
-    request::Request,
-    response::{Parts, Response},
+    http::request::Request,
+    http::response::{Parts, Response},
     server::Http1Server,
     service::from_fn,
     body::Full,

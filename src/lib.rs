@@ -50,8 +50,6 @@ pub mod common;
 pub mod uri;
 pub mod headers;
 pub mod http;
-pub mod request;
-pub mod response;
 pub mod body;
 
 // HTTP protocol

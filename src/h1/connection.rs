@@ -10,8 +10,7 @@ use super::spec::{self, ProtoError};
 use crate::body::{Body, BodyWrite};
 use crate::h1::spec::{HttpContext, HttpState};
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
-use crate::request::Request;
-use crate::response::Response;
+use crate::http::{Request, Response};
 use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;

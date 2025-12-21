@@ -7,8 +7,7 @@ use crate::headers::error::HeaderError;
 use crate::headers::standard::{CONTENT_LENGTH, HOST};
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
 use crate::http::{Extensions, httpdate_now};
-use crate::request;
-use crate::response;
+use crate::http::{request, response};
 use crate::uri::HttpScheme;
 
 pub(crate) const MAX_HEADERS: usize = 64;

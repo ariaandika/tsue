@@ -3,8 +3,7 @@ use std::convert::Infallible;
 use tcio::futures::{Map, map};
 
 use crate::body::Incoming;
-use crate::request::Request;
-use crate::response::Response;
+use crate::http::{Request, Response};
 
 // ===== Service =====
 
