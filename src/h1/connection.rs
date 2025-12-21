@@ -16,7 +16,21 @@ use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+const MAX_FIELD_CAP: usize = 4 * 1024;
 const DEFAULT_BUFFER_CAP: usize = 512;
+
+/// Read bytes from IO into buffer.
+macro_rules! io_read {
+    ($io:ident.$read:ident($buffer:ident, $cx:expr)) => {
+        let read = ready!($io.$read($buffer, $cx)?);
+        if read == 0 {
+            return Poll::Ready(Ok(()));
+        }
+        if $buffer.len() > MAX_FIELD_CAP {
+            return Poll::Ready(Err("excessive field size".into()));
+        }
+    };
+}
 
 pub struct Connection<IO, S, B, F> {
     io: IO,
@@ -81,6 +95,8 @@ where
         B: Body,
         B::Error: std::error::Error + Send + Sync + 'static,
     {
+        // TODO: create custom error type that can generate Response
+
         let (io, read_buffer, write_buffer, header_map, mut phase, service) = self.project();
 
         loop {
@@ -93,10 +109,7 @@ where
                     //
                     // thus `is_parse_pending` flag is necessary
                     if read_buffer.is_empty() | *is_parse_pending {
-                        let read = ready!(io.poll_read_buf(read_buffer, cx)?);
-                        if read == 0 {
-                            return Poll::Ready(Ok(()));
-                        }
+                        io_read!(io.poll_read_buf(read_buffer, cx));
                     }
 
                     let reqline = match Reqline::parse_chunk(read_buffer).into_poll_result()? {
@@ -111,29 +124,25 @@ where
                     phase.set(Phase::Header(reqline));
                 }
                 PhaseProject::Header(_) => {
-                    // TODO: create custom error type that can generate Response
-
                     loop {
-                        match Header::parse_chunk(read_buffer).into_poll_result()? {
-                            Poll::Ready(Some(mut header)) => {
-                                if header_map.len() >= spec::MAX_HEADERS {
-                                    return Poll::Ready(Err(ProtoError::TooManyHeaders.into()));
-                                }
-                                header.name.make_ascii_lowercase();
-                                header_map.append(
-                                    HeaderName::from_bytes_lowercase(header.name)?,
-                                    HeaderValue::from_bytes(header.value)?,
-                                );
-                            },
+                        let header = match Header::parse_chunk(read_buffer).into_poll_result()? {
+                            Poll::Ready(Some(ok)) => ok,
                             Poll::Ready(None) => break,
                             Poll::Pending => {
-                                // TODO: limit buffer size
-                                let read = ready!(io.poll_read_buf(read_buffer, cx)?);
-                                if read == 0 {
-                                    return Poll::Ready(Ok(()));
-                                }
+                                io_read!(io.poll_read_buf(read_buffer, cx));
                                 continue;
                             }
+                        };
+
+                        let Header { mut name, value } = header;
+                        name.make_ascii_lowercase();
+                        header_map.append(
+                            HeaderName::from_bytes_lowercase(name)?,
+                            HeaderValue::from_bytes(value)?,
+                        );
+
+                        if header_map.len() > spec::MAX_HEADERS {
+                            return Poll::Ready(Err(ProtoError::TooManyHeaders.into()));
                         }
                     }
 
