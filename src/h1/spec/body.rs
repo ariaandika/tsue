@@ -27,6 +27,10 @@ pub enum Coding {
     ContentLength(u64),
 }
 
+#[derive(Debug)]
+pub struct BodyHandle {
+}
+
 impl BodyDecoder {
     pub fn new(headers: &HeaderMap) -> Result<Self, ProtoError> {
         let mut content_lengths = headers.get_all(CONTENT_LENGTH);
@@ -58,7 +62,7 @@ impl BodyDecoder {
         Ok(Self { coding })
     }
 
-    pub fn build_body(&self, buffer: &mut BytesMut, handle: &crate::h1::io::IoHandle) -> Incoming {
+    pub fn build_body(&self, buffer: &mut BytesMut, handle: &BodyHandle) -> Incoming {
         // let body = if io.read_buffer_mut().len() == content_len as usize {
         //     // all body have been read, use standalone representation
         //     Body::new(io.read_buffer_mut().split())
@@ -109,6 +113,12 @@ impl BodyDecoder {
                 }
             }
         }
+    }
+}
+
+impl BodyHandle {
+    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<std::io::Result<BytesMut>> {
+        todo!()
     }
 }
 

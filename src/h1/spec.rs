@@ -12,7 +12,7 @@
 //!
 //! # Usage
 //!
-//! Create [`HttpContext`] after parsing reqest line. Add header for each header parsed. Finally
+//! Create [`HttpState`] after parsing reqest line. Add header for each header parsed. Finally
 //! call `build_*` method to retrieve [`HttpContext`], [`BodyDecoder`], and [`Request`].
 //!
 //! [`Request`]: crate::request::Request
@@ -27,6 +27,6 @@ pub(crate) use state::MAX_HEADERS;
 use chunked::ChunkedDecoder;
 
 pub use context::HttpContext;
-pub use body::{BodyDecoder, Coding, BodyError};
+pub use body::{BodyDecoder, Coding, BodyHandle, BodyError};
 pub use state::{HttpState, write_response};
 pub use error::ProtoError;

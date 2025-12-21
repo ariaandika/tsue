@@ -1,23 +1,41 @@
 use std::{pin::Pin, task::ready};
 use std::task::Poll;
+use tcio::bytes::BytesMut;
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
-use crate::h2::frame;
-use crate::io::IoBuffer;
+use super::frame;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 const PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const MAX_BUFFER_CAP: usize = 16 * 1024;
+const DEFAULT_BUFFER_CAP: usize = 512;
+
+macro_rules! io_read {
+    ($io:ident.$read:ident($buffer:ident, $cx:expr)) => {
+        let read = ready!($io.$read($buffer, $cx)?);
+        if read == 0 {
+            return Poll::Ready(Ok(()));
+        }
+        if $buffer.len() > MAX_BUFFER_CAP {
+            return Poll::Ready(Err("excessive field size".into()));
+        }
+    };
+}
 
 /// HTTP/2.0 Connection.
 #[derive(Debug)]
 pub struct Connection<IO> {
-    io: IoBuffer<IO>,
+    io: IO,
+    read_buffer: BytesMut,
+    write_buffer: BytesMut,
     phase: Phase,
 }
 
 type ConnectionProject<'a, IO> = (
-    &'a mut IoBuffer<IO>,
+    &'a mut IO,
+    &'a mut BytesMut,
+    &'a mut BytesMut,
     Pin<&'a mut Phase>,
 );
 
@@ -32,22 +50,25 @@ enum PhaseProject {
 
 impl<IO> Connection<IO> {
     pub fn new(io: IO) -> Self {
-        Self { io: IoBuffer::new(io), phase: Phase::Preface }
+        Self {
+            io,
+            read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
+            write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
+            phase: Phase::Preface,
+        }
     }
 
     fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<(), BoxError>>
     where
         IO: AsyncIoRead + AsyncIoWrite,
     {
-        let (io, mut phase,) = self.project();
+        let (io, read_buffer, _write_buffer, mut phase,) = self.project();
 
         loop {
             match phase.as_mut().project() {
                 PhaseProject::Preface => {
-                    let buffer = io.read_buffer_mut();
-
-                    let Some((preface, rest)) = buffer.split_first_chunk() else {
-                        ready!(io.poll_read(cx)?);
+                    let Some((preface, rest)) = read_buffer.split_first_chunk() else {
+                        io_read!(io.poll_read_buf(read_buffer, cx));
                         continue;
                     };
 
@@ -124,7 +145,7 @@ impl<IO> Connection<IO> {
                                 let size = u32::from_be_bytes(*size);
                                 println!("[{ty:?}] window size increment = {size}");
 
-                                const SIZE: usize = 1_048_576_000;
+                                const _SIZE: usize = 1_048_576_000;
 
                                 rest
                             }
@@ -169,6 +190,8 @@ impl<IO> Connection<IO> {
             let me = self.get_unchecked_mut();
             (
                 &mut me.io,
+                &mut me.read_buffer,
+                &mut me.write_buffer,
                 Pin::new_unchecked(&mut me.phase),
             )
         }

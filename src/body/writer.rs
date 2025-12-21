@@ -5,7 +5,7 @@ use std::{
 use tcio::{bytes::Bytes, io::AsyncIoWrite};
 
 use super::Incoming;
-use crate::h1::io::IoBuffer;
+// use crate::h1::io::IoBuffer;
 
 pub struct BodyWrite {
     body: Incoming,
@@ -27,7 +27,7 @@ impl BodyWrite {
 
     pub fn poll_write<IO: AsyncIoWrite>(
         &mut self,
-        io: &mut IoBuffer<IO>,
+        // io: &mut IoBuffer<IO>,
         cx: &mut std::task::Context,
     ) -> Poll<io::Result<()>> {
         // loop {
