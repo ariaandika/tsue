@@ -1,11 +1,22 @@
-//! Request and Response Body.
+//! HTTP Body Message.
+//!
+//! ## Core
+//!
+//! - [`Body`] the trait that represent a message body
+//! - [`Frame`] a single frame of a message body
+//!
+//! ## Implementation
+//!
+//! - [`Incoming`] streamed or buffered body
+//! - [`Full`] single chunk body
+//!
 mod frame;
 
-mod incoming;
 mod handle;
 mod stream;
 mod collect;
 
+mod incoming;
 mod full;
 
 mod writer;
@@ -13,21 +24,27 @@ mod writer;
 pub(crate) use writer::BodyWrite;
 
 pub use frame::Frame;
-pub use stream::BodyStream;
-pub use collect::Collect;
-pub use incoming::Incoming;
 
+pub use incoming::Incoming;
 pub use full::Full;
 
+pub use stream::BodyStream;
+pub use collect::Collect;
+
+use std::pin::Pin;
+use std::task::{Poll, Context};
+use tcio::bytes::Buf;
+
+#[allow(clippy::type_complexity)]
 pub trait Body {
-    type Data: tcio::bytes::Buf;
+    type Data: Buf;
 
     type Error;
 
     fn poll_data(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context,
-    ) -> std::task::Poll<Option<Result<Frame<Self::Data>, Self::Error>>>;
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>>;
 
     fn is_end_stream(&self) -> bool;
 
