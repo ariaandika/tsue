@@ -3,9 +3,10 @@
 // Range - partial content requests
 // Trailer - trailing headers after chunked body
 // Priority - HTTP/2/3 stream prioritization
-use crate::h1::{parser::Reqline, spec::ProtoError};
+use crate::h1::parser::Reqline;
 use crate::headers::{HeaderMap, standard::CONNECTION};
 use crate::http::{Method, Version};
+use crate::http::spec::ProtoError;
 
 // TODO: protocol upgrade www.rfc-editor.org/rfc/rfc9110.html#name-upgrade
 

@@ -9,6 +9,9 @@ mod date;
 pub mod request;
 pub mod response;
 
+pub(crate) mod spec;
+pub(crate) mod shared;
+
 pub use method::Method;
 pub use version::Version;
 pub use status::StatusCode;

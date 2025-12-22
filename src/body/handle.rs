@@ -4,7 +4,7 @@ use std::{
     task::{Poll, ready},
 };
 
-pub use crate::h1::spec::{BodyHandle as IoHandle};
+pub use crate::http::spec::{BodyHandle as IoHandle};
 
 #[derive(Debug)]
 pub struct BodyHandle {

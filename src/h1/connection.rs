@@ -6,10 +6,11 @@ use tcio::bytes::BytesMut;
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use super::parser::{Header, Reqline};
-use super::spec::{self, ProtoError};
 use crate::body::{Body, BodyWrite};
-use crate::h1::spec::{HttpContext, HttpState};
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
+use crate::http::spec;
+use crate::http::spec::ProtoError;
+use crate::http::spec::{HttpContext, HttpState};
 use crate::http::{Request, Response};
 use crate::service::HttpService;
 
