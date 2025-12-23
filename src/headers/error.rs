@@ -1,5 +1,5 @@
-use super::HeaderNameError;
-use super::HeaderValueError;
+pub use super::HeaderNameError;
+pub use super::HeaderValueError;
 
 /// An error that can occur in header related operations.
 #[derive(Debug)]

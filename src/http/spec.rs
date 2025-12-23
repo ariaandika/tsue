@@ -19,14 +19,13 @@
 mod chunked;
 mod body;
 
-mod context;
 mod state;
+mod context;
 mod error;
 
-pub(crate) use state::MAX_HEADERS;
 use chunked::ChunkedDecoder;
 
+pub use state::{HttpState, write_response, insert_header};
 pub use context::HttpContext;
 pub use body::{BodyDecoder, Coding, BodyHandle, BodyError};
-pub use state::{HttpState, write_response};
 pub use error::ProtoError;

@@ -51,7 +51,7 @@ type ConnectionProject<'a, IO, S, B, F> = (
 );
 
 enum Phase<B, F> {
-    Reqline { is_parse_pending: bool },
+    Reqline { want_read: bool },
     Header(Reqline),
     Service { context: HttpContext, service: F },
     Drain(Response<B>),
@@ -62,7 +62,7 @@ enum Phase<B, F> {
 
 enum PhaseProject<'a, B, F> {
     Reqline {
-        is_parse_pending: &'a mut bool,
+        want_read: &'a mut bool,
     },
     Header(&'a mut Reqline),
     Service {
@@ -84,7 +84,7 @@ where
             io,
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
-            phase: Phase::Reqline { is_parse_pending: false },
+            phase: Phase::Reqline { want_read: true },
             service,
         }
     }
@@ -101,21 +101,21 @@ where
 
         loop {
             match phase.as_mut().project() {
-                PhaseProject::Reqline { is_parse_pending } => {
+                PhaseProject::Reqline { want_read } => {
                     // it is possible that subsequent request bytes may already in buffer when
                     // reading request body because of request pipelining
                     //
-                    // but if `parse_chunk` returns pending, it will also put bytes in buffer
+                    // but if `parse_chunk` returns pending, it will also put bytes in the buffer
                     //
-                    // thus `is_parse_pending` flag is necessary
-                    if read_buffer.is_empty() | *is_parse_pending {
+                    // thus explicit `want_read` flag is necessary
+                    if *want_read {
                         io_read!(io.poll_read_buf(read_buffer, cx));
                     }
 
                     let reqline = match Reqline::parse_chunk(read_buffer).into_poll_result()? {
                         Poll::Ready(ok) => ok,
                         Poll::Pending => {
-                            *is_parse_pending = true;
+                            *want_read = true;
                             continue;
                         }
                     };
@@ -125,25 +125,17 @@ where
                 }
                 PhaseProject::Header(_) => {
                     loop {
-                        let header = match Header::parse_chunk(read_buffer).into_poll_result()? {
-                            Poll::Ready(Some(ok)) => ok,
-                            Poll::Ready(None) => break,
+                        match Header::parse_chunk(read_buffer).into_poll_result()? {
                             Poll::Pending => {
                                 io_read!(io.poll_read_buf(read_buffer, cx));
                                 continue;
                             }
+                            Poll::Ready(Some(Header { name, value })) => {
+                                spec::insert_header(header_map, name, value)?;
+                            }
+                            Poll::Ready(None) => break,
                         };
 
-                        let Header { mut name, value } = header;
-                        name.make_ascii_lowercase();
-                        header_map.append(
-                            HeaderName::from_bytes_lowercase(name)?,
-                            HeaderValue::from_bytes(value)?,
-                        );
-
-                        if header_map.len() > spec::MAX_HEADERS {
-                            return Poll::Ready(Err(ProtoError::TooManyHeaders.into()));
-                        }
                     }
 
                     // ===== Service =====
@@ -224,7 +216,7 @@ where
                     read_buffer.clear();
                     read_buffer.reserve(DEFAULT_BUFFER_CAP);
 
-                    phase.set(Phase::Reqline { is_parse_pending: false });
+                    phase.set(Phase::Reqline { want_read: false });
                 }
             }
         }
@@ -278,7 +270,7 @@ impl<B, F> Phase<B, F> {
         // SAFETY: self is pinned, no custom Drop and Unpin
         unsafe {
             match self.get_unchecked_mut() {
-                Self::Reqline { is_parse_pending } => PhaseProject::Reqline { is_parse_pending },
+                Self::Reqline { want_read } => PhaseProject::Reqline { want_read },
                 Self::Header(h) => PhaseProject::Header(h),
                 Self::Service { context, service } => PhaseProject::Service {
                     context,

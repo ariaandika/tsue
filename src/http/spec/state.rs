@@ -2,15 +2,12 @@ use tcio::bytes::{Bytes, BytesMut};
 
 use super::ProtoError;
 use super::{HttpContext, BodyDecoder};
-use crate::h1::parser::{Header, Reqline};
-use crate::headers::error::HeaderError;
+use crate::h1::parser::{Reqline};
 use crate::headers::standard::{CONTENT_LENGTH, HOST};
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
 use crate::http::{Extensions, httpdate_now};
 use crate::http::{request, response};
 use crate::uri::HttpScheme;
-
-pub(crate) const MAX_HEADERS: usize = 64;
 
 #[derive(Debug)]
 pub struct HttpState {
@@ -21,31 +18,6 @@ pub struct HttpState {
 impl HttpState {
     pub fn new(reqline: Reqline, headers: HeaderMap) -> Self {
         Self { reqline, headers }
-    }
-
-    pub fn insert_header(&mut self, mut header: Header) -> Result<(), ProtoError> {
-        if self.headers.len() > MAX_HEADERS {
-            return Err(ProtoError::TooManyHeaders);
-        }
-
-        header.value.make_ascii_lowercase();
-
-        self.headers.append(
-            HeaderName::from_slice(header.name).expect("TODO"),
-            HeaderValue::from_slice(header.value.freeze()).expect("TODO"),
-        );
-
-        Ok(())
-    }
-
-    pub fn try_content_len(&self) -> Result<Option<u64>, HeaderError> {
-        match self.headers.get(CONTENT_LENGTH) {
-            Some(content_len) => match tcio::atou(content_len.as_bytes()) {
-                Some(ok) => Ok(Some(ok)),
-                None => todo!("to be removed"),
-            },
-            None => Ok(None),
-        }
     }
 
     pub fn build_context(&self) -> Result<HttpContext, ProtoError> {
@@ -71,6 +43,26 @@ impl HttpState {
             extensions: Extensions::new(),
         })
     }
+}
+
+pub fn insert_header(
+    map: &mut HeaderMap,
+    mut name: BytesMut,
+    value: BytesMut,
+) -> Result<(), ProtoError> {
+    const MAX_HEADERS: usize = 64;
+
+    if map.len() >= MAX_HEADERS {
+        return Err(ProtoError::TooManyHeaders);
+    }
+
+    name.make_ascii_lowercase();
+    map.append(
+        HeaderName::from_bytes_lowercase(name)?,
+        HeaderValue::from_bytes(value)?,
+    );
+
+    Ok(())
 }
 
 pub fn write_response(res: &response::Parts, buf: &mut BytesMut, content_len: u64) {

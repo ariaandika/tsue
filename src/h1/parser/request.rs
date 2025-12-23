@@ -2,7 +2,8 @@ use std::slice::from_raw_parts;
 use tcio::bytes::BytesMut;
 
 use super::{Target, error::ParseError, matches};
-use crate::{http::{Method, Version}, common::ParseResult};
+use crate::common::ParseResult;
+use crate::http::{Method, Version};
 
 const VERSION_SIZE: usize = b"HTTP/1.1".len();
 
