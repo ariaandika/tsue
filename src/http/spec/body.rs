@@ -14,6 +14,7 @@ use super::ChunkedDecoder;
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
 use crate::body::Incoming;
+use crate::body::handle::Shared;
 
 #[derive(Debug)]
 pub struct BodyDecoder {
@@ -22,13 +23,19 @@ pub struct BodyDecoder {
 
 #[derive(Clone, Debug)]
 pub enum Coding {
+    /// TODO: Currently, content-length: 0, and body exhausted state is separated
     Empty,
     Chunked(ChunkedDecoder),
     ContentLength(u64),
 }
 
-#[derive(Debug)]
-pub struct BodyHandle {
+impl Coding {
+    pub fn new(len: Option<u64>) -> Self {
+        match len {
+            Some(len) => Self::ContentLength(len),
+            None => Self::Chunked(ChunkedDecoder::new()),
+        }
+    }
 }
 
 impl BodyDecoder {
@@ -62,34 +69,30 @@ impl BodyDecoder {
         Ok(Self { coding })
     }
 
-    pub fn build_body(&self, buffer: &mut BytesMut, handle: &BodyHandle) -> Incoming {
-        // let body = if io.read_buffer_mut().len() == content_len as usize {
-        //     // all body have been read, use standalone representation
-        //     Body::new(io.read_buffer_mut().split())
-        // } else {
-        //     // `IoBuffer` remaining is only calculated excluding the already read body
-        //     let Some(remaining_body_len) = content_len.checked_sub(io.read_buffer_mut().len() as u64)
-        //     else {
-        //         return Poll::Ready(Err("content-length is less than body".into()));
-        //     };
-        //     io.set_remaining(remaining_body_len);
-        //     Body::from_handle(io.handle(), remaining_body_len)
-        // };
+    pub fn build_body(
+        &self,
+        buffer: &mut BytesMut,
+        shared: &mut Shared,
+        cx: &mut std::task::Context,
+    ) -> Incoming {
         match &self.coding {
             Coding::Empty | Coding::ContentLength(0) => Incoming::empty(),
-            Coding::Chunked(chunked) => todo!(),
+            Coding::Chunked(_) => Incoming::from_handle(shared.handle(cx), None),
             Coding::ContentLength(len) => {
                 if buffer.len() as u64 == *len {
                     Incoming::new(buffer.split())
                 } else {
-                    todo!()
+                    Incoming::from_handle(shared.handle(cx), Some(*len))
                 }
             }
         }
     }
 
     /// Returns Poll::Pending if more data read is required.
-    pub(crate) fn poll_read(&mut self, buffer: &mut BytesMut) -> Poll<Result<Option<BytesMut>, BodyError>> {
+    pub(crate) fn poll_read(
+        &mut self,
+        buffer: &mut BytesMut,
+    ) -> Poll<Result<Option<BytesMut>, BodyError>> {
         match &mut self.coding {
             Coding::Empty => Poll::Ready(Err(BodyError::Exhausted)),
             Coding::Chunked(decoder) => decoder.poll_chunk(buffer),
@@ -113,12 +116,6 @@ impl BodyDecoder {
                 }
             }
         }
-    }
-}
-
-impl BodyHandle {
-    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<std::io::Result<BytesMut>> {
-        todo!()
     }
 }
 

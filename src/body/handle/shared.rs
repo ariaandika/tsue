@@ -2,7 +2,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU8, Ordering, fence};
 use std::task::{Poll, Waker, ready};
 use std::{io, mem};
-use tcio::bytes::{BufMut, Bytes, BytesMut};
+use tcio::bytes::{Bytes, BytesMut};
 use tcio::io::AsyncIoRead;
 
 /// Sender shared handle.
@@ -33,17 +33,6 @@ enum Data {
 // }
 
 struct SharedInner {
-    // /// sender handle SHOULD NOT set waker if WANT flag set
-    // /// sender handle may only write data if WANT flag unset
-    // ///
-    // /// receiver handle SHOULD NOT read data if DATA flag unset
-    // /// receiver handle may only read data if DATA flag set
-    // ///
-    // /// if WANT flag is set, the waker is receiver handle's waker
-    // /// if WANT flag is unset, the waker is receiver handle's waker
-    // waker: Option<Waker>,
-
-
     /// sender handle SHOULD NOT write data if DATA flag set
     /// sender handle may only write data if DATA flag unset
     ///
@@ -68,6 +57,8 @@ const DATA_MASK     : u8 = 1 << 2;
 
 unsafe impl Send for Shared { }
 unsafe impl Sync for Shared { }
+unsafe impl Send for Handle { }
+unsafe impl Sync for Handle { }
 
 impl Drop for Shared {
     fn drop(&mut self) {
@@ -208,7 +199,7 @@ impl Shared {
     /// Check for data request from recv handle.
     ///
     /// Any IO error is propagated to recv handle.
-    pub fn poll_read<IO>(&mut self, buf: &mut BytesMut, io: IO, cx: &mut std::task::Context) -> Poll<()>
+    pub fn poll_read<IO>(&mut self, buf: &mut BytesMut, io: &mut IO, cx: &mut std::task::Context) -> Poll<()>
     where
         IO: AsyncIoRead,
     {

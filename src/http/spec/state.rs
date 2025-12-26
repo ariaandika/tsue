@@ -5,6 +5,7 @@ use super::{HttpContext, BodyDecoder};
 use crate::h1::parser::{Reqline};
 use crate::headers::standard::{CONTENT_LENGTH, HOST};
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
+use crate::http::spec::Coding;
 use crate::http::{Extensions, httpdate_now};
 use crate::http::{request, response};
 use crate::uri::HttpScheme;
@@ -65,17 +66,27 @@ pub fn insert_header(
     Ok(())
 }
 
-pub fn write_response(res: &response::Parts, buf: &mut BytesMut, content_len: u64) {
-    buf.reserve(128);
-
+pub fn write_response(res: &response::Parts, buf: &mut BytesMut, coding: &Coding) {
     buf.extend_from_slice(res.version.as_str().as_bytes());
     buf.extend_from_slice(b" ");
     buf.extend_from_slice(res.status.as_str().as_bytes());
     buf.extend_from_slice(b"\r\nDate: ");
     buf.extend_from_slice(&httpdate_now()[..]);
-    buf.extend_from_slice(b"\r\nContent-Length: ");
-    buf.extend_from_slice(itoa::Buffer::new().format(content_len).as_bytes());
-    buf.extend_from_slice(b"\r\n");
+
+    match coding {
+        Coding::Empty => {
+            buf.extend_from_slice(b"\r\nContent-Length: 0\r\n");
+        }
+        Coding::Chunked(_) => {
+            // TODO: support compressed transfer-encodings
+            buf.extend_from_slice(b"\r\nTransfer-Encoding: chunked\r\n");
+        }
+        Coding::ContentLength(len) => {
+            buf.extend_from_slice(b"\r\nContent-Length: ");
+            buf.extend_from_slice(itoa::Buffer::new().format(*len).as_bytes());
+            buf.extend_from_slice(b"\r\n");
+        }
+    }
 
     for (key, val) in &res.headers {
         buf.extend_from_slice(key.as_str().as_bytes());

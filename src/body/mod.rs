@@ -11,7 +11,7 @@
 //! - [`Full`] single chunk body
 //!
 mod frame;
-mod handle;
+pub(crate) mod handle;
 mod stream;
 mod collect;
 mod incoming;
@@ -42,6 +42,6 @@ pub trait Body {
 
     fn is_end_stream(&self) -> bool;
 
-    fn size_hint(&self) -> (usize, Option<usize>);
+    fn size_hint(&self) -> (u64, Option<u64>);
 }
 

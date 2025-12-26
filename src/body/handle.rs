@@ -1,12 +1,12 @@
-use tcio::bytes::BytesMut;
+use tcio::bytes::Bytes;
 use std::{
     io,
     task::{Poll, ready},
 };
 
-pub use crate::http::spec::{BodyHandle as IoHandle};
-
 mod shared;
+
+pub use shared::{Shared, Handle as IoHandle};
 
 #[derive(Debug)]
 pub struct BodyHandle {
@@ -26,7 +26,7 @@ impl BodyHandle {
         self.size_hint
     }
 
-    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<io::Result<BytesMut>>> {
+    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<io::Result<Bytes>>> {
         let data = ready!(self.handle.poll_read(cx)?);
 
         if let Some(size_hint) = &mut self.size_hint {

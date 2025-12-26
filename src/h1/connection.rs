@@ -6,12 +6,12 @@ use tcio::bytes::BytesMut;
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use super::parser::{Header, Reqline};
-use crate::body::{Body, BodyWrite};
-use crate::headers::{HeaderMap, HeaderName, HeaderValue};
-use crate::http::spec;
-use crate::http::spec::ProtoError;
+use crate::body::Body;
+use crate::body::handle::Shared;
+use crate::headers::HeaderMap;
+use crate::http::spec::{self, Coding};
 use crate::http::spec::{HttpContext, HttpState};
-use crate::http::{Request, Response};
+use crate::http::Request;
 use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -34,6 +34,7 @@ macro_rules! io_read {
 
 pub struct Connection<IO, S, B, F> {
     io: IO,
+    shared: Shared,
     read_buffer: BytesMut,
     write_buffer: BytesMut,
     header_map: HeaderMap,
@@ -43,6 +44,7 @@ pub struct Connection<IO, S, B, F> {
 
 type ConnectionProject<'a, IO, S, B, F> = (
     &'a mut IO,
+    &'a mut Shared,
     &'a mut BytesMut,
     &'a mut BytesMut,
     &'a mut HeaderMap,
@@ -54,8 +56,8 @@ enum Phase<B, F> {
     Reqline { want_read: bool },
     Header(Reqline),
     Service { context: HttpContext, service: F },
-    Drain(Response<B>),
-    Flush(B),
+    ResHeader { body: B, coding: Coding },
+    ResBody { body: B, coding: Coding },
     Cleanup,
     Placeholder,
 }
@@ -64,13 +66,16 @@ enum PhaseProject<'a, B, F> {
     Reqline {
         want_read: &'a mut bool,
     },
-    Header(&'a mut Reqline),
+    Header,
     Service {
         context: &'a mut HttpContext,
         service: Pin<&'a mut F>,
     },
-    Drain(&'a mut Response<B>),
-    Flush(Pin<&'a mut B>),
+    ResHeader,
+    ResBody {
+        body: Pin<&'a mut B>,
+        coding: &'a mut Coding,
+    },
     Cleanup,
 }
 
@@ -80,8 +85,9 @@ where
 {
     pub fn new(io: IO, service: Arc<S>) -> Self {
         Self {
-            header_map: HeaderMap::new(),
             io,
+            shared: Shared::new(),
+            header_map: HeaderMap::new(),
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             phase: Phase::Reqline { want_read: true },
@@ -97,7 +103,7 @@ where
     {
         // TODO: create custom error type that can generate Response
 
-        let (io, read_buffer, write_buffer, header_map, mut phase, service) = self.project();
+        let (io, shared, read_buffer, write_buffer, header_map, mut phase, service) = self.project();
 
         loop {
             match phase.as_mut().project() {
@@ -123,7 +129,7 @@ where
                     header_map.reserve(16);
                     phase.set(Phase::Header(reqline));
                 }
-                PhaseProject::Header(_) => {
+                PhaseProject::Header => {
                     loop {
                         match Header::parse_chunk(read_buffer).into_poll_result()? {
                             Poll::Pending => {
@@ -149,63 +155,59 @@ where
                     let context = state.build_context()?;
                     let decoder = state.build_decoder()?;
                     let parts = state.build_parts()?;
+                    let body = decoder.build_body(read_buffer, shared, cx);
 
-                    // FIXME: create shared Handle where Incoming 
-                    // let handle = io.handle();
-                    // let body = decoder.build_body(io.read_buffer_mut(), &handle);
+                    let request = Request::from_parts(parts, body);
 
-                    // let request = Request::from_parts(parts, body);
-                    //
-                    // let service = service.call(request);
-                    // phase.set(Phase::Service { context, service });
-
-                    todo!()
+                    let service = service.call(request);
+                    phase.set(Phase::Service { context, service });
                 }
-                PhaseProject::Service { context: _, service } => match service.poll(cx) {
-                    Poll::Ready(Ok(ok)) => {
-                        phase.set(Phase::Drain(ok));
-                    }
-                    Poll::Ready(Err(err)) => {
-                        return Poll::Ready(Err(err.into()));
-                    }
-                    Poll::Pending => {
-                        todo!()
-                        // let _ = io.poll_io_wants(cx)?;
-                        // return Poll::Pending;
-                    }
-                },
-                PhaseProject::Drain(_) => {
-                    // TODO: drain only if the body is an a treshold
-                    // ready!(io.poll_drain(cx)?);
+                PhaseProject::Service { context: _, service } => {
+                    let response = match service.poll(cx) {
+                        Poll::Ready(Ok(ok)) => ok,
+                        Poll::Ready(Err(err)) => {
+                            return Poll::Ready(Err(err.into()));
+                        }
+                        Poll::Pending => {
+                            let _ = shared.poll_read(read_buffer, io, cx);
+                            return Poll::Pending;
+                        }
+                    };
 
-                    let Phase::Drain(response) = phase.as_mut().take() else {
+                    let (parts, body) = response.into_parts();
+
+                    let coding = Coding::new(body.size_hint().1);
+                    spec::write_response(&parts, write_buffer, &coding);
+
+                    let mut headers = parts.headers;
+                    headers.clear();
+                    *header_map = headers;
+
+                    phase.set(Phase::ResHeader { body, coding });
+                },
+                PhaseProject::ResHeader => {
+                    ready!(io.poll_write_all_buf(write_buffer, cx))?;
+                    let Phase::ResHeader { body, coding } = phase.as_mut().take() else {
                         // SAFETY: pattern matched
                         unsafe { std::hint::unreachable_unchecked() }
                     };
-
-                    let (mut parts, body) = response.into_parts();
-
-                    // spec::write_response(&parts, io.write_buffer_mut(), body.remaining() as _);
-                    todo!();
-
-                    parts.headers.clear();
-                    *header_map = parts.headers;
-
-                    phase.set(Phase::Flush(body));
+                    phase.set(Phase::ResBody { body, coding });
                 }
-                PhaseProject::Flush(body) => {
-                    // ready!(io.poll_flush(cx))?;
+                PhaseProject::ResBody { body, coding } => {
+                    ready!(io.poll_write_all_buf(write_buffer, cx))?;
 
-                    // ready!(body.poll_write(io, cx))?;
-                    ready!(Body::poll_data(body, cx)?);
-                    todo!();
-                    // Body::poll_data(self: std::pin::Pin<&mut Self>, cx)
+                    let Some(frame) = ready!(Body::poll_data(body, cx)?) else {
+                        phase.set(Phase::Cleanup);
+                        continue;
+                    };
 
-                    phase.set(Phase::Cleanup);
+                    if let Ok(data) = frame.into_data() {
+                        todo!()
+                    }
                 }
                 PhaseProject::Cleanup => {
-                    // this phase exists to ensure all shared bytes is dropped, thus can be
-                    // reclaimed
+                    // TODO: drain only if the body is an a drain treshold
+                    // ready!(io.poll_drain(cx)?);
 
                     // `reserve` will try to reclaim buffer, but if the underlying buffer is grow
                     // thus reallocated, and the new allocated capacity is not at least
@@ -255,6 +257,7 @@ impl<IO, S, B, F> Connection<IO, S, B, F> {
             let me = self.get_unchecked_mut();
             (
                 &mut me.io,
+                &mut me.shared,
                 &mut me.read_buffer,
                 &mut me.write_buffer,
                 &mut me.header_map,
@@ -271,13 +274,16 @@ impl<B, F> Phase<B, F> {
         unsafe {
             match self.get_unchecked_mut() {
                 Self::Reqline { want_read } => PhaseProject::Reqline { want_read },
-                Self::Header(h) => PhaseProject::Header(h),
+                Self::Header(_) => PhaseProject::Header,
                 Self::Service { context, service } => PhaseProject::Service {
                     context,
                     service: Pin::new_unchecked(service),
                 },
-                Self::Drain(r) => PhaseProject::Drain(r),
-                Self::Flush(b) => PhaseProject::Flush(Pin::new_unchecked(b)),
+                Self::ResHeader { .. } => PhaseProject::ResHeader,
+                Self::ResBody { body, coding } => PhaseProject::ResBody {
+                    body: Pin::new_unchecked(body),
+                    coding,
+                },
                 Self::Cleanup => PhaseProject::Cleanup,
                 Self::Placeholder => unreachable!(),
             }

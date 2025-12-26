@@ -102,7 +102,7 @@ impl Incoming {
             } else {
                 Some(Ok(std::mem::take(b)))
             }),
-            Repr::Handle(handle) => handle.poll_read(cx).map_ok(BytesMut::freeze),
+            Repr::Handle(handle) => handle.poll_read(cx),
         }
     }
 }

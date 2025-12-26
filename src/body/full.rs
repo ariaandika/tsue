@@ -46,10 +46,10 @@ where
         self.data.is_none()
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
+    fn size_hint(&self) -> (u64, Option<u64>) {
         match &self.data {
             Some(d) => {
-                let remain = d.remaining();
+                let remain = d.remaining() as u64;
                 (remain, Some(remain))
             },
             None => (0, None),

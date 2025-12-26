@@ -27,5 +27,5 @@ use chunked::ChunkedDecoder;
 
 pub use state::{HttpState, write_response, insert_header};
 pub use context::HttpContext;
-pub use body::{BodyDecoder, Coding, BodyHandle, BodyError};
+pub use body::{BodyDecoder, Coding, BodyError};
 pub use error::ProtoError;
