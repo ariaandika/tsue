@@ -6,6 +6,8 @@ use std::{
 
 pub use crate::http::spec::{BodyHandle as IoHandle};
 
+mod shared;
+
 #[derive(Debug)]
 pub struct BodyHandle {
     handle: IoHandle,

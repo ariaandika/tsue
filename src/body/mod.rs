@@ -11,23 +11,17 @@
 //! - [`Full`] single chunk body
 //!
 mod frame;
-
 mod handle;
 mod stream;
 mod collect;
-
 mod incoming;
 mod full;
-
 mod writer;
 
 pub(crate) use writer::BodyWrite;
-
 pub use frame::Frame;
-
 pub use incoming::Incoming;
 pub use full::Full;
-
 pub use stream::BodyStream;
 pub use collect::Collect;
 
