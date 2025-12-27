@@ -1,8 +1,7 @@
+use std::task::{Poll, ready};
 use tcio::bytes::Bytes;
-use std::{
-    io,
-    task::{Poll, ready},
-};
+
+use super::error::ReadError;
 
 mod shared;
 
@@ -26,7 +25,7 @@ impl BodyHandle {
         self.size_hint
     }
 
-    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<io::Result<Bytes>>> {
+    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<Result<Bytes, ReadError>>> {
         let data = ready!(self.handle.poll_read(cx)?);
 
         if let Some(size_hint) = &mut self.size_hint {

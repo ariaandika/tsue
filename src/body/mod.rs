@@ -17,6 +17,7 @@ mod collect;
 mod incoming;
 mod full;
 mod writer;
+pub mod error;
 
 pub(crate) use writer::BodyWrite;
 pub use frame::Frame;

@@ -2,14 +2,14 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Poll, ready};
-use tcio::bytes::BytesMut;
+use tcio::bytes::{Buf, BytesMut};
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use super::parser::{Header, Reqline};
 use crate::body::Body;
 use crate::body::handle::Shared;
 use crate::headers::HeaderMap;
-use crate::http::spec::{self, Coding};
+use crate::http::spec::{self, BodyDecoder};
 use crate::http::spec::{HttpContext, HttpState};
 use crate::http::Request;
 use crate::service::HttpService;
@@ -53,11 +53,23 @@ type ConnectionProject<'a, IO, S, B, F> = (
 );
 
 enum Phase<B, F> {
-    Reqline { want_read: bool },
+    Reqline {
+        want_read: bool,
+    },
     Header(Reqline),
-    Service { context: HttpContext, service: F },
-    ResHeader { body: B, coding: Coding },
-    ResBody { body: B, coding: Coding },
+    Service {
+        context: HttpContext,
+        decoder: BodyDecoder,
+        service: F,
+    },
+    ResHeader {
+        body: B,
+        body_encoder: BodyDecoder,
+    },
+    ResBody {
+        body: B,
+        body_encoder: BodyDecoder,
+    },
     Cleanup,
     Placeholder,
 }
@@ -69,12 +81,13 @@ enum PhaseProject<'a, B, F> {
     Header,
     Service {
         context: &'a mut HttpContext,
+        body_encoder: &'a mut BodyDecoder,
         service: Pin<&'a mut F>,
     },
     ResHeader,
     ResBody {
         body: Pin<&'a mut B>,
-        coding: &'a mut Coding,
+        body_encoder: &'a mut BodyDecoder,
     },
     Cleanup,
 }
@@ -160,40 +173,41 @@ where
                     let request = Request::from_parts(parts, body);
 
                     let service = service.call(request);
-                    phase.set(Phase::Service { context, service });
+                    phase.set(Phase::Service { context, decoder, service });
                 }
-                PhaseProject::Service { context: _, service } => {
+                PhaseProject::Service { context: _, body_encoder: decoder, service } => {
                     let response = match service.poll(cx) {
                         Poll::Ready(Ok(ok)) => ok,
                         Poll::Ready(Err(err)) => {
                             return Poll::Ready(Err(err.into()));
                         }
                         Poll::Pending => {
-                            let _ = shared.poll_read(read_buffer, io, cx);
+                            let _ = shared.poll_read(read_buffer, decoder, io, cx);
                             return Poll::Pending;
                         }
                     };
 
+                    // ===== Response ======
                     let (parts, body) = response.into_parts();
 
-                    let coding = Coding::new(body.size_hint().1);
-                    spec::write_response(&parts, write_buffer, &coding);
+                    let body_encoder = BodyDecoder::from_len(body.size_hint().1);
+                    spec::write_response(&parts, write_buffer, body_encoder.coding());
 
                     let mut headers = parts.headers;
                     headers.clear();
                     *header_map = headers;
 
-                    phase.set(Phase::ResHeader { body, coding });
+                    phase.set(Phase::ResHeader { body, body_encoder });
                 },
                 PhaseProject::ResHeader => {
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
-                    let Phase::ResHeader { body, coding } = phase.as_mut().take() else {
+                    let Phase::ResHeader { body, body_encoder } = phase.as_mut().take() else {
                         // SAFETY: pattern matched
                         unsafe { std::hint::unreachable_unchecked() }
                     };
-                    phase.set(Phase::ResBody { body, coding });
+                    phase.set(Phase::ResBody { body, body_encoder });
                 }
-                PhaseProject::ResBody { body, coding } => {
+                PhaseProject::ResBody { body, body_encoder } => {
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
 
                     let Some(frame) = ready!(Body::poll_data(body, cx)?) else {
@@ -201,8 +215,10 @@ where
                         continue;
                     };
 
-                    if let Ok(data) = frame.into_data() {
-                        todo!()
+                    if let Ok(mut data) = frame.into_data() {
+                        let len = data.remaining();
+                        ready!(body_encoder.encode_chunk(data.copy_to_bytes(len), &mut *io))?;
+                        todo!("statefull body encoding")
                     }
                 }
                 PhaseProject::Cleanup => {
@@ -275,14 +291,19 @@ impl<B, F> Phase<B, F> {
             match self.get_unchecked_mut() {
                 Self::Reqline { want_read } => PhaseProject::Reqline { want_read },
                 Self::Header(_) => PhaseProject::Header,
-                Self::Service { context, service } => PhaseProject::Service {
+                Self::Service {
                     context,
+                    decoder,
+                    service,
+                } => PhaseProject::Service {
+                    context,
+                    body_encoder: decoder,
                     service: Pin::new_unchecked(service),
                 },
                 Self::ResHeader { .. } => PhaseProject::ResHeader,
-                Self::ResBody { body, coding } => PhaseProject::ResBody {
+                Self::ResBody { body, body_encoder } => PhaseProject::ResBody {
                     body: Pin::new_unchecked(body),
-                    coding,
+                    body_encoder,
                 },
                 Self::Cleanup => PhaseProject::Cleanup,
                 Self::Placeholder => unreachable!(),

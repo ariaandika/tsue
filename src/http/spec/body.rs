@@ -7,7 +7,8 @@
 
 use std::fmt;
 use std::task::Poll;
-use tcio::bytes::BytesMut;
+use tcio::bytes::{Bytes, BytesMut};
+use tcio::io::AsyncIoWrite;
 
 use super::ProtoError;
 use super::ChunkedDecoder;
@@ -29,16 +30,17 @@ pub enum Coding {
     ContentLength(u64),
 }
 
-impl Coding {
-    pub fn new(len: Option<u64>) -> Self {
-        match len {
-            Some(len) => Self::ContentLength(len),
-            None => Self::Chunked(ChunkedDecoder::new()),
+impl BodyDecoder {
+    pub fn from_len(len: Option<u64>) -> Self {
+        let coding = match len {
+            Some(len) => Coding::ContentLength(len),
+            None => Coding::Chunked(ChunkedDecoder::new()),
+        };
+        Self {
+            coding,
         }
     }
-}
 
-impl BodyDecoder {
     pub fn new(headers: &HeaderMap) -> Result<Self, ProtoError> {
         let mut content_lengths = headers.get_all(CONTENT_LENGTH);
         let mut transfer_encodings = headers.get_all(TRANSFER_ENCODING);
@@ -89,13 +91,13 @@ impl BodyDecoder {
     }
 
     /// Returns Poll::Pending if more data read is required.
-    pub(crate) fn poll_read(
+    pub(crate) fn decode_chunk(
         &mut self,
         buffer: &mut BytesMut,
-    ) -> Poll<Result<Option<BytesMut>, BodyError>> {
+    ) -> Poll<Option<Result<BytesMut, BodyError>>> {
         match &mut self.coding {
-            Coding::Empty => Poll::Ready(Err(BodyError::Exhausted)),
-            Coding::Chunked(decoder) => decoder.poll_chunk(buffer),
+            Coding::Empty => Poll::Ready(Some(Err(BodyError::Exhausted))),
+            Coding::Chunked(decoder) => decoder.decode_chunk(buffer),
             Coding::ContentLength(remaining_mut) => {
                 let remaining = *remaining_mut;
                 match remaining.checked_sub(buffer.len() as u64) {
@@ -106,16 +108,53 @@ impl BodyDecoder {
                             clippy::cast_possible_truncation,
                             reason = "remaining <= buffer.len() which is usize"
                         )]
-                        Poll::Ready(Ok(Some(buffer.split_to(remaining as usize))))
+                        Poll::Ready(Some(Ok(buffer.split_to(remaining as usize))))
                     }
                     // buffer does not contains all expected content
                     Some(leftover) => {
                         *remaining_mut = leftover;
-                        Poll::Ready(Ok(Some(buffer.split())))
+                        Poll::Ready(Some(Ok(buffer.split())))
                     }
                 }
             }
         }
+    }
+
+    pub(crate) fn encode_chunk<W: AsyncIoWrite>(
+        &mut self,
+        mut chunk: Bytes,
+        io: &mut W,
+    ) -> Poll<Result<(), BodyError>> {
+        match &mut self.coding {
+            Coding::Chunked(decoder) => decoder.encode_chunk(io),
+            Coding::ContentLength(remaining_mut) => {
+                let remaining = *remaining_mut;
+                match remaining.checked_sub(chunk.len() as u64) {
+                    // chunk contains exact or larger than expected content
+                    None | Some(0) => {
+                        self.coding = Coding::Empty;
+                        #[allow(
+                            clippy::cast_possible_truncation,
+                            reason = "remaining <= buffer.len() which is usize"
+                        )]
+                        chunk.truncate(remaining as usize);
+                        todo!("statefull chunk encoder")
+                        // Poll::Ready(Ok(()))
+                    }
+                    // buffer does not contains all expected content
+                    Some(leftover) => {
+                        *remaining_mut = leftover;
+                        // Poll::Ready(Some(Ok(buffer.split())))
+                        todo!("statefull chunk encoder")
+                    }
+                }
+            },
+            Coding::Empty => Poll::Ready(Ok(()))
+        }
+    }
+
+    pub const fn coding(&self) -> &Coding {
+        &self.coding
     }
 }
 

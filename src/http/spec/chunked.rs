@@ -29,10 +29,10 @@ impl ChunkedDecoder {
     }
 
     /// Poll for chunked body, returns `None` it end of chunks found.
-    pub(crate) fn poll_chunk(
+    pub(crate) fn decode_chunk(
         &mut self,
         buffer: &mut BytesMut,
-    ) -> Poll<Result<Option<BytesMut>, BodyError>> {
+    ) -> Poll<Option<Result<BytesMut, BodyError>>> {
         match &mut self.phase {
             Phase::Header => {
                 let Some(digits_len) = buffer.iter().position(|e| !e.is_ascii_hexdigit()) else {
@@ -41,17 +41,17 @@ impl ChunkedDecoder {
                 // SAFETY: `is_ascii_hexdigit` is subset of ASCII
                 let digits = unsafe { str::from_utf8_unchecked(&buffer[..digits_len]) };
                 let Ok(chunk_len) = u64::from_str_radix(digits, 16) else {
-                    return Poll::Ready(Err(BodyError::InvalidChunked));
+                    return Poll::Ready(Some(Err(BodyError::InvalidChunked)));
                 };
                 if chunk_len > MAX_CHUNKED_SIZE {
-                    return Poll::Ready(Err(BodyError::ChunkTooLarge));
+                    return Poll::Ready(Some(Err(BodyError::ChunkTooLarge)));
                 }
 
                 // extension / CRLF delimiter
                 let trailing_header = match buffer[digits_len] {
                     b'\r' => match buffer.get(digits_len + 1) {
                         Some(b'\n') => 2,
-                        Some(_) => return Poll::Ready(Err(BodyError::InvalidChunked)),
+                        Some(_) => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
                         None => return Poll::Pending,
                     },
                     b';' => match buffer[digits_len..].iter().position(|&e| e == b'\n') {
@@ -59,7 +59,7 @@ impl ChunkedDecoder {
                         Some(trailing) => trailing + 1,
                         None => return Poll::Pending,
                     },
-                    _ => return Poll::Ready(Err(BodyError::InvalidChunked)),
+                    _ => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
                 };
                 buffer.advance(digits_len + trailing_header);
 
@@ -67,15 +67,15 @@ impl ChunkedDecoder {
                     Some(nonzero_len) => {
                         self.phase = Phase::Chunk(nonzero_len);
                         // advance
-                        self.poll_chunk(buffer)
+                        self.decode_chunk(buffer)
                     }
                     None => match buffer.first_chunk::<2>() {
                         Some(b"\r\n") => {
                             self.phase = Phase::Eof;
                             buffer.advance(2);
-                            Poll::Ready(Ok(None))
+                            Poll::Ready(None)
                         }
-                        Some(_) => Poll::Ready(Err(BodyError::InvalidChunked)),
+                        Some(_) => Poll::Ready(Some(Err(BodyError::InvalidChunked))),
                         None => Poll::Pending,
                     }
                 }
@@ -89,7 +89,7 @@ impl ChunkedDecoder {
                     // buffer contains partial of the expected chunk
                     Some(leftover) => {
                         *remaining_mut = leftover;
-                        Poll::Ready(Ok(Some(buffer.split())))
+                        Poll::Ready(Some(Ok(buffer.split())))
                     }
                     // buffer contains exact or larger than expected content
                     None => {
@@ -104,15 +104,22 @@ impl ChunkedDecoder {
                                 self.phase = Phase::Header;
                                 buffer.advance(2);
                             }
-                            Some(_) => return Poll::Ready(Err(BodyError::InvalidChunked)),
+                            Some(_) => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
                             None => return Poll::Pending,
                         }
-                        Poll::Ready(Ok(Some(body)))
+                        Poll::Ready(Some(Ok(body)))
                     }
                 }
             }
-            Phase::Eof => Poll::Ready(Err(BodyError::Exhausted)),
+            Phase::Eof => Poll::Ready(Some(Err(BodyError::Exhausted))),
         }
+    }
+
+    pub fn encode_chunk<W: tcio::io::AsyncIoWrite>(
+        &mut self,
+        io: &mut W,
+    ) -> Poll<Result<(), BodyError>> {
+        todo!()
     }
 }
 

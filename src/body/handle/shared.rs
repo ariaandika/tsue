@@ -5,6 +5,9 @@ use std::{io, mem};
 use tcio::bytes::{Bytes, BytesMut};
 use tcio::io::AsyncIoRead;
 
+use crate::http::spec::{BodyDecoder, BodyError};
+use crate::body::error::ReadError;
+
 /// Sender shared handle.
 pub struct Shared {
     inner: NonNull<SharedInner>,
@@ -19,8 +22,10 @@ pub struct Handle {
 enum Data {
     #[default]
     None,
+    Eof,
     Ok(Bytes),
-    Err(io::Error),
+    BodyErr(BodyError),
+    IoErr(io::Error),
     Recv(Waker),
     Send(Waker),
 }
@@ -124,7 +129,7 @@ impl Drop for Handle {
 }
 
 impl Handle {
-    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<io::Result<Bytes>> {
+    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Result<Bytes, ReadError>> {
         let inner = unsafe { self.inner.as_mut() };
 
         // set `wants` flag
@@ -140,7 +145,8 @@ impl Handle {
 
             let result = match mem::replace(&mut inner.data, Data::None) {
                 Data::Ok(bytes) => Ok(bytes),
-                Data::Err(err) => Err(err),
+                Data::BodyErr(err) => Err(err.into()),
+                Data::IoErr(err) => Err(err.into()),
                 _ => unreachable!(),
             };
 
@@ -199,7 +205,13 @@ impl Shared {
     /// Check for data request from recv handle.
     ///
     /// Any IO error is propagated to recv handle.
-    pub fn poll_read<IO>(&mut self, buf: &mut BytesMut, io: &mut IO, cx: &mut std::task::Context) -> Poll<()>
+    pub fn poll_read<IO>(
+        &mut self,
+        buf: &mut BytesMut,
+        decoder: &mut BodyDecoder,
+        io: &mut IO,
+        cx: &mut std::task::Context,
+    ) -> Poll<()>
     where
         IO: AsyncIoRead,
     {
@@ -215,14 +227,23 @@ impl Shared {
 
         } else if flag.is_set::<WANT_MASK>() {
             // recv handle wants data
-            let result = match ready!(io.poll_read_buf(buf, cx)) {
-                Ok(read) => {
-                    if read == 0 {
-                        todo!("connection terminated")
-                    }
-                    Data::Ok(buf.split_to(read).freeze())
-                },
-                Err(err) => Data::Err(err),
+            let result = loop {
+                match ready!(io.poll_read_buf(buf, cx)) {
+                    Ok(read) => {
+                        if read == 0 {
+                            todo!("connection terminated")
+                        }
+                        let Poll::Ready(data) = decoder.decode_chunk(buf) else {
+                            continue;
+                        };
+                        break match data {
+                            Some(Ok(data)) => Data::Ok(data.freeze()),
+                            Some(Err(err)) => Data::BodyErr(err),
+                            None => Data::Eof,
+                        }
+                    },
+                    Err(err) => break Data::IoErr(err),
+                };
             };
 
             // WANT flag is set, thus recv is idle and the data is owned by send handle
@@ -275,3 +296,4 @@ impl Bitwise for u8 {
         *self & F != F
     }
 }
+

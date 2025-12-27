@@ -1,9 +1,10 @@
-use tcio::bytes::{Bytes, BytesMut};
 use std::{io, task::Poll};
+use tcio::bytes::Bytes;
 
-use super::handle::{BodyHandle, IoHandle};
 use super::BodyWrite;
 use super::Collect;
+use super::error::ReadError;
+use super::handle::{BodyHandle, IoHandle};
 
 /// [`Body`] implemenation for HTTP server.
 ///
@@ -85,7 +86,7 @@ impl Incoming {
 
 impl Incoming {
     #[inline]
-    pub fn read(&mut self) -> impl Future<Output = Option<io::Result<Bytes>>> {
+    pub fn read(&mut self) -> impl Future<Output = Option<Result<Bytes, ReadError>>> {
         std::future::poll_fn(|cx| self.poll_read(cx))
     }
 
@@ -95,7 +96,7 @@ impl Incoming {
     }
 
     /// Tries to read data from the stream and returns the buffer.
-    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<io::Result<Bytes>>> {
+    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<Result<Bytes, ReadError>>> {
         match &mut self.repr {
             Repr::Bytes(b) => Poll::Ready(if b.is_empty() {
                 None
