@@ -6,7 +6,7 @@
 use crate::h1::parser::Reqline;
 use crate::headers::{HeaderMap, standard::CONNECTION};
 use crate::http::{Method, Version};
-use crate::http::spec::ProtoError;
+use crate::proto::error::ProtoError;
 
 // TODO: protocol upgrade www.rfc-editor.org/rfc/rfc9110.html#name-upgrade
 

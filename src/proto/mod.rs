@@ -1,4 +1,3 @@
-#![deny(clippy::cast_possible_truncation)]
 //! HTTP/1.1 Semantics.
 //!
 //! - [`HttpContext`] per request context
@@ -16,16 +15,11 @@
 //! call `build_*` method to retrieve [`HttpContext`], [`BodyDecoder`], and [`Request`].
 //!
 //! [`Request`]: crate::request::Request
-mod chunked;
-mod body;
 
 mod state;
 mod context;
-mod error;
+pub mod error;
 
-use chunked::ChunkedDecoder;
-
-pub use state::{HttpState, write_response, insert_header};
+pub use state::{HttpState, insert_header, write_response};
 pub use context::HttpContext;
-pub use body::{BodyDecoder, Coding, BodyError};
-pub use error::ProtoError;
+

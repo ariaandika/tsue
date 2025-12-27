@@ -5,8 +5,8 @@ use std::{io, mem};
 use tcio::bytes::{Bytes, BytesMut};
 use tcio::io::AsyncIoRead;
 
-use crate::http::spec::{BodyDecoder, BodyError};
-use crate::body::error::ReadError;
+use crate::body::decoder::BodyDecoder;
+use crate::body::error::{ReadError, BodyError};
 
 /// Sender shared handle.
 pub struct Shared {

@@ -9,8 +9,8 @@ use super::parser::{Header, Reqline};
 use crate::body::Body;
 use crate::body::handle::Shared;
 use crate::headers::HeaderMap;
-use crate::http::spec::{self, BodyDecoder};
-use crate::http::spec::{HttpContext, HttpState};
+use crate::body::decoder::BodyDecoder;
+use crate::proto::{self, HttpContext, HttpState};
 use crate::http::Request;
 use crate::service::HttpService;
 
@@ -150,7 +150,7 @@ where
                                 continue;
                             }
                             Poll::Ready(Some(Header { name, value })) => {
-                                spec::insert_header(header_map, name, value)?;
+                                proto::insert_header(header_map, name, value)?;
                             }
                             Poll::Ready(None) => break,
                         };
@@ -191,7 +191,7 @@ where
                     let (parts, body) = response.into_parts();
 
                     let body_encoder = BodyDecoder::from_len(body.size_hint().1);
-                    spec::write_response(&parts, write_buffer, body_encoder.coding());
+                    proto::write_response(&parts, write_buffer, body_encoder.coding());
 
                     let mut headers = parts.headers;
                     headers.clear();

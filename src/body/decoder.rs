@@ -5,17 +5,16 @@
 // Content-Length
 // Transfer-Encoding - chunked, gzip, etc.
 
-use std::fmt;
 use std::task::Poll;
 use tcio::bytes::{Bytes, BytesMut};
 use tcio::io::AsyncIoWrite;
 
-use super::ProtoError;
-use super::ChunkedDecoder;
+use crate::body::chunked::ChunkedDecoder;
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
 use crate::body::Incoming;
 use crate::body::handle::Shared;
+use crate::body::error::BodyError;
 
 #[derive(Debug)]
 pub struct BodyDecoder {
@@ -41,7 +40,7 @@ impl BodyDecoder {
         }
     }
 
-    pub fn new(headers: &HeaderMap) -> Result<Self, ProtoError> {
+    pub fn new(headers: &HeaderMap) -> Result<Self, BodyError> {
         let mut content_lengths = headers.get_all(CONTENT_LENGTH);
         let mut transfer_encodings = headers.get_all(TRANSFER_ENCODING);
 
@@ -52,21 +51,21 @@ impl BodyDecoder {
 
                 let ok = transfer_encodings.all(|e|e.as_bytes().eq_ignore_ascii_case(b"chunked"));
                 if !ok {
-                    return Err(ProtoError::UnknownCodings);
+                    return Err(BodyError::UnknownCodings);
                 }
 
                 Coding::Chunked(ChunkedDecoder::new())
             }
             (Some(length), false) => {
                 if content_lengths.has_remaining() {
-                    return Err(ProtoError::InvalidContentLength);
+                    return Err(BodyError::InvalidContentLength);
                 }
                 match tcio::atou(length.as_bytes()) {
                     Some(length) => Coding::ContentLength(length),
-                    None => return Err(ProtoError::InvalidContentLength),
+                    None => return Err(BodyError::InvalidContentLength),
                 }
             }
-            (Some(_), true) => return Err(ProtoError::InvalidCodings),
+            (Some(_), true) => return Err(BodyError::InvalidCodings),
         };
         Ok(Self { coding })
     }
@@ -155,37 +154,6 @@ impl BodyDecoder {
 
     pub const fn coding(&self) -> &Coding {
         &self.coding
-    }
-}
-
-// ===== Error =====
-
-/// A semantic error when reading message body.
-#[derive(Debug)]
-pub enum BodyError {
-    /// User error where it tries to read empty body.
-    Exhausted,
-    /// Client error where chunked format is invalid.
-    InvalidChunked,
-    /// Client error where chunked length is too large.
-    ChunkTooLarge,
-}
-
-impl BodyError {
-    const fn message(&self) -> &'static str {
-        match self {
-            Self::Exhausted => "message body exhausted",
-            Self::InvalidChunked => "invalid chunked format",
-            Self::ChunkTooLarge => "chunk too large",
-        }
-    }
-}
-
-impl std::error::Error for BodyError { }
-
-impl fmt::Display for BodyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.message())
     }
 }
 

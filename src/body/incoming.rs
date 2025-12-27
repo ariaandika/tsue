@@ -1,7 +1,6 @@
-use std::{io, task::Poll};
+use std::task::Poll;
 use tcio::bytes::Bytes;
 
-use super::BodyWrite;
 use super::Collect;
 use super::error::ReadError;
 use super::handle::{BodyHandle, IoHandle};
@@ -54,10 +53,10 @@ impl Incoming {
         }
     }
 
-    #[inline]
-    pub(crate) fn into_writer(self) -> BodyWrite {
-        BodyWrite::new(self)
-    }
+    // #[inline]
+    // pub(crate) fn into_writer(self) -> BodyWrite {
+    //     BodyWrite::new(self)
+    // }
 }
 
 // ===== Ref =====

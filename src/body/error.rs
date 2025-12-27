@@ -1,6 +1,46 @@
 use std::io;
 
-use crate::http::spec::BodyError;
+// ===== Body Error =====
+
+/// A semantic error when reading message body.
+#[derive(Debug)]
+pub enum BodyError {
+    /// Invalid or duplicate Content-Length value.
+    InvalidContentLength,
+    /// Invalid message body codings.
+    InvalidCodings,
+    /// Unknown or unsupported `Transfer-Encoding` codings.
+    UnknownCodings,
+    /// User error where it tries to read empty body.
+    Exhausted,
+    /// Client error where chunked format is invalid.
+    InvalidChunked,
+    /// Client error where chunked length is too large.
+    ChunkTooLarge,
+}
+
+impl BodyError {
+    const fn message(&self) -> &'static str {
+        match self {
+            Self::InvalidContentLength => "invalid content length",
+            Self::InvalidCodings => "invalid message body codings",
+            Self::UnknownCodings => "unknown or unsupported message body codings",
+            Self::Exhausted => "message body exhausted",
+            Self::InvalidChunked => "invalid chunked format",
+            Self::ChunkTooLarge => "chunk too large",
+        }
+    }
+}
+
+impl std::error::Error for BodyError { }
+
+impl std::fmt::Display for BodyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+// ===== Read Body Error =====
 
 /// Body reading error.
 pub struct ReadError {

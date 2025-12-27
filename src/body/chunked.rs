@@ -1,7 +1,7 @@
 use std::{num::NonZeroU64, task::Poll};
 use tcio::bytes::{Buf, BytesMut};
 
-use super::BodyError;
+use crate::body::error::BodyError;
 
 const MAX_CHUNKED_SIZE: u64 = 64 * 1024;
 
@@ -122,4 +122,3 @@ impl ChunkedDecoder {
         todo!()
     }
 }
-

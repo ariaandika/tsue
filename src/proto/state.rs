@@ -1,13 +1,15 @@
 use tcio::bytes::{Bytes, BytesMut};
 
-use super::ProtoError;
-use super::{HttpContext, BodyDecoder};
-use crate::h1::parser::{Reqline};
-use crate::headers::standard::{CONTENT_LENGTH, HOST};
+use crate::body::decoder::BodyDecoder;
+use crate::body::decoder::Coding;
+use crate::body::error::BodyError;
+use crate::h1::parser::Reqline;
+use crate::headers::standard::HOST;
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
-use crate::http::spec::Coding;
 use crate::http::{Extensions, httpdate_now};
 use crate::http::{request, response};
+use crate::proto::HttpContext;
+use crate::proto::error::ProtoError;
 use crate::uri::HttpScheme;
 
 #[derive(Debug)]
@@ -25,7 +27,7 @@ impl HttpState {
         HttpContext::new(&self.reqline, &self.headers)
     }
 
-    pub fn build_decoder(&self) -> Result<BodyDecoder, ProtoError> {
+    pub fn build_decoder(&self) -> Result<BodyDecoder, BodyError> {
         BodyDecoder::new(&self.headers)
     }
 

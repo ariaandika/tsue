@@ -69,4 +69,3 @@ impl From<HeaderValueError> for ProtoError {
         Self::HeaderError(value.into())
     }
 }
-

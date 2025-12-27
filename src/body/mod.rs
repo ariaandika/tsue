@@ -10,16 +10,25 @@
 //! - [`Incoming`] streamed or buffered body
 //! - [`Full`] single chunk body
 //!
-mod frame;
-pub(crate) mod handle;
+
+// === impl Body ===
 mod stream;
-mod collect;
-mod incoming;
 mod full;
-mod writer;
+
+// === HTTP ===
+mod chunked;
+// mod encoder;
+pub(crate) mod decoder;
+
+// === IO ===
+pub(crate) mod handle;
+mod frame;
+mod incoming;
+mod collect;
+
 pub mod error;
 
-pub(crate) use writer::BodyWrite;
+
 pub use frame::Frame;
 pub use incoming::Incoming;
 pub use full::Full;
