@@ -6,7 +6,7 @@ use crate::body::error::BodyError;
 const MAX_CHUNKED_SIZE: u64 = 64 * 1024;
 
 #[derive(Clone, Debug)]
-pub struct ChunkedDecoder {
+pub struct ChunkedCoder {
     phase: Phase,
 }
 
@@ -14,18 +14,13 @@ pub struct ChunkedDecoder {
 enum Phase {
     Header,
     Chunk(NonZeroU64),
-    Eof,
 }
 
-impl ChunkedDecoder {
+impl ChunkedCoder {
     pub(crate) fn new() -> Self {
         Self {
             phase: Phase::Header,
         }
-    }
-
-    pub fn is_eof(&self) -> bool {
-        matches!(self.phase, Phase::Eof)
     }
 
     /// Poll for chunked body, returns `None` it end of chunks found.
@@ -71,7 +66,6 @@ impl ChunkedDecoder {
                     }
                     None => match buffer.first_chunk::<2>() {
                         Some(b"\r\n") => {
-                            self.phase = Phase::Eof;
                             buffer.advance(2);
                             Poll::Ready(None)
                         }
@@ -111,7 +105,6 @@ impl ChunkedDecoder {
                     }
                 }
             }
-            Phase::Eof => Poll::Ready(Some(Err(BodyError::Exhausted))),
         }
     }
 

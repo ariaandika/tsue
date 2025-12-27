@@ -5,7 +5,7 @@ use std::{io, mem};
 use tcio::bytes::{Bytes, BytesMut};
 use tcio::io::AsyncIoRead;
 
-use crate::body::decoder::BodyDecoder;
+use crate::body::coder::BodyCoder;
 use crate::body::error::{ReadError, BodyError};
 
 /// Sender shared handle.
@@ -208,7 +208,7 @@ impl Shared {
     pub fn poll_read<IO>(
         &mut self,
         buf: &mut BytesMut,
-        decoder: &mut BodyDecoder,
+        decoder: &mut BodyCoder,
         io: &mut IO,
         cx: &mut std::task::Context,
     ) -> Poll<()>

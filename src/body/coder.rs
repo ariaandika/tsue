@@ -9,34 +9,32 @@ use std::task::Poll;
 use tcio::bytes::{Bytes, BytesMut};
 use tcio::io::AsyncIoWrite;
 
-use crate::body::chunked::ChunkedDecoder;
+use crate::body::chunked::ChunkedCoder;
+use crate::body::error::BodyError;
+use crate::body::handle::Shared;
+use crate::body::{Codec, Incoming};
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
-use crate::body::Incoming;
-use crate::body::handle::Shared;
-use crate::body::error::BodyError;
 
 #[derive(Debug)]
-pub struct BodyDecoder {
-    coding: Coding,
+pub struct BodyCoder {
+    kind: Kind,
 }
 
 #[derive(Clone, Debug)]
-pub enum Coding {
-    /// TODO: Currently, content-length: 0, and body exhausted state is separated
-    Empty,
-    Chunked(ChunkedDecoder),
+enum Kind {
+    Chunked(ChunkedCoder),
     ContentLength(u64),
 }
 
-impl BodyDecoder {
+impl BodyCoder {
     pub fn from_len(len: Option<u64>) -> Self {
-        let coding = match len {
-            Some(len) => Coding::ContentLength(len),
-            None => Coding::Chunked(ChunkedDecoder::new()),
+        let kind = match len {
+            Some(len) => Kind::ContentLength(len),
+            None => Kind::Chunked(ChunkedCoder::new()),
         };
         Self {
-            coding,
+            kind,
         }
     }
 
@@ -44,8 +42,8 @@ impl BodyDecoder {
         let mut content_lengths = headers.get_all(CONTENT_LENGTH);
         let mut transfer_encodings = headers.get_all(TRANSFER_ENCODING);
 
-        let coding = match (content_lengths.next(), transfer_encodings.has_remaining()) {
-            (None, false) => Coding::ContentLength(0),
+        let kind = match (content_lengths.next(), transfer_encodings.has_remaining()) {
+            (None, false) => Kind::ContentLength(0),
             (None, true) => {
                 // TODO: support compressed transfer-encodings
 
@@ -54,20 +52,20 @@ impl BodyDecoder {
                     return Err(BodyError::UnknownCodings);
                 }
 
-                Coding::Chunked(ChunkedDecoder::new())
+                Kind::Chunked(ChunkedCoder::new())
             }
             (Some(length), false) => {
                 if content_lengths.has_remaining() {
                     return Err(BodyError::InvalidContentLength);
                 }
                 match tcio::atou(length.as_bytes()) {
-                    Some(length) => Coding::ContentLength(length),
+                    Some(length) => Kind::ContentLength(length),
                     None => return Err(BodyError::InvalidContentLength),
                 }
             }
             (Some(_), true) => return Err(BodyError::InvalidCodings),
         };
-        Ok(Self { coding })
+        Ok(Self { kind })
     }
 
     pub fn build_body(
@@ -76,10 +74,10 @@ impl BodyDecoder {
         shared: &mut Shared,
         cx: &mut std::task::Context,
     ) -> Incoming {
-        match &self.coding {
-            Coding::Empty | Coding::ContentLength(0) => Incoming::empty(),
-            Coding::Chunked(_) => Incoming::from_handle(shared.handle(cx), None),
-            Coding::ContentLength(len) => {
+        match &self.kind {
+            Kind::ContentLength(0) => Incoming::empty(),
+            Kind::Chunked(_) => Incoming::from_handle(shared.handle(cx), None),
+            Kind::ContentLength(len) => {
                 if buffer.len() as u64 == *len {
                     Incoming::new(buffer.split())
                 } else {
@@ -94,15 +92,13 @@ impl BodyDecoder {
         &mut self,
         buffer: &mut BytesMut,
     ) -> Poll<Option<Result<BytesMut, BodyError>>> {
-        match &mut self.coding {
-            Coding::Empty => Poll::Ready(Some(Err(BodyError::Exhausted))),
-            Coding::Chunked(decoder) => decoder.decode_chunk(buffer),
-            Coding::ContentLength(remaining_mut) => {
+        match &mut self.kind {
+            Kind::Chunked(decoder) => decoder.decode_chunk(buffer),
+            Kind::ContentLength(remaining_mut) => {
                 let remaining = *remaining_mut;
                 match remaining.checked_sub(buffer.len() as u64) {
                     // buffer contains exact or larger than expected content
                     None | Some(0) => {
-                        self.coding = Coding::Empty;
                         #[allow(
                             clippy::cast_possible_truncation,
                             reason = "remaining <= buffer.len() which is usize"
@@ -124,14 +120,13 @@ impl BodyDecoder {
         mut chunk: Bytes,
         io: &mut W,
     ) -> Poll<Result<(), BodyError>> {
-        match &mut self.coding {
-            Coding::Chunked(decoder) => decoder.encode_chunk(io),
-            Coding::ContentLength(remaining_mut) => {
+        match &mut self.kind {
+            Kind::Chunked(decoder) => decoder.encode_chunk(io),
+            Kind::ContentLength(remaining_mut) => {
                 let remaining = *remaining_mut;
                 match remaining.checked_sub(chunk.len() as u64) {
                     // chunk contains exact or larger than expected content
                     None | Some(0) => {
-                        self.coding = Coding::Empty;
                         #[allow(
                             clippy::cast_possible_truncation,
                             reason = "remaining <= buffer.len() which is usize"
@@ -148,12 +143,14 @@ impl BodyDecoder {
                     }
                 }
             },
-            Coding::Empty => Poll::Ready(Ok(()))
         }
     }
 
-    pub const fn coding(&self) -> &Coding {
-        &self.coding
+    pub const fn coding(&self) -> Codec {
+        match &self.kind {
+            Kind::Chunked(_) => Codec::Chunked,
+            Kind::ContentLength(len) => Codec::ContentLength(*len),
+        }
     }
 }
 

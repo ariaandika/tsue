@@ -17,8 +17,7 @@ mod full;
 
 // === HTTP ===
 mod chunked;
-// mod encoder;
-pub(crate) mod decoder;
+mod coder;
 
 // === IO ===
 pub(crate) mod handle;
@@ -29,10 +28,11 @@ mod collect;
 pub mod error;
 
 
+pub use stream::BodyStream;
+pub use full::Full;
+pub use coder::BodyCoder;
 pub use frame::Frame;
 pub use incoming::Incoming;
-pub use full::Full;
-pub use stream::BodyStream;
 pub use collect::Collect;
 
 use std::pin::Pin;
@@ -55,3 +55,9 @@ pub trait Body {
     fn size_hint(&self) -> (u64, Option<u64>);
 }
 
+/// HTTP Body Codec.
+#[derive(Copy, Clone, Debug)]
+pub enum Codec {
+    Chunked,
+    ContentLength(u64),
+}

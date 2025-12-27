@@ -9,7 +9,7 @@ use super::parser::{Header, Reqline};
 use crate::body::Body;
 use crate::body::handle::Shared;
 use crate::headers::HeaderMap;
-use crate::body::decoder::BodyDecoder;
+use crate::body::BodyCoder;
 use crate::proto::{self, HttpContext, HttpState};
 use crate::http::Request;
 use crate::service::HttpService;
@@ -59,16 +59,16 @@ enum Phase<B, F> {
     Header(Reqline),
     Service {
         context: HttpContext,
-        decoder: BodyDecoder,
+        decoder: BodyCoder,
         service: F,
     },
     ResHeader {
         body: B,
-        body_encoder: BodyDecoder,
+        body_encoder: BodyCoder,
     },
     ResBody {
         body: B,
-        body_encoder: BodyDecoder,
+        body_encoder: BodyCoder,
     },
     Cleanup,
     Placeholder,
@@ -81,13 +81,13 @@ enum PhaseProject<'a, B, F> {
     Header,
     Service {
         context: &'a mut HttpContext,
-        body_encoder: &'a mut BodyDecoder,
+        body_encoder: &'a mut BodyCoder,
         service: Pin<&'a mut F>,
     },
     ResHeader,
     ResBody {
         body: Pin<&'a mut B>,
-        body_encoder: &'a mut BodyDecoder,
+        body_encoder: &'a mut BodyCoder,
     },
     Cleanup,
 }
@@ -190,8 +190,8 @@ where
                     // ===== Response ======
                     let (parts, body) = response.into_parts();
 
-                    let body_encoder = BodyDecoder::from_len(body.size_hint().1);
-                    proto::write_response(&parts, write_buffer, body_encoder.coding());
+                    let body_encoder = BodyCoder::from_len(body.size_hint().1);
+                    proto::write_response(&parts, write_buffer, &body_encoder.coding());
 
                     let mut headers = parts.headers;
                     headers.clear();

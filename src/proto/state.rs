@@ -1,7 +1,7 @@
 use tcio::bytes::{Bytes, BytesMut};
 
-use crate::body::decoder::BodyDecoder;
-use crate::body::decoder::Coding;
+use crate::body::Codec;
+use crate::body::BodyCoder;
 use crate::body::error::BodyError;
 use crate::h1::parser::Reqline;
 use crate::headers::standard::HOST;
@@ -27,8 +27,8 @@ impl HttpState {
         HttpContext::new(&self.reqline, &self.headers)
     }
 
-    pub fn build_decoder(&self) -> Result<BodyDecoder, BodyError> {
-        BodyDecoder::new(&self.headers)
+    pub fn build_decoder(&self) -> Result<BodyCoder, BodyError> {
+        BodyCoder::new(&self.headers)
     }
 
     pub fn build_parts(self) -> Result<request::Parts, ProtoError> {
@@ -68,7 +68,7 @@ pub fn insert_header(
     Ok(())
 }
 
-pub fn write_response(res: &response::Parts, buf: &mut BytesMut, coding: &Coding) {
+pub fn write_response(res: &response::Parts, buf: &mut BytesMut, coding: &Codec) {
     buf.extend_from_slice(res.version.as_str().as_bytes());
     buf.extend_from_slice(b" ");
     buf.extend_from_slice(res.status.as_str().as_bytes());
@@ -76,14 +76,11 @@ pub fn write_response(res: &response::Parts, buf: &mut BytesMut, coding: &Coding
     buf.extend_from_slice(&httpdate_now()[..]);
 
     match coding {
-        Coding::Empty => {
-            buf.extend_from_slice(b"\r\nContent-Length: 0\r\n");
-        }
-        Coding::Chunked(_) => {
+        Codec::Chunked => {
             // TODO: support compressed transfer-encodings
             buf.extend_from_slice(b"\r\nTransfer-Encoding: chunked\r\n");
         }
-        Coding::ContentLength(len) => {
+        Codec::ContentLength(len) => {
             buf.extend_from_slice(b"\r\nContent-Length: ");
             buf.extend_from_slice(itoa::Buffer::new().format(*len).as_bytes());
             buf.extend_from_slice(b"\r\n");
