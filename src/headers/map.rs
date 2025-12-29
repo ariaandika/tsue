@@ -436,7 +436,7 @@ impl HeaderMap {
             return;
         }
 
-        let mut me = Self::with_capacity_unchecked(limit_cap((self.cap as usize) << 1));
+        let mut me = Self::with_capacity_unchecked(limit_cap(self.cap.next_power_of_two() as usize));
 
         for field in self.fields_mut().iter_mut().filter_map(Option::take) {
             me.insert_inner(field, true);
