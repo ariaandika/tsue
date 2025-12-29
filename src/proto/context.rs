@@ -16,6 +16,15 @@ pub struct HttpContext {
     pub is_res_body_allowed: bool,
 }
 
+impl Default for HttpContext {
+    fn default() -> Self {
+        Self {
+            is_keep_alive: false,
+            is_res_body_allowed: false,
+        }
+    }
+}
+
 impl HttpContext {
     pub fn new(reqline: &Reqline, headers: &HeaderMap) -> Result<Self, ProtoError> {
         let mut is_keep_alive = matches!(

@@ -5,12 +5,12 @@
 // Content-Length
 // Transfer-Encoding - chunked, gzip, etc.
 
-use std::task::Poll;
+use std::task::{Poll, ready};
 use tcio::bytes::{Bytes, BytesMut};
 use tcio::io::AsyncIoWrite;
 
 use crate::body::chunked::ChunkedCoder;
-use crate::body::error::BodyError;
+use crate::body::error::{BodyError, ReadError};
 use crate::body::handle::Shared;
 use crate::body::{Codec, Incoming};
 use crate::headers::HeaderMap;
@@ -117,31 +117,20 @@ impl BodyCoder {
 
     pub(crate) fn encode_chunk<W: AsyncIoWrite>(
         &mut self,
-        mut chunk: Bytes,
+        chunk: &mut Bytes,
+        write_buffer: &mut BytesMut,
         io: &mut W,
-    ) -> Poll<Result<(), BodyError>> {
+        cx: &mut std::task::Context,
+    ) -> Poll<Result<(), ReadError>> {
         match &mut self.kind {
-            Kind::Chunked(decoder) => decoder.encode_chunk(io),
+            Kind::Chunked(decoder) => decoder.encode_chunk(chunk, write_buffer, io, cx),
             Kind::ContentLength(remaining_mut) => {
-                let remaining = *remaining_mut;
-                match remaining.checked_sub(chunk.len() as u64) {
-                    // chunk contains exact or larger than expected content
-                    None | Some(0) => {
-                        #[allow(
-                            clippy::cast_possible_truncation,
-                            reason = "remaining <= buffer.len() which is usize"
-                        )]
-                        chunk.truncate(remaining as usize);
-                        todo!("statefull chunk encoder")
-                        // Poll::Ready(Ok(()))
-                    }
-                    // buffer does not contains all expected content
-                    Some(leftover) => {
-                        *remaining_mut = leftover;
-                        // Poll::Ready(Some(Ok(buffer.split())))
-                        todo!("statefull chunk encoder")
-                    }
+                if *remaining_mut < chunk.len() as u64 {
+                    return Poll::Ready(Err(BodyError::InvalidSizeHint.into()));
                 }
+                let read = ready!(io.poll_write_buf(chunk, cx))?;
+                *remaining_mut -= read as u64;
+                Poll::Ready(Ok(()))
             },
         }
     }

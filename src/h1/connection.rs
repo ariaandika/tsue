@@ -2,7 +2,7 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Poll, ready};
-use tcio::bytes::{Buf, BytesMut};
+use tcio::bytes::{Buf, Bytes, BytesMut};
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use super::parser::{Header, Reqline};
@@ -40,6 +40,8 @@ pub struct Connection<IO, S, B, F> {
     header_map: HeaderMap,
     phase: Phase<B, F>,
     service: Arc<S>,
+    /// per request context
+    context: HttpContext,
 }
 
 type ConnectionProject<'a, IO, S, B, F> = (
@@ -50,6 +52,7 @@ type ConnectionProject<'a, IO, S, B, F> = (
     &'a mut HeaderMap,
     Pin<&'a mut Phase<B, F>>,
     &'a mut Arc<S>,
+    &'a mut HttpContext,
 );
 
 enum Phase<B, F> {
@@ -58,17 +61,17 @@ enum Phase<B, F> {
     },
     Header(Reqline),
     Service {
-        context: HttpContext,
         decoder: BodyCoder,
         service: F,
     },
     ResHeader {
         body: B,
-        body_encoder: BodyCoder,
+        encoder: BodyCoder,
     },
     ResBody {
         body: B,
-        body_encoder: BodyCoder,
+        encoder: BodyCoder,
+        chunk: Option<Bytes>,
     },
     Cleanup,
     Placeholder,
@@ -80,14 +83,14 @@ enum PhaseProject<'a, B, F> {
     },
     Header,
     Service {
-        context: &'a mut HttpContext,
-        body_encoder: &'a mut BodyCoder,
+        decoder: &'a mut BodyCoder,
         service: Pin<&'a mut F>,
     },
     ResHeader,
     ResBody {
         body: Pin<&'a mut B>,
-        body_encoder: &'a mut BodyCoder,
+        encoder: &'a mut BodyCoder,
+        chunk: &'a mut Option<Bytes>,
     },
     Cleanup,
 }
@@ -105,6 +108,7 @@ where
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             phase: Phase::Reqline { want_read: true },
             service,
+            context: HttpContext::default(),
         }
     }
 
@@ -116,7 +120,7 @@ where
     {
         // TODO: create custom error type that can generate Response
 
-        let (io, shared, read_buffer, write_buffer, header_map, mut phase, service) = self.project();
+        let (io, shared, read_buffer, write_buffer, header_map, mut phase, service, context) = self.project();
 
         loop {
             match phase.as_mut().project() {
@@ -165,17 +169,18 @@ where
                     };
 
                     let state = HttpState::new(reqline, mem::take(header_map));
-                    let context = state.build_context()?;
+                    let curr_context = state.build_context()?;
                     let decoder = state.build_decoder()?;
                     let parts = state.build_parts()?;
                     let body = decoder.build_body(read_buffer, shared, cx);
 
                     let request = Request::from_parts(parts, body);
+                    *context = curr_context;
 
                     let service = service.call(request);
-                    phase.set(Phase::Service { context, decoder, service });
+                    phase.set(Phase::Service { decoder, service });
                 }
-                PhaseProject::Service { context: _, body_encoder: decoder, service } => {
+                PhaseProject::Service { decoder, service } => {
                     let response = match service.poll(cx) {
                         Poll::Ready(Ok(ok)) => ok,
                         Poll::Ready(Err(err)) => {
@@ -190,25 +195,32 @@ where
                     // ===== Response ======
                     let (parts, body) = response.into_parts();
 
-                    let body_encoder = BodyCoder::from_len(body.size_hint().1);
-                    proto::write_response(&parts, write_buffer, &body_encoder.coding());
+                    let encoder = BodyCoder::from_len(body.size_hint().1);
+                    proto::write_response(&parts, write_buffer, &encoder.coding());
 
                     let mut headers = parts.headers;
                     headers.clear();
                     *header_map = headers;
 
-                    phase.set(Phase::ResHeader { body, body_encoder });
+                    phase.set(Phase::ResHeader { body, encoder });
                 },
                 PhaseProject::ResHeader => {
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
-                    let Phase::ResHeader { body, body_encoder } = phase.as_mut().take() else {
+                    let Phase::ResHeader { body, encoder } = phase.as_mut().take() else {
                         // SAFETY: pattern matched
                         unsafe { std::hint::unreachable_unchecked() }
                     };
-                    phase.set(Phase::ResBody { body, body_encoder });
+                    phase.set(Phase::ResBody { body, encoder, chunk: None });
                 }
-                PhaseProject::ResBody { body, body_encoder } => {
+                PhaseProject::ResBody { body, encoder, chunk } => {
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
+
+                    while let Some(chunk_mut) = chunk {
+                        ready!(encoder.encode_chunk(chunk_mut, write_buffer, &mut *io, cx))?;
+                        if chunk_mut.is_empty() {
+                            *chunk = None;
+                        }
+                    }
 
                     let Some(frame) = ready!(Body::poll_data(body, cx)?) else {
                         phase.set(Phase::Cleanup);
@@ -217,13 +229,16 @@ where
 
                     if let Ok(mut data) = frame.into_data() {
                         let len = data.remaining();
-                        ready!(body_encoder.encode_chunk(data.copy_to_bytes(len), &mut *io))?;
-                        todo!("statefull body encoding")
+                        assert!(chunk.replace(data.copy_to_bytes(len)).is_none());
                     }
                 }
                 PhaseProject::Cleanup => {
                     // TODO: drain only if the body is an a drain treshold
                     // ready!(io.poll_drain(cx)?);
+
+                    if !context.is_keep_alive {
+                        return Poll::Ready(Ok(()));
+                    }
 
                     // `reserve` will try to reclaim buffer, but if the underlying buffer is grow
                     // thus reallocated, and the new allocated capacity is not at least
@@ -279,6 +294,7 @@ impl<IO, S, B, F> Connection<IO, S, B, F> {
                 &mut me.header_map,
                 Pin::new_unchecked(&mut me.phase),
                 &mut me.service,
+                &mut me.context,
             )
         }
     }
@@ -291,19 +307,19 @@ impl<B, F> Phase<B, F> {
             match self.get_unchecked_mut() {
                 Self::Reqline { want_read } => PhaseProject::Reqline { want_read },
                 Self::Header(_) => PhaseProject::Header,
-                Self::Service {
-                    context,
+                Self::Service { decoder, service } => PhaseProject::Service {
                     decoder,
-                    service,
-                } => PhaseProject::Service {
-                    context,
-                    body_encoder: decoder,
                     service: Pin::new_unchecked(service),
                 },
                 Self::ResHeader { .. } => PhaseProject::ResHeader,
-                Self::ResBody { body, body_encoder } => PhaseProject::ResBody {
+                Self::ResBody {
+                    body,
+                    encoder,
+                    chunk,
+                } => PhaseProject::ResBody {
                     body: Pin::new_unchecked(body),
-                    body_encoder,
+                    encoder,
+                    chunk,
                 },
                 Self::Cleanup => PhaseProject::Cleanup,
                 Self::Placeholder => unreachable!(),

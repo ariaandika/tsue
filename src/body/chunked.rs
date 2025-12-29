@@ -1,7 +1,9 @@
+use std::task::ready;
 use std::{num::NonZeroU64, task::Poll};
-use tcio::bytes::{Buf, BytesMut};
+use tcio::bytes::{Buf, BufMut, Bytes, BytesMut};
+use tcio::io::AsyncIoWrite;
 
-use crate::body::error::BodyError;
+use crate::body::error::{BodyError, ReadError};
 
 const MAX_CHUNKED_SIZE: u64 = 64 * 1024;
 
@@ -108,10 +110,53 @@ impl ChunkedCoder {
         }
     }
 
-    pub fn encode_chunk<W: tcio::io::AsyncIoWrite>(
+    pub fn encode_chunk<W: AsyncIoWrite>(
         &mut self,
+        chunk: &mut Bytes,
+        write_buffer: &mut BytesMut,
         io: &mut W,
-    ) -> Poll<Result<(), BodyError>> {
-        todo!()
+        cx: &mut std::task::Context,
+    ) -> Poll<Result<(), ReadError>> {
+        match &mut self.phase {
+            Phase::Header => {
+                debug_assert!(write_buffer.is_empty());
+
+                let Some(clen) = NonZeroU64::new(chunk.len() as u64) else {
+                    return Poll::Ready(Ok(()));
+                };
+
+                // itoa::Buffer had max of 40
+                write_buffer.reserve(42);
+
+                let header: &mut [u8] =
+                    unsafe { std::mem::transmute(write_buffer.spare_capacity_mut()) };
+
+                let mut b = itoa::Buffer::new();
+                let s = b.format(clen.get()).as_bytes();
+                let len = s.len();
+
+                header[..len].copy_from_slice(s);
+                header[len..len + 2].copy_from_slice(b"\r\n");
+
+                unsafe { write_buffer.advance_mut(len + 2) };
+
+                self.phase = Phase::Chunk(clen);
+                Poll::Ready(Ok(()))
+            }
+            Phase::Chunk(remaining) => {
+                if write_buffer.has_remaining() {
+                    ready!(io.poll_write_all_buf(write_buffer, cx))?;
+                }
+                if remaining.get() < chunk.len() as u64 {
+                    return Poll::Ready(Err(BodyError::InvalidSizeHint.into()));
+                }
+                let read = ready!(io.poll_write_buf(chunk, cx))?;
+                match NonZeroU64::new(remaining.get() - read as u64) {
+                    Some(ok) => *remaining = ok,
+                    None => self.phase = Phase::Header,
+                }
+                Poll::Ready(Ok(()))
+            }
+        }
     }
 }
