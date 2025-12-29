@@ -2,8 +2,10 @@ use tcio::bytes::{Bytes, BytesMut};
 use std::{
     io,
     pin::Pin,
-    task::Poll,
+    task::{Poll, ready},
 };
+
+use crate::body::error::{BodyError, ReadError};
 
 use super::Incoming;
 
@@ -41,12 +43,33 @@ impl Collect {
 }
 
 impl Future for Collect {
-    type Output = io::Result<Bytes>;
+    type Output = Result<Bytes, ReadError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Self::Output> {
         let me = self.get_mut();
 
-        todo!()
+        while let Some(result) = ready!(me.body.poll_read(cx)) {
+            let data = result?;
+            match me.buffer.as_mut().expect("poll after complete") {
+                Buffer::None => me.buffer = Some(Buffer::Ref(data)),
+                Buffer::Mut(bytesm) => {
+                    bytesm.extend_from_slice(&data);
+                },
+                Buffer::Ref(bytes) => {
+                    // the stream returns 2 chunk, a copy is required for concatenation
+                    let (lo, up) = me.body.size_hint();
+                    let Ok(hint) = usize::try_from(up.unwrap_or(lo)) else {
+                        return Poll::Ready(Err(BodyError::ChunkTooLarge.into()));
+                    };
+                    let mut bytesm = BytesMut::with_capacity(data.len() + hint);
+                    bytesm.extend_from_slice(bytes);
+                    bytesm.extend_from_slice(&data);
+                    me.buffer = Some(Buffer::Mut(bytesm));
+                },
+            };
+        }
+
+        Poll::Ready(Ok(me.take_buffer()))
 
         // match &mut me.body.repr() {
         //     Repr::Bytes(b) => Poll::Ready(if b.is_empty() {

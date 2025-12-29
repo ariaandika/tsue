@@ -7,7 +7,7 @@ use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use super::parser::{Header, Reqline};
 use crate::body::Body;
-use crate::body::handle::Shared;
+use crate::body::handle::SendHandle;
 use crate::headers::HeaderMap;
 use crate::body::BodyCoder;
 use crate::proto::{self, HttpContext, HttpState};
@@ -17,7 +17,7 @@ use crate::service::HttpService;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 const MAX_FIELD_CAP: usize = 4 * 1024;
-const DEFAULT_BUFFER_CAP: usize = 512;
+const DEFAULT_BUFFER_CAP: usize = 1024;
 
 /// Read bytes from IO into buffer.
 macro_rules! io_read {
@@ -34,7 +34,7 @@ macro_rules! io_read {
 
 pub struct Connection<IO, S, B, F> {
     io: IO,
-    shared: Shared,
+    shared: SendHandle,
     read_buffer: BytesMut,
     write_buffer: BytesMut,
     header_map: HeaderMap,
@@ -46,7 +46,7 @@ pub struct Connection<IO, S, B, F> {
 
 type ConnectionProject<'a, IO, S, B, F> = (
     &'a mut IO,
-    &'a mut Shared,
+    &'a mut SendHandle,
     &'a mut BytesMut,
     &'a mut BytesMut,
     &'a mut HeaderMap,
@@ -102,7 +102,7 @@ where
     pub fn new(io: IO, service: Arc<S>) -> Self {
         Self {
             io,
-            shared: Shared::new(),
+            shared: SendHandle::new(),
             header_map: HeaderMap::new(),
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),

@@ -5,7 +5,7 @@ use super::error::ReadError;
 
 mod shared;
 
-pub use shared::{Shared, Handle as IoHandle};
+pub use shared::{SendHandle, RecvHandle as IoHandle};
 
 #[derive(Debug)]
 pub struct BodyHandle {

@@ -2,23 +2,23 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU8, Ordering, fence};
 use std::task::{Poll, Waker, ready};
 use std::{io, mem};
-use tcio::bytes::{Bytes, BytesMut};
+use tcio::bytes::{BufMut, Bytes, BytesMut};
 use tcio::io::AsyncIoRead;
 
 use crate::body::coder::BodyCoder;
 use crate::body::error::{ReadError, BodyError};
 
 /// Sender shared handle.
-pub struct Shared {
+pub struct SendHandle {
     inner: NonNull<SharedInner>,
 }
 
 /// Receiver shared handle.
-pub struct Handle {
+pub struct RecvHandle {
     inner: NonNull<SharedInner>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 enum Data {
     #[default]
     None,
@@ -26,8 +26,8 @@ enum Data {
     Ok(Bytes),
     BodyErr(BodyError),
     IoErr(io::Error),
-    Recv(Waker),
-    Send(Waker),
+    // Recv(Waker),
+    // Send(Waker),
 }
 
 // union Data {
@@ -37,15 +37,34 @@ enum Data {
 //     send: std::mem::ManuallyDrop<Waker>,
 // }
 
+#[derive(Debug, Default)]
+enum WakerHandle {
+    #[default]
+    None,
+    Send(Waker),
+    Recv(Waker),
+}
+
+impl WakerHandle {
+    fn is_send(&self) -> bool {
+        matches!(self, Self::Send(..))
+    }
+
+    fn is_recv(&self) -> bool {
+        matches!(self, Self::Recv(..))
+    }
+}
+
 struct SharedInner {
-    /// sender handle SHOULD NOT write data if DATA flag set
-    /// sender handle may only write data if DATA flag unset
+    /// send handle SHOULD NOT write data if DATA flag set
+    /// send handle may only write data if DATA flag unset
     ///
-    /// receiver handle SHOULD NOT read data if DATA flag unset
-    /// receiver handle may only read data if DATA flag set
+    /// recv handle SHOULD NOT read data if DATA flag unset
+    /// recv handle may only read data if DATA flag set
     ///
     /// either handle may read and write data if the SHARED flag unset
     data: Data,
+    waker: WakerHandle,
     /// WANT: is handle wants data read
     /// SHARED: is both handle still alive
     /// DATA: is data available in shared memory
@@ -60,12 +79,12 @@ const SHARED_MASK   : u8 = 1 << 1;
 const DATA_MASK     : u8 = 1 << 2;
 // const RECV_MASK: u8     = 1 << 3;
 
-unsafe impl Send for Shared { }
-unsafe impl Sync for Shared { }
-unsafe impl Send for Handle { }
-unsafe impl Sync for Handle { }
+unsafe impl Send for SendHandle { }
+unsafe impl Sync for SendHandle { }
+unsafe impl Send for RecvHandle { }
+unsafe impl Sync for RecvHandle { }
 
-impl Drop for Shared {
+impl Drop for SendHandle {
     fn drop(&mut self) {
         let mut inner = self.inner;
 
@@ -80,23 +99,23 @@ impl Drop for Shared {
                 // is idle, thus send handle must call waker if needed
                 fence(Ordering::Acquire);
                 let me = unsafe { inner.as_mut() };
-                if let Data::Recv(waker) = mem::take(&mut me.data) {
+                if let WakerHandle::Recv(waker) = mem::take(&mut me.waker) {
                     waker.wake();
                 }
             }
 
             // otherwise, if WANT flag is unset, the send handle is idle and the memory is
-            // owned by recv handle, thus recv handle must call waker if needed
+            // owned by recv handle, thus nothing need to be done here
 
         } else {
-            // receiver handle already dropped, clean up the shared memory
+            // recv handle already dropped, clean up the shared memory
             fence(Ordering::Acquire);
             unsafe { drop(Box::from_raw(inner.as_ptr())); }
         }
     }
 }
 
-impl Drop for Handle {
+impl Drop for RecvHandle {
     fn drop(&mut self) {
         let mut inner = self.inner;
 
@@ -108,65 +127,76 @@ impl Drop for Handle {
 
             if old_flag.is_set::<WANT_MASK>() {
                 // if WANT flag is set, the memory is owned by the send handle and its the
-                // one doing works, thus no waker needs to be called
+                // one doing works, thus nothing need to be done here
 
             } else {
                 // otherwise, if WANT flag is unset, the send handle is idle and the memory is
                 // owned by recv handle, thus recv handle must call waker if needed
                 fence(Ordering::Acquire);
                 let me = unsafe { inner.as_mut() };
-                if let Data::Send(waker) = mem::take(&mut me.data) {
+                if let WakerHandle::Send(waker) = mem::take(&mut me.waker) {
                     waker.wake();
                 }
             }
 
         } else {
-            // receiver handle already dropped, clean up the shared memory
+            // send handle already dropped, clean up the shared memory
             fence(Ordering::Acquire);
             unsafe { drop(Box::from_raw(inner.as_ptr())); }
         }
     }
 }
 
-impl Handle {
+impl RecvHandle {
     pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Result<Bytes, ReadError>> {
         let inner = unsafe { self.inner.as_mut() };
 
-        // set `wants` flag
-        let flag = inner.flag.fetch_or(WANT_MASK, Ordering::Acquire);
+        // DATA WANT
+        // 0    0       owned by Recv
+        // 0    1       owned by Send
+        // 1    0       owned by Recv
+        // 1    1       INVALID
 
-        if flag.is_unset::<SHARED_MASK>() {
-            // sender handle is already dropped
-            return Poll::Ready(Err(io::ErrorKind::ConnectionAborted.into()));
-        }
+        // set `want` flag
+        let flag = inner.flag.fetch_or(WANT_MASK, Ordering::Acquire);
 
         if flag.is_set::<DATA_MASK>() {
             // data is available
 
-            let result = match mem::replace(&mut inner.data, Data::None) {
+            let result = match mem::take(&mut inner.data) {
                 Data::Ok(bytes) => Ok(bytes),
                 Data::BodyErr(err) => Err(err.into()),
                 Data::IoErr(err) => Err(err.into()),
                 _ => unreachable!(),
             };
 
-            // unset the `data` flag
-            inner.flag.store(flag & !DATA_MASK, Ordering::Release);
+            debug_assert!(inner.waker.is_send());
+
+            // unset the `data` and `want` flag
+            inner.flag.store(flag & !DATA_MASK & !WANT_MASK, Ordering::Release);
 
             Poll::Ready(result)
         } else if flag.is_unset::<WANT_MASK>() {
             // `wants` is unset before, call waker and set current waker
 
             let inner = unsafe { self.inner.as_mut() };
-            let waker = Data::Recv(cx.waker().clone());
-            let Data::Send(waker) = mem::replace(&mut inner.data, waker) else {
-                unreachable!();
+
+            if flag.is_unset::<SHARED_MASK>() {
+                // send handle is already dropped
+                return Poll::Ready(Err(io::ErrorKind::ConnectionAborted.into()));
+            }
+
+            let waker = WakerHandle::Recv(cx.waker().clone());
+            let waker = match mem::replace(&mut inner.waker, waker) {
+                WakerHandle::Send(waker) => waker,
+                data => {
+                    unreachable!("data: {data:?}");
+                }
             };
             waker.wake();
 
             Poll::Pending
         } else {
-            // sender handle is still alive
             // data not available
             // waker already called
             Poll::Pending
@@ -174,10 +204,11 @@ impl Handle {
     }
 }
 
-impl Shared {
+impl SendHandle {
     pub fn new() -> Self {
         let inner = SharedInner {
             flag: AtomicU8::new(INITIAL_FLAG),
+            waker: WakerHandle::None,
             data: Data::None,
         };
         Self {
@@ -185,9 +216,9 @@ impl Shared {
         }
     }
 
-    pub fn handle(&mut self, cx: &mut std::task::Context) -> Handle {
+    pub fn handle(&mut self, cx: &mut std::task::Context) -> RecvHandle {
         // set `shared` flag
-        let flag = unsafe { self.inner.as_ref().flag.fetch_or(SHARED_MASK, Ordering::Relaxed) };
+        let flag = unsafe { self.inner.as_ref() }.flag.fetch_or(SHARED_MASK, Ordering::Relaxed);
 
         // ensure no other handle are alive
         assert!(flag.is_unset::<SHARED_MASK>());
@@ -195,9 +226,9 @@ impl Shared {
         // SAFETY: it is ensured that no other handle are holding the shared data
         let inner = unsafe { self.inner.as_mut() };
 
-        inner.data = Data::Send(cx.waker().clone());
+        inner.waker = WakerHandle::Send(cx.waker().clone());
 
-        Handle {
+        RecvHandle {
             inner: self.inner
         }
     }
@@ -218,62 +249,76 @@ impl Shared {
         let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Acquire);
 
         if flag.is_unset::<SHARED_MASK>() {
-            // recv handle is already dropped
-            Poll::Ready(())
+            // SAFETY: recv handle is already dropped, no other handle is holding the memory
+            unsafe {
+                let inner = self.inner.as_mut();
+                drop(mem::take(&mut inner.data));
+                *inner.flag.get_mut() = INITIAL_FLAG;
+            }
+            return Poll::Ready(());
+        }
 
-        } else if flag.is_set::<DATA_MASK>() {
-            // data is still available
-            Poll::Ready(())
-
-        } else if flag.is_set::<WANT_MASK>() {
+        if flag.is_set::<WANT_MASK>() {
             // recv handle wants data
+
+            debug_assert!(flag.is_unset::<DATA_MASK>());
+
             let result = loop {
-                match ready!(io.poll_read_buf(buf, cx)) {
-                    Ok(read) => {
-                        if read == 0 {
-                            todo!("connection terminated")
-                        }
-                        let Poll::Ready(data) = decoder.decode_chunk(buf) else {
-                            continue;
-                        };
-                        break match data {
-                            Some(Ok(data)) => Data::Ok(data.freeze()),
-                            Some(Err(err)) => Data::BodyErr(err),
-                            None => Data::Eof,
-                        }
-                    },
-                    Err(err) => break Data::IoErr(err),
+                // TODO:(!) this will cause infinite loop when `decode_chunk` returns None
+                if buf.is_empty() {
+                    match ready!(io.poll_read_buf(buf, cx)) {
+                        Ok(read) => {
+                            if read == 0 {
+                                todo!("connection terminated: {}", buf.spare_capacity_mut().len())
+                            }
+                            // ...
+                        },
+                        Err(err) => break Data::IoErr(err),
+                    };
+                }
+
+                let Poll::Ready(data) = decoder.decode_chunk(buf) else {
+                    continue;
                 };
+                break match data {
+                    Some(Ok(data)) => Data::Ok(data.freeze()),
+                    Some(Err(err)) => Data::BodyErr(err),
+                    None => Data::Eof,
+                }
             };
 
             // WANT flag is set, thus recv is idle and the data is owned by send handle
             let inner = unsafe { self.inner.as_mut() };
-            let Data::Send(waker) = mem::replace(&mut inner.data, result) else {
+            inner.data = result;
+
+            // wake recv handle
+            let waker = WakerHandle::Send(cx.waker().clone());
+            let WakerHandle::Recv(waker) = mem::replace(&mut inner.waker, waker) else {
                 unreachable!();
             };
-            // unset WANT and set DATA flag
-            inner.flag.store(flag & !WANT_MASK & DATA_MASK, Ordering::Release);
             waker.wake();
 
-            Poll::Ready(())
+            // unset WANT and set DATA flag
+            inner.flag.store(flag & !WANT_MASK | DATA_MASK, Ordering::Release);
 
+            Poll::Ready(())
         } else {
             // recv handle is still alive
             // want flag is unset
-            Poll::Pending
+            Poll::Ready(())
         }
     }
 }
 
 // ===== Helpers =====
 
-impl std::fmt::Debug for Shared {
+impl std::fmt::Debug for SendHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Shared").finish_non_exhaustive()
     }
 }
 
-impl std::fmt::Debug for Handle {
+impl std::fmt::Debug for RecvHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Handle").finish_non_exhaustive()
     }

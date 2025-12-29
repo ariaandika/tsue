@@ -11,7 +11,7 @@ use tcio::io::AsyncIoWrite;
 
 use crate::body::chunked::ChunkedCoder;
 use crate::body::error::{BodyError, ReadError};
-use crate::body::handle::Shared;
+use crate::body::handle::SendHandle;
 use crate::body::{Codec, Incoming};
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
@@ -71,7 +71,7 @@ impl BodyCoder {
     pub fn build_body(
         &self,
         buffer: &mut BytesMut,
-        shared: &mut Shared,
+        shared: &mut SendHandle,
         cx: &mut std::task::Context,
     ) -> Incoming {
         match &self.kind {
