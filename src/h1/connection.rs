@@ -7,11 +7,11 @@ use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
 use super::parser::{Header, Reqline};
 use crate::body::Body;
+use crate::body::BodyCoder;
 use crate::body::handle::SendHandle;
 use crate::headers::HeaderMap;
-use crate::body::BodyCoder;
-use crate::proto::{self, HttpContext, HttpState};
 use crate::http::Request;
+use crate::proto::{self, HttpContext, HttpState};
 use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -40,8 +40,9 @@ pub struct Connection<IO, S, B, F> {
     header_map: HeaderMap,
     phase: Phase<B, F>,
     service: Arc<S>,
-    /// per request context
+    // === per request ===
     context: HttpContext,
+    decoder: BodyCoder,
 }
 
 type ConnectionProject<'a, IO, S, B, F> = (
@@ -53,6 +54,7 @@ type ConnectionProject<'a, IO, S, B, F> = (
     Pin<&'a mut Phase<B, F>>,
     &'a mut Arc<S>,
     &'a mut HttpContext,
+    &'a mut BodyCoder,
 );
 
 enum Phase<B, F> {
@@ -61,7 +63,6 @@ enum Phase<B, F> {
     },
     Header(Reqline),
     Service {
-        decoder: BodyCoder,
         service: F,
     },
     ResHeader {
@@ -83,7 +84,6 @@ enum PhaseProject<'a, B, F> {
     },
     Header,
     Service {
-        decoder: &'a mut BodyCoder,
         service: Pin<&'a mut F>,
     },
     ResHeader,
@@ -109,6 +109,7 @@ where
             phase: Phase::Reqline { want_read: true },
             service,
             context: HttpContext::default(),
+            decoder: BodyCoder::from_len(Some(0)),
         }
     }
 
@@ -120,7 +121,7 @@ where
     {
         // TODO: create custom error type that can generate Response
 
-        let (io, shared, read_buffer, write_buffer, header_map, mut phase, service, context) = self.project();
+        let (io, shared, read_buffer, write_buffer, header_map, mut phase, service, context, decoder) = self.project();
 
         loop {
             match phase.as_mut().project() {
@@ -162,15 +163,15 @@ where
                     }
 
                     // ===== Service =====
-
                     let Phase::Header(reqline) = phase.as_mut().take() else {
                         // SAFETY: pattern matched
                         unsafe { std::hint::unreachable_unchecked() }
                     };
 
                     let state = HttpState::new(reqline, mem::take(header_map));
+
+                    *decoder = state.build_decoder()?;
                     let curr_context = state.build_context()?;
-                    let decoder = state.build_decoder()?;
                     let parts = state.build_parts()?;
                     let body = decoder.build_body(read_buffer, shared, cx);
 
@@ -178,16 +179,16 @@ where
                     *context = curr_context;
 
                     let service = service.call(request);
-                    phase.set(Phase::Service { decoder, service });
+                    phase.set(Phase::Service { service });
                 }
-                PhaseProject::Service { decoder, service } => {
+                PhaseProject::Service { service } => {
                     let response = match service.poll(cx) {
                         Poll::Ready(Ok(ok)) => ok,
                         Poll::Ready(Err(err)) => {
                             return Poll::Ready(Err(err.into()));
                         }
                         Poll::Pending => {
-                            let _ = shared.poll_read(read_buffer, decoder, io, cx);
+                            shared.poll_read(read_buffer, decoder, io, cx);
                             return Poll::Pending;
                         }
                     };
@@ -233,8 +234,7 @@ where
                     }
                 }
                 PhaseProject::Cleanup => {
-                    // TODO: drain only if the body is an a drain treshold
-                    // ready!(io.poll_drain(cx)?);
+                    ready!(shared.poll_close(read_buffer, decoder, io, cx));
 
                     if !context.is_keep_alive {
                         return Poll::Ready(Ok(()));
@@ -295,6 +295,7 @@ impl<IO, S, B, F> Connection<IO, S, B, F> {
                 Pin::new_unchecked(&mut me.phase),
                 &mut me.service,
                 &mut me.context,
+                &mut me.decoder,
             )
         }
     }
@@ -307,8 +308,7 @@ impl<B, F> Phase<B, F> {
             match self.get_unchecked_mut() {
                 Self::Reqline { want_read } => PhaseProject::Reqline { want_read },
                 Self::Header(_) => PhaseProject::Header,
-                Self::Service { decoder, service } => PhaseProject::Service {
-                    decoder,
+                Self::Service { service } => PhaseProject::Service {
                     service: Pin::new_unchecked(service),
                 },
                 Self::ResHeader { .. } => PhaseProject::ResHeader,

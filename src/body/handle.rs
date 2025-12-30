@@ -26,7 +26,9 @@ impl BodyHandle {
     }
 
     pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<Result<Bytes, ReadError>>> {
-        let data = ready!(self.handle.poll_read(cx)?);
+        let Some(data) = ready!(self.handle.poll_read(cx)?) else {
+            return Poll::Ready(None);
+        };
 
         if let Some(size_hint) = &mut self.size_hint {
             *size_hint -= data.len() as u64;
