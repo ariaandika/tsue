@@ -68,6 +68,20 @@ impl BodyCoder {
         Ok(Self { kind })
     }
 
+    pub fn has_remaining(&self) -> bool {
+        match &self.kind {
+            Kind::Chunked(_) => true,
+            Kind::ContentLength(len) => *len != 0,
+        }
+    }
+
+    pub fn size_hint(&self) -> Option<u64> {
+        match &self.kind {
+            Kind::Chunked(_) => None,
+            Kind::ContentLength(len) => Some(*len),
+        }
+    }
+
     pub fn build_body(
         &self,
         buffer: &mut BytesMut,
@@ -94,11 +108,17 @@ impl BodyCoder {
     ) -> Poll<Option<Result<BytesMut, BodyError>>> {
         match &mut self.kind {
             Kind::Chunked(decoder) => decoder.decode_chunk(buffer),
+            Kind::ContentLength(0) => Poll::Ready(None),
             Kind::ContentLength(remaining_mut) => {
+                if buffer.is_empty() {
+                    return Poll::Pending;
+                }
+
                 let remaining = *remaining_mut;
                 match remaining.checked_sub(buffer.len() as u64) {
                     // buffer contains exact or larger than expected content
                     None | Some(0) => {
+                        *remaining_mut = 0;
                         #[allow(
                             clippy::cast_possible_truncation,
                             reason = "remaining <= buffer.len() which is usize"
