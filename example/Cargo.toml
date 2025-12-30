@@ -5,9 +5,10 @@ edition = "2024"
 publish = false
 
 [dependencies]
+env_logger = "0.11.8"
 tcio = { git = "https://github.com/ariaandika/tcio", features = ["tokio"] }
 tokio = { version = "1.45.1", features = ["rt-multi-thread"] }
-tsue = { version = "0.1.0", path = ".." }
+tsue = { version = "0.1.0", path = "..", features = ["log"] }
 
 [[bin]]
 name = "example"

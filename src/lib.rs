@@ -42,6 +42,7 @@
 //! [RFC9112]: <https://www.rfc-editor.org/rfc/rfc9112.html>
 #![warn(missing_debug_implementations)]
 
+mod log;
 mod matches;
 pub mod common;
 
