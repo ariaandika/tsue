@@ -1,9 +1,6 @@
+use std::pin::Pin;
+use std::task::{Poll, ready};
 use tcio::bytes::{Bytes, BytesMut};
-use std::{
-    io,
-    pin::Pin,
-    task::{Poll, ready},
-};
 
 use crate::body::error::{BodyError, ReadError};
 

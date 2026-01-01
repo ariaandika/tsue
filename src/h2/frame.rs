@@ -1,3 +1,4 @@
+#![allow(unused, reason = "TODO: h2 implementation")]
 
 /// Frame Type.
 #[derive(Debug)]

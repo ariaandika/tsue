@@ -10,20 +10,12 @@ use crate::proto::error::ProtoError;
 
 // TODO: protocol upgrade www.rfc-editor.org/rfc/rfc9110.html#name-upgrade
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct HttpContext {
     pub is_keep_alive: bool,
     pub is_res_body_allowed: bool,
 }
 
-impl Default for HttpContext {
-    fn default() -> Self {
-        Self {
-            is_keep_alive: false,
-            is_res_body_allowed: false,
-        }
-    }
-}
 
 impl HttpContext {
     pub fn new(reqline: &Reqline, headers: &HeaderMap) -> Result<Self, ProtoError> {
@@ -31,6 +23,8 @@ impl HttpContext {
             reqline.version,
             Version::HTTP_11 | Version::HTTP_2 | Version::HTTP_3
         );
+
+        // https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
         let is_res_body_allowed = !matches!(reqline.method, Method::HEAD);
 
         if let Some(value) = headers.get(CONNECTION) {

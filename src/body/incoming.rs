@@ -76,9 +76,9 @@ impl Incoming {
         }
     }
 
-    pub(super) fn repr(&self) -> &Repr {
-        &self.repr
-    }
+    // pub(super) fn repr(&self) -> &Repr {
+    //     &self.repr
+    // }
 }
 
 // ===== Read =====
