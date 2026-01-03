@@ -2,9 +2,8 @@ use std::pin::Pin;
 use std::task::{Poll, ready};
 use tcio::bytes::{Bytes, BytesMut};
 
+use crate::body::Incoming;
 use crate::body::error::{BodyError, ReadError};
-
-use super::Incoming;
 
 /// A future returned from [`Body::collect`], which buffer entire request body.
 #[derive(Debug)]

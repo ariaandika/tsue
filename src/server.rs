@@ -71,7 +71,7 @@ pub mod driver {
         B: crate::body::Body,
         B::Error: std::error::Error + Send + Sync + 'static,
     {
-        type Future = Connection<IO, S, B, S::Future>;
+        type Future = Connection<IO, S, B, B::Data, S::Future>;
 
         fn call(io: IO, service: Arc<S>) -> Self::Future {
             Connection::new(io, service)

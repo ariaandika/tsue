@@ -5,12 +5,11 @@
 // Content-Length
 // Transfer-Encoding - chunked, gzip, etc.
 
-use std::task::{Poll, ready};
-use tcio::bytes::{Bytes, BytesMut};
-use tcio::io::AsyncIoWrite;
+use std::task::Poll;
+use tcio::bytes::{Buf, BytesMut};
 
-use crate::body::chunked::ChunkedCoder;
-use crate::body::error::{BodyError, ReadError};
+use crate::body::chunked::{ChunkedCoder, EncodedBuf};
+use crate::body::error::BodyError;
 use crate::body::handle::SendHandle;
 use crate::body::{Codec, Incoming};
 use crate::headers::HeaderMap;
@@ -135,23 +134,26 @@ impl BodyCoder {
         }
     }
 
-    pub(crate) fn encode_chunk<W: AsyncIoWrite>(
+    /// Encode message body chunk.
+    ///
+    /// Returns [`EncodedBuf`] which is just a bytes that also may contains chunk header.
+    pub(crate) fn encode_chunk<B: Buf>(
         &mut self,
-        chunk: &mut Bytes,
+        chunk: B,
         write_buffer: &mut BytesMut,
-        io: &mut W,
-        cx: &mut std::task::Context,
-    ) -> Poll<Result<(), ReadError>> {
+        is_last_chunk: bool,
+    ) -> Result<EncodedBuf<B>, BodyError> {
         match &mut self.kind {
-            Kind::Chunked(decoder) => decoder.encode_chunk(chunk, write_buffer, io, cx),
+            Kind::Chunked(decoder) => Ok(decoder.encode_chunk(chunk, write_buffer, is_last_chunk)),
             Kind::ContentLength(remaining_mut) => {
-                if *remaining_mut < chunk.len() as u64 {
-                    return Poll::Ready(Err(BodyError::InvalidSizeHint.into()));
+                match remaining_mut.checked_sub(chunk.remaining() as u64) {
+                    Some(rem) => {
+                        *remaining_mut = rem;
+                        Ok(EncodedBuf::exact(chunk))
+                    },
+                    None => Err(BodyError::InvalidSizeHint),
                 }
-                let read = ready!(io.poll_write_buf(chunk, cx))?;
-                *remaining_mut -= read as u64;
-                Poll::Ready(Ok(()))
-            },
+            }
         }
     }
 

@@ -46,7 +46,6 @@ impl std::fmt::Display for BodyError {
 // ===== Read Body Error =====
 
 /// Body reading error.
-// TODO: rename ReadError, it contains more than io reading
 pub struct ReadError {
     kind: Box<Kind>,
 }

@@ -26,6 +26,10 @@ impl Reqline {
 fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError> {
     use ParseResult as Result;
 
+    if bytes.is_empty() {
+        return Result::Pending;
+    }
+
     let mut reqline = {
         let mut state = bytes.as_slice();
 

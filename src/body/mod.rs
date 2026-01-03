@@ -12,7 +12,6 @@
 //!
 
 // === impl Body ===
-mod stream;
 mod full;
 
 // === HTTP ===
@@ -28,8 +27,8 @@ mod collect;
 pub mod error;
 
 
-pub use stream::BodyStream;
 pub use full::Full;
+pub use chunked::EncodedBuf;
 pub use coder::BodyCoder;
 pub use frame::Frame;
 pub use incoming::Incoming;

@@ -68,22 +68,24 @@ pub fn insert_header(
     Ok(())
 }
 
-pub fn write_response(res: &response::Parts, buf: &mut BytesMut, coding: &Codec) {
+pub fn write_response_head(res: &response::Parts, buf: &mut BytesMut, coding: Option<Codec>) {
     buf.extend_from_slice(res.version.as_str().as_bytes());
     buf.extend_from_slice(b" ");
     buf.extend_from_slice(res.status.as_str().as_bytes());
     buf.extend_from_slice(b"\r\nDate: ");
     buf.extend_from_slice(&httpdate_now()[..]);
 
-    match coding {
-        Codec::Chunked => {
-            // TODO: support compressed transfer-encodings
-            buf.extend_from_slice(b"\r\nTransfer-Encoding: chunked\r\n");
-        }
-        Codec::ContentLength(len) => {
-            buf.extend_from_slice(b"\r\nContent-Length: ");
-            buf.extend_from_slice(itoa::Buffer::new().format(*len).as_bytes());
-            buf.extend_from_slice(b"\r\n");
+    if let Some(coding) = coding {
+        match coding {
+            Codec::Chunked => {
+                // TODO: support compressed transfer-encodings
+                buf.extend_from_slice(b"\r\nTransfer-Encoding: chunked\r\n");
+            }
+            Codec::ContentLength(len) => {
+                buf.extend_from_slice(b"\r\nContent-Length: ");
+                buf.extend_from_slice(itoa::Buffer::new().format(len).as_bytes());
+                buf.extend_from_slice(b"\r\n");
+            }
         }
     }
 

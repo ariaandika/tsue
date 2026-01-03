@@ -2,13 +2,13 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Poll, ready};
-use tcio::bytes::{Buf, Bytes, BytesMut};
+use tcio::bytes::BytesMut;
 use tcio::io::{AsyncIoRead, AsyncIoWrite};
 
-use super::parser::{Header, Reqline};
-use crate::body::Body;
 use crate::body::BodyCoder;
 use crate::body::handle::SendHandle;
+use crate::body::{Body, EncodedBuf};
+use crate::h1::parser::{Header, Reqline};
 use crate::headers::HeaderMap;
 use crate::http::Request;
 use crate::proto::{self, HttpContext, HttpState};
@@ -20,6 +20,8 @@ const MAX_FIELD_CAP: usize = 4 * 1024;
 const DEFAULT_BUFFER_CAP: usize = 1024;
 
 /// Read bytes from IO into buffer.
+///
+/// Handle zero read and max buffer length.
 macro_rules! io_read {
     ($io:ident.$read:ident($buffer:ident, $cx:expr)) => {
         let read = ready!($io.$read($buffer, $cx)?);
@@ -32,81 +34,72 @@ macro_rules! io_read {
     };
 }
 
-pub struct Connection<IO, S, B, F> {
+pub struct Connection<IO, S, B, D, F> {
     io: IO,
     shared: SendHandle,
     read_buffer: BytesMut,
     write_buffer: BytesMut,
     header_map: HeaderMap,
-    phase: Phase<B, F>,
+    phase: Phase<B, D, F>,
     service: Arc<S>,
     // === per request ===
     context: HttpContext,
     decoder: BodyCoder,
 }
 
-type ConnectionProject<'a, IO, S, B, F> = (
+type ConnectionProject<'a, IO, S, B, D, F> = (
     &'a mut IO,
     &'a mut SendHandle,
     &'a mut BytesMut,
     &'a mut BytesMut,
     &'a mut HeaderMap,
-    Pin<&'a mut Phase<B, F>>,
+    Pin<&'a mut Phase<B, D, F>>,
     &'a mut Arc<S>,
     &'a mut HttpContext,
     &'a mut BodyCoder,
 );
 
-enum Phase<B, F> {
-    Reqline {
-        want_read: bool,
-    },
-    Header(Reqline),
+enum Phase<B, D, F> {
+    Reqline(Option<Reqline>),
     Service {
         service: F,
     },
-    ResHeader {
+    Response {
         body: B,
         encoder: BodyCoder,
+        chunk: Option<EncodedBuf<D>>,
     },
-    ResBody {
-        body: B,
-        encoder: BodyCoder,
-        chunk: Option<Bytes>,
-    },
+    ResponseNoBody,
     Cleanup,
-    Placeholder,
 }
 
-enum PhaseProject<'a, B, F> {
-    Reqline {
-        want_read: &'a mut bool,
-    },
-    Header,
+enum PhaseProject<'a, B, D, F> {
+    Reqline(&'a mut Option<Reqline>),
     Service {
         service: Pin<&'a mut F>,
     },
-    ResHeader,
-    ResBody {
+    Response {
         body: Pin<&'a mut B>,
         encoder: &'a mut BodyCoder,
-        chunk: &'a mut Option<Bytes>,
+        chunk: &'a mut Option<EncodedBuf<D>>,
     },
+    ResponseNoBody,
     Cleanup,
 }
 
-impl<IO, S, B> Connection<IO, S, B, S::Future>
+impl<IO, S, B> Connection<IO, S, B, B::Data, S::Future>
 where
     S: HttpService<ResBody = B, Error: Into<BoxError>>,
+    B: Body,
 {
     pub fn new(io: IO, service: Arc<S>) -> Self {
         Self {
             io,
             shared: SendHandle::new(),
-            header_map: HeaderMap::new(),
+            header_map: HeaderMap::with_capacity(16),
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
-            phase: Phase::Reqline { want_read: true },
+            phase: Phase::Reqline(None),
             service,
             context: HttpContext::default(),
             decoder: BodyCoder::from_len(Some(0)),
@@ -121,62 +114,60 @@ where
     {
         // TODO: create custom error type that can generate Response
 
-        let (io, shared, read_buffer, write_buffer, header_map, mut phase, service, context, decoder) = self.project();
+        let (
+            io,
+            shared,
+            read_buffer,
+            write_buffer,
+            header_map,
+            mut phase,
+            service,
+            context,
+            decoder,
+        ) = self.project();
 
         loop {
             match phase.as_mut().project() {
-                PhaseProject::Reqline { want_read } => {
-                    // it is possible that subsequent request bytes may already in buffer when
-                    // reading request body because of request pipelining
-                    //
-                    // but if `parse_chunk` returns pending, it will also put bytes in the buffer
-                    //
-                    // thus explicit `want_read` flag is necessary
-                    if *want_read {
-                        io_read!(io.poll_read_buf(read_buffer, cx));
-                    }
-
-                    let reqline = match Reqline::parse_chunk(read_buffer).into_poll_result()? {
-                        Poll::Ready(ok) => ok,
-                        Poll::Pending => {
-                            *want_read = true;
-                            continue;
-                        }
-                    };
-
-                    header_map.reserve(16);
-                    phase.set(Phase::Header(reqline));
-                }
-                PhaseProject::Header => {
-                    loop {
-                        match Header::parse_chunk(read_buffer).into_poll_result()? {
+                PhaseProject::Reqline(reqline) => {
+                    if reqline.is_none() {
+                        match Reqline::parse_chunk(read_buffer).into_poll_result()? {
+                            Poll::Ready(ok) => {
+                                *reqline = Some(ok);
+                            },
                             Poll::Pending => {
                                 io_read!(io.poll_read_buf(read_buffer, cx));
                                 continue;
                             }
+                        }
+                    }
+
+                    loop {
+                        match Header::parse_chunk(read_buffer).into_poll_result()? {
                             Poll::Ready(Some(Header { name, value })) => {
                                 proto::insert_header(header_map, name, value)?;
                             }
                             Poll::Ready(None) => break,
-                        };
-
+                            Poll::Pending => {
+                                io_read!(io.poll_read_buf(read_buffer, cx));
+                                continue;
+                            }
+                        }
                     }
 
-                    // ===== Service =====
-                    let Phase::Header(reqline) = phase.as_mut().take() else {
-                        // SAFETY: pattern matched
+                    // ===== Request =====
+                    let Some(reqline) = reqline.take() else {
+                        // SAFETY: checked at the start of the arm
                         unsafe { std::hint::unreachable_unchecked() }
                     };
 
                     let state = HttpState::new(reqline, mem::take(header_map));
 
                     *decoder = state.build_decoder()?;
-                    let curr_context = state.build_context()?;
+                    *context = state.build_context()?;
+
                     let parts = state.build_parts()?;
                     let body = decoder.build_body(read_buffer, shared, cx);
-
                     let request = Request::from_parts(parts, body);
-                    *context = curr_context;
 
                     let service = service.call(request);
                     phase.set(Phase::Service { service });
@@ -195,42 +186,58 @@ where
 
                     // ===== Response ======
                     let (parts, body) = response.into_parts();
+                    let is_res_body = !body.is_end_stream();
 
                     let encoder = BodyCoder::from_len(body.size_hint().1);
-                    proto::write_response(&parts, write_buffer, &encoder.coding());
+                    let coding = is_res_body.then_some(encoder.coding());
+                    proto::write_response_head(&parts, write_buffer, coding);
 
+                    // reuse header map allocation
                     let mut headers = parts.headers;
                     headers.clear();
                     *header_map = headers;
 
-                    phase.set(Phase::ResHeader { body, encoder });
+                    let next_phase = if context.is_res_body_allowed && is_res_body {
+                        Phase::Response { body, encoder, chunk: None }
+                    } else {
+                        Phase::ResponseNoBody
+                    };
+
+                    phase.set(next_phase);
                 },
-                PhaseProject::ResHeader => {
+                PhaseProject::ResponseNoBody => {
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
-                    let Phase::ResHeader { body, encoder } = phase.as_mut().take() else {
-                        // SAFETY: pattern matched
-                        unsafe { std::hint::unreachable_unchecked() }
-                    };
-                    phase.set(Phase::ResBody { body, encoder, chunk: None });
-                }
-                PhaseProject::ResBody { body, encoder, chunk } => {
+                    phase.set(Phase::Cleanup);
+                },
+                PhaseProject::Response { mut body, encoder, chunk } => {
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
 
-                    while let Some(chunk_mut) = chunk {
-                        ready!(encoder.encode_chunk(chunk_mut, write_buffer, &mut *io, cx))?;
-                        if chunk_mut.is_empty() {
-                            *chunk = None;
+                    loop {
+                        match chunk {
+                            Some(EncodedBuf { header, chunk: chunk_mut, trail }) => {
+                                ready!(io.poll_write_all_buf(header, cx))?;
+                                ready!(io.poll_write_all_buf(chunk_mut, cx))?;
+                                ready!(io.poll_write_all_buf(trail, cx))?;
+                                *chunk = None;
+                            },
+                            None => {
+                                if body.is_end_stream() {
+                                    phase.set(Phase::Cleanup);
+                                    break;
+                                }
+
+                                let Some(frame) = ready!(Body::poll_data(body.as_mut(), cx)?) else {
+                                    phase.set(Phase::Cleanup);
+                                    break;
+                                };
+
+                                // TODO: user message body trailer is discarded
+                                if let Ok(data) = frame.into_data() {
+                                    let encoded = encoder.encode_chunk(data, write_buffer, body.is_end_stream())?;
+                                    *chunk = Some(encoded);
+                                }
+                            },
                         }
-                    }
-
-                    let Some(frame) = ready!(Body::poll_data(body, cx)?) else {
-                        phase.set(Phase::Cleanup);
-                        continue;
-                    };
-
-                    if let Ok(mut data) = frame.into_data() {
-                        let len = data.remaining();
-                        assert!(chunk.replace(data.copy_to_bytes(len)).is_none());
                     }
                 }
                 PhaseProject::Cleanup => {
@@ -249,14 +256,14 @@ where
                     read_buffer.clear();
                     read_buffer.reserve(DEFAULT_BUFFER_CAP);
 
-                    phase.set(Phase::Reqline { want_read: false });
+                    phase.set(Phase::Reqline(None));
                 }
             }
         }
     }
 }
 
-impl<IO, S, B> Future for Connection<IO, S, B, S::Future>
+impl<IO, S, B> Future for Connection<IO, S, B, B::Data, S::Future>
 where
     IO: AsyncIoRead + AsyncIoWrite,
     S: HttpService<ResBody = B, Error: Into<BoxError>>,
@@ -273,7 +280,7 @@ where
     }
 }
 
-impl<IO, S, B, F> std::fmt::Debug for Connection<IO, S, B, F> {
+impl<IO, S, B, D, F> std::fmt::Debug for Connection<IO, S, B, D, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Connection").finish_non_exhaustive()
     }
@@ -281,8 +288,8 @@ impl<IO, S, B, F> std::fmt::Debug for Connection<IO, S, B, F> {
 
 // ===== Projection =====
 
-impl<IO, S, B, F> Connection<IO, S, B, F> {
-    fn project(self: Pin<&mut Self>) -> ConnectionProject<'_, IO, S, B, F> {
+impl<IO, S, B, D, F> Connection<IO, S, B, D, F> {
+    fn project(self: Pin<&mut Self>) -> ConnectionProject<'_, IO, S, B, D, F> {
         // SAFETY: self is pinned, no custom Drop and Unpin
         unsafe {
             let me = self.get_unchecked_mut();
@@ -301,35 +308,28 @@ impl<IO, S, B, F> Connection<IO, S, B, F> {
     }
 }
 
-impl<B, F> Phase<B, F> {
-    fn project(self: Pin<&mut Self>) -> PhaseProject<'_, B, F> {
+impl<B, D, F> Phase<B, D, F> {
+    fn project(self: Pin<&mut Self>) -> PhaseProject<'_, B, D, F> {
         // SAFETY: self is pinned, no custom Drop and Unpin
         unsafe {
             match self.get_unchecked_mut() {
-                Self::Reqline { want_read } => PhaseProject::Reqline { want_read },
-                Self::Header(_) => PhaseProject::Header,
+                Self::Reqline(reqline) => PhaseProject::Reqline(reqline),
                 Self::Service { service } => PhaseProject::Service {
                     service: Pin::new_unchecked(service),
                 },
-                Self::ResHeader { .. } => PhaseProject::ResHeader,
-                Self::ResBody {
+                Self::Response {
                     body,
                     encoder,
                     chunk,
-                } => PhaseProject::ResBody {
+                } => PhaseProject::Response {
                     body: Pin::new_unchecked(body),
                     encoder,
                     chunk,
                 },
+                Self::ResponseNoBody => PhaseProject::ResponseNoBody,
                 Self::Cleanup => PhaseProject::Cleanup,
-                Self::Placeholder => unreachable!(),
             }
         }
-    }
-
-    fn take(self: Pin<&mut Self>) -> Self {
-        // SAFETY: self is pinned, no custom Drop and Unpin
-        unsafe { mem::replace(self.get_unchecked_mut(), Self::Placeholder) }
     }
 }
 

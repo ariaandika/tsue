@@ -20,6 +20,5 @@ mod state;
 mod context;
 pub mod error;
 
-pub use state::{HttpState, insert_header, write_response};
-pub use context::HttpContext;
-
+pub(crate) use state::{HttpState, insert_header, write_response_head};
+pub(crate) use context::HttpContext;

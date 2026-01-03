@@ -14,13 +14,11 @@
 //! - [`uri`] Uniform Resource Identifier ([RFC3986])
 //! - [`headers`] HTTP Header Fields ([RFC9110 Section 5])
 //! - [`http`] HTTP Semantics ([RFC9110])
-//! - [`request`] HTTP Request Message ([RFC9110 Section 6])
-//! - [`response`] HTTP Response Message ([RFC9110 Section 6])
 //!
 //! ## Behaviors
 //!
 //! - [`h1`] HTTP/1.1 ([RFC9112])
-//! - `h2` HTTP/2.0 (RFC9113)
+//! - [`h2`] HTTP/2.0 (RFC9113)
 //!
 //! ## User Abstraction
 //!
@@ -53,7 +51,7 @@ pub mod http;
 pub mod body;
 
 // HTTP protocol
-mod proto;
+pub mod proto;
 pub mod h1;
 pub mod h2;
 
