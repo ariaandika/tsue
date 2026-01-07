@@ -267,12 +267,12 @@ impl SendHandle {
         debug_assert!(flag.is_set::<WANT_MASK>());
 
         let result = loop {
-            break match decoder.decode_chunk(buf) {
+            break match decoder.decode_chunk(&mut *buf) {
                 Poll::Ready(Some(Ok(data))) => Data::Ok(data.freeze()),
                 Poll::Ready(Some(Err(err))) => Data::BodyErr(err),
                 Poll::Ready(None) => Data::Eof,
                 Poll::Pending => {
-                    let Poll::Ready(result) = io.poll_read_buf(buf, cx) else {
+                    let Poll::Ready(result) = io.poll_read_buf(&mut *buf, cx) else {
                         return;
                     };
                     match result {
@@ -323,12 +323,12 @@ impl SendHandle {
             // recv handle is already dropped, and the state should be reset
             // TODO: drain request body
             loop {
-                match decoder.decode_chunk(buf) {
+                match decoder.decode_chunk(&mut *buf) {
                     Poll::Ready(Some(Ok(_))) => {}
                     Poll::Ready(Some(Err(_))) => todo!("body error when draining"),
                     Poll::Ready(None) => break,
                     Poll::Pending => {
-                        let Poll::Ready(result) = io.poll_read_buf(buf, cx) else {
+                        let Poll::Ready(result) = io.poll_read_buf(&mut *buf, cx) else {
                             return Poll::Pending;
                         };
                         match result {

@@ -28,57 +28,56 @@ impl Header {
 fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, ParseError> {
     use ParseResult as Result;
 
-    let mut cursor = bytes.cursor_mut();
-
-    match ready!(cursor.next()) {
-        b'\r' => match ready!(cursor.next()) {
-            b'\n' => {
-                cursor.advance_buf();
-                return Result::Ok(None);
-            }
-            _ => return Result::Err(ParseError::InvalidSeparator),
-        },
-        b'\n' => {
-            cursor.advance_buf();
-            return Result::Ok(None);
-        }
-        _ => {}
-    }
-
-    cursor = bytes.cursor_mut();
-
-    let offset = matches::match_header_name! {
-        cursor;
-        |val,nth| match val {
-            b':' => nth,
-            _ => return Result::Err(ParseError::InvalidHeader),
+    if let b @ (b'\r' | b'\n') = ready!(bytes.first()) {
+        let adv = match (b, bytes.get(1)) {
+            (b'\r', Some(b'\n')) => 2,
+            (b'\r', None) => return Result::Err(ParseError::InvalidSeparator),
+            (b'\n', _) => 1,
+            _ => unreachable!(),
         };
-        else {
-            return ParseResult::Pending
-        }
-    };
-
-    match ready!(cursor.next()) {
-        b' ' => { }
-        _ => return Result::Err(ParseError::InvalidSeparator),
+        bytes.advance(adv);
+        return Result::Ok(None);
     }
 
-    matches::match_header_value!(cursor);
+    let mut line = {
+        let mut state = bytes.as_slice();
+        let delim = matches::split_crlf!(state else {
+            return Result::Pending
+        });
 
-    let crlf = match ready!(cursor.next()) {
-        b'\r' => match ready!(cursor.next()) {
-            b'\n' => 2,
+        let crlf = match delim {
+            b'\r' => match state.split_first() {
+                Some((b'\n', rest)) => {
+                    state = rest;
+                    2
+                },
+                Some(_) => return Result::Err(ParseError::InvalidSeparator),
+                None => return Result::Pending,
+            },
+            b'\n' => 1,
             _ => return Result::Err(ParseError::InvalidSeparator),
-        },
-        b'\n' => 1,
-        _ => return Result::Err(ParseError::InvalidHeader),
+        };
+        let mut line = bytes.split_to_ptr(state.as_ptr());
+        line.truncate_off(crlf);
+        line
     };
 
-    let mut line = cursor.split_to();
-    let name = line.split_to(offset);
+    let mut state = line.as_slice();
+    let delim = matches::split_header_name!(state else {
+        return Result::Err(ParseError::InvalidHeader)
+    });
+    if delim != b':' {
+        return Result::Err(ParseError::InvalidHeader)
+    }
 
-    line.advance(b": ".len());
-    line.truncate_off(crlf);
+    let mut delim_len = 1;
+    while let Some((b' ', rest)) = state.split_first() {
+        delim_len += 1;
+        state = rest;
+    }
+
+    let mut name = line.split_to_ptr(state.as_ptr());
+    name.truncate_off(delim_len);
 
     ParseResult::Ok(Some(Header {
         name,

@@ -12,7 +12,7 @@ const MAX_BUFFER_CAP: usize = 16 * 1024;
 const DEFAULT_BUFFER_CAP: usize = 512;
 
 macro_rules! io_read {
-    ($io:ident.$read:ident($buffer:ident, $cx:expr)) => {
+    ($io:ident.$read:ident($buffer:expr, $cx:expr)) => {
         let read = ready!($io.$read($buffer, $cx)?);
         if read == 0 {
             return Poll::Ready(Ok(()));
@@ -68,7 +68,7 @@ impl<IO> Connection<IO> {
             match phase.as_mut().project() {
                 PhaseProject::Preface => {
                     let Some((preface, rest)) = read_buffer.split_first_chunk() else {
-                        io_read!(io.poll_read_buf(read_buffer, cx));
+                        io_read!(io.poll_read_buf(&mut *read_buffer, cx));
                         continue;
                     };
 

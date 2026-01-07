@@ -23,7 +23,7 @@ const DEFAULT_BUFFER_CAP: usize = 1024;
 ///
 /// Handle zero read and max buffer length.
 macro_rules! io_read {
-    ($io:ident.$read:ident($buffer:ident, $cx:expr)) => {
+    ($io:ident.$read:ident($buffer:expr, $cx:expr)) => {
         let read = ready!($io.$read($buffer, $cx)?);
         if read == 0 {
             return Poll::Ready(Ok(()));
@@ -130,12 +130,12 @@ where
             match phase.as_mut().project() {
                 PhaseProject::Reqline(reqline) => {
                     if reqline.is_none() {
-                        match Reqline::parse_chunk(read_buffer).into_poll_result()? {
+                        match Reqline::parse_chunk(&mut *read_buffer).into_poll_result()? {
                             Poll::Ready(ok) => {
                                 *reqline = Some(ok);
                             },
                             Poll::Pending => {
-                                io_read!(io.poll_read_buf(read_buffer, cx));
+                                io_read!(io.poll_read_buf(&mut *read_buffer, cx));
                                 continue;
                             }
                         }
@@ -148,7 +148,7 @@ where
                             }
                             Poll::Ready(None) => break,
                             Poll::Pending => {
-                                io_read!(io.poll_read_buf(read_buffer, cx));
+                                io_read!(io.poll_read_buf(&mut *read_buffer, cx));
                                 continue;
                             }
                         }

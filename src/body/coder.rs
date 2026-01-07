@@ -7,6 +7,7 @@
 
 use std::task::Poll;
 use tcio::bytes::{Buf, BytesMut};
+use tcio::num::atou;
 
 use crate::body::chunked::{ChunkedCoder, EncodedBuf};
 use crate::body::error::BodyError;
@@ -57,7 +58,7 @@ impl BodyCoder {
                 if content_lengths.has_remaining() {
                     return Err(BodyError::InvalidContentLength);
                 }
-                match tcio::atou(length.as_bytes()) {
+                match atou(length.as_bytes()) {
                     Some(length) => Kind::ContentLength(length),
                     None => return Err(BodyError::InvalidContentLength),
                 }

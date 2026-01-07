@@ -1,4 +1,5 @@
 use std::slice::from_raw_parts;
+use tcio::num::atou;
 
 use super::{Authority, Host, HttpScheme, HttpUri, Path, Scheme, Uri, matches};
 
@@ -107,7 +108,7 @@ impl Authority {
     pub const fn port(&self) -> Option<u16> {
         match self.split_port() {
             // with port validation in constructor, should we do unsafe calculation ?
-            Some((_, port)) => match tcio::atou(port) {
+            Some((_, port)) => match atou(port) {
                 Some(ok) => Some(ok as u16),
                 None => None,
             }
@@ -181,7 +182,7 @@ impl Host {
     pub const fn port(&self) -> Option<u16> {
         match self.split_port() {
             // with port validation in constructor, should we do unsafe calculation ?
-            Some((_, port)) => match tcio::atou(port) {
+            Some((_, port)) => match atou(port) {
                 Some(ok) => Some(ok as u16),
                 None => None,
             }
