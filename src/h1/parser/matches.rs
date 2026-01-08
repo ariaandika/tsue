@@ -42,7 +42,7 @@ macro_rules! split_crlf {
                 let nth = (result.trailing_zeros() / 8) as usize;
                 unsafe {
                     let end = $state.as_ptr().add($state.len());
-                    let at_ptr = chunk.as_ptr().add(nth);
+                    let at_ptr = $state.as_ptr().add(nth);
 
                     let rest = at_ptr.add(1);
                     let rest_len = end.offset_from_unsigned(rest);
@@ -98,7 +98,7 @@ macro_rules! split_header_name {
                 let nth = (result.trailing_zeros() / 8) as usize;
                 unsafe {
                     let end = $state.as_ptr().add($state.len());
-                    let at_ptr = chunk.as_ptr().add(nth);
+                    let at_ptr = $state.as_ptr().add(nth);
 
                     let rest = at_ptr.add(1);
                     let rest_len = end.offset_from_unsigned(rest);

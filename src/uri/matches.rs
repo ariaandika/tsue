@@ -47,7 +47,7 @@ pub const fn split_at_sign(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
         let result = is_at & MSB;
         if result != 0 {
             let nth = (result.trailing_zeros() / 8) as usize;
-            return split_delim_chunk!(bytes, chunk, nth);
+            return split_delim_chunk!(bytes, state, nth);
         }
 
         state = rest;
@@ -90,7 +90,7 @@ pub const fn split_port(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
             state = lead;
         } else if *byte == b':' {
             unsafe {
-                let mid_ptr = state.as_ptr().add(state.len());
+                let mid_ptr = bytes.as_ptr().add(state.len());
                 let len = bytes.len() - state.len();
                 return Some((lead, from_raw_parts(mid_ptr, len)));
             };
