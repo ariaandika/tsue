@@ -1,9 +1,9 @@
 #![allow(unused, reason = "logger")]
 
-macro_rules! info {
+macro_rules! trace {
     ($($tt:tt)*) => {
         #[cfg(feature = "log")]
-        ::log::info!($($tt)*);
+        ::log::trace!($($tt)*);
     };
 }
 
@@ -11,6 +11,13 @@ macro_rules! debug {
     ($($tt:tt)*) => {
         #[cfg(feature = "log")]
         ::log::debug!($($tt)*);
+    };
+}
+
+macro_rules! info {
+    ($($tt:tt)*) => {
+        #[cfg(feature = "log")]
+        ::log::info!($($tt)*);
     };
 }
 
@@ -28,4 +35,4 @@ macro_rules! error {
     };
 }
 
-pub(crate) use {info, debug, warning, error};
+pub(crate) use {trace, debug, info, warning, error};

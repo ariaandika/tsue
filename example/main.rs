@@ -1,14 +1,12 @@
 use std::io;
 use tcio::bytes::Bytes;
 use tokio::{net::TcpListener, runtime::Runtime};
-use tsue::{
-    body::Incoming,
-    http::request::Request,
-    http::response::{Parts, Response},
-    server::Http1Server,
-    service::from_fn,
-    body::Full,
-};
+use tsue::body::Full;
+use tsue::body::Incoming;
+use tsue::http::request::Request;
+use tsue::http::response::{Parts, Response};
+use tsue::server::Http1Server;
+use tsue::service::from_fn;
 
 fn main() -> io::Result<()> {
     env_logger::init();
@@ -24,13 +22,9 @@ fn main() -> io::Result<()> {
 }
 
 async fn handle(req: Request<Incoming>) -> Response<Full<Bytes>> {
-    let parts = req.parts();
-    dbg!(parts);
-
-    if parts.uri.path() != "/null" {
+    if req.parts().uri.path() != "/null" {
         let body = req.into_body().collect().await.unwrap();
-        // println!("{}", lossy(&body.as_slice()));
-        println!("Body len {}", body.len());
+        println!("Body len: {}", body.len());
     }
 
     Response::from_parts(Parts::default(), Full::new(Bytes::from_static(b"Hello")))
