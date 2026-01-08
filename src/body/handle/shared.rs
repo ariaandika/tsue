@@ -6,7 +6,7 @@ use tcio::bytes::{Bytes, BytesMut};
 use tcio::io::AsyncIoRead;
 
 use crate::body::coder::BodyCoder;
-use crate::body::error::{ReadError, BodyError};
+use crate::body::error::{BodyError, ReadError};
 
 /// Sender shared handle.
 pub struct SendHandle {
@@ -18,7 +18,7 @@ pub struct RecvHandle {
     inner: NonNull<SharedInner>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 enum Data {
     #[default]
     None,
@@ -88,10 +88,11 @@ impl Drop for SendHandle {
                 {
                     waker.wake();
                 }
+            } else {
+                // otherwise, if WANT flag is unset, the send handle is idle and the memory is
+                // owned by recv handle, thus nothing need to be done here
             }
 
-            // otherwise, if WANT flag is unset, the send handle is idle and the memory is
-            // owned by recv handle, thus nothing need to be done here
         } else {
             // recv handle already dropped, clean up the shared memory
             fence(Ordering::Acquire);
@@ -317,6 +318,7 @@ impl SendHandle {
 
         if flag.is_set::<SHARED_MASK>() {
             self.poll_read(buf, decoder, io, cx);
+            buf.clear();
             Poll::Pending
 
         } else {
@@ -325,7 +327,7 @@ impl SendHandle {
             loop {
                 match decoder.decode_chunk(&mut *buf) {
                     Poll::Ready(Some(Ok(_))) => {}
-                    Poll::Ready(Some(Err(_))) => todo!("body error when draining"),
+                    Poll::Ready(Some(Err(err))) => todo!("body error when draining: {err}"),
                     Poll::Ready(None) => break,
                     Poll::Pending => {
                         let Poll::Ready(result) = io.poll_read_buf(&mut *buf, cx) else {
@@ -344,8 +346,6 @@ impl SendHandle {
     }
 }
 
-// ===== Helpers =====
-
 impl std::fmt::Debug for SendHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Shared").finish_non_exhaustive()
@@ -357,6 +357,20 @@ impl std::fmt::Debug for RecvHandle {
         f.debug_struct("Handle").finish_non_exhaustive()
     }
 }
+
+impl std::fmt::Debug for Data {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Eof => write!(f, "Eof"),
+            Self::Ok(arg0) => f.debug_tuple("Ok").field(&format_args!("..{}",arg0.len())).finish(),
+            Self::BodyErr(arg0) => f.debug_tuple("BodyErr").field(arg0).finish(),
+            Self::IoErr(arg0) => f.debug_tuple("IoErr").field(arg0).finish(),
+        }
+    }
+}
+
+// ===== Helpers =====
 
 trait Bitwise {
     fn is_set<const F: u8>(&self) -> bool;

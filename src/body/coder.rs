@@ -29,12 +29,11 @@ enum Kind {
 
 impl BodyCoder {
     pub fn from_len(len: Option<u64>) -> Self {
-        let kind = match len {
-            Some(len) => Kind::ContentLength(len),
-            None => Kind::Chunked(ChunkedCoder::new()),
-        };
         Self {
-            kind,
+            kind: match len {
+                Some(len) => Kind::ContentLength(len),
+                None => Kind::Chunked(ChunkedCoder::new()),
+            },
         }
     }
 
@@ -69,16 +68,16 @@ impl BodyCoder {
     }
 
     pub fn has_remaining(&self) -> bool {
-        match &self.kind {
+        match self.kind {
             Kind::Chunked(_) => true,
-            Kind::ContentLength(len) => *len != 0,
+            Kind::ContentLength(len) => len != 0,
         }
     }
 
     pub fn size_hint(&self) -> Option<u64> {
-        match &self.kind {
+        match self.kind {
             Kind::Chunked(_) => None,
-            Kind::ContentLength(len) => Some(*len),
+            Kind::ContentLength(len) => Some(len),
         }
     }
 
@@ -88,14 +87,14 @@ impl BodyCoder {
         shared: &mut SendHandle,
         cx: &mut std::task::Context,
     ) -> Incoming {
-        match &self.kind {
+        match self.kind {
             Kind::ContentLength(0) => Incoming::empty(),
             Kind::Chunked(_) => Incoming::from_handle(shared.handle(cx), None),
             Kind::ContentLength(len) => {
-                if buffer.len() as u64 == *len {
+                if buffer.len() as u64 == len {
                     Incoming::new(buffer.split())
                 } else {
-                    Incoming::from_handle(shared.handle(cx), Some(*len))
+                    Incoming::from_handle(shared.handle(cx), Some(len))
                 }
             }
         }
@@ -113,24 +112,9 @@ impl BodyCoder {
                 if buffer.is_empty() {
                     return Poll::Pending;
                 }
-
-                let remaining = *remaining_mut;
-                match remaining.checked_sub(buffer.len() as u64) {
-                    // buffer contains exact or larger than expected content
-                    None | Some(0) => {
-                        *remaining_mut = 0;
-                        #[allow(
-                            clippy::cast_possible_truncation,
-                            reason = "remaining <= buffer.len() which is usize"
-                        )]
-                        Poll::Ready(Some(Ok(buffer.split_to(remaining as usize))))
-                    }
-                    // buffer does not contains all expected content
-                    Some(leftover) => {
-                        *remaining_mut = leftover;
-                        Poll::Ready(Some(Ok(buffer.split())))
-                    }
-                }
+                let cnt = (*remaining_mut).min(buffer.len() as u64);
+                *remaining_mut -= cnt;
+                Poll::Ready(Some(Ok(buffer.split_to(cnt as usize))))
             }
         }
     }
@@ -159,9 +143,9 @@ impl BodyCoder {
     }
 
     pub const fn coding(&self) -> Codec {
-        match &self.kind {
+        match self.kind {
             Kind::Chunked(_) => Codec::Chunked,
-            Kind::ContentLength(len) => Codec::ContentLength(*len),
+            Kind::ContentLength(len) => Codec::ContentLength(len),
         }
     }
 }

@@ -4,108 +4,123 @@ use tcio::bytes::{Buf, Bytes, BytesMut};
 
 use crate::body::error::BodyError;
 
-const MAX_CHUNKED_SIZE: u64 = 64 * 1024;
+const MAX_CHUNKED_SIZE: u64 = u64::MAX >> 1;
 
 #[derive(Clone, Debug)]
 pub struct ChunkedCoder {
-    phase: Phase,
-}
-
-#[derive(Clone, Debug)]
-enum Phase {
-    Header,
-    Chunk(NonZeroU64),
+    /// 0 => Eof,
+    /// MAX => Header phase,
+    /// _ => Chunk phase,
+    raw: u64
 }
 
 impl ChunkedCoder {
     pub(crate) fn new() -> Self {
-        Self {
-            phase: Phase::Header,
-        }
+        Self { raw: u64::MAX }
     }
 
-    /// Poll for chunked body, returns `None` it end of chunks found.
+    fn set_header_phase(&mut self) {
+        self.raw = u64::MAX
+    }
+
+    fn is_header(&self) -> bool {
+        self.raw == u64::MAX
+    }
+
+    fn is_eof(&self) -> bool {
+        self.raw == 0
+    }
+
+    /// Poll for chunked body, returns `None` if end of chunks found.
     pub(crate) fn decode_chunk(
         &mut self,
         buffer: &mut BytesMut,
     ) -> Poll<Option<Result<BytesMut, BodyError>>> {
-        match &mut self.phase {
-            Phase::Header => {
-                let Some(digits_len) = buffer.iter().position(|e| !e.is_ascii_hexdigit()) else {
-                    return Poll::Pending;
-                };
-                // SAFETY: `is_ascii_hexdigit` is subset of ASCII
-                let digits = unsafe { str::from_utf8_unchecked(&buffer[..digits_len]) };
-                let Ok(chunk_len) = u64::from_str_radix(digits, 16) else {
-                    return Poll::Ready(Some(Err(BodyError::InvalidChunked)));
-                };
-                if chunk_len > MAX_CHUNKED_SIZE {
-                    return Poll::Ready(Some(Err(BodyError::ChunkTooLarge)));
-                }
+        if self.is_eof() {
+            return Poll::Ready(None);
+        }
 
-                // extension / CRLF delimiter
-                let trailing_header = match buffer[digits_len] {
-                    b'\r' => match buffer.get(digits_len + 1) {
-                        Some(b'\n') => 2,
-                        Some(_) => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
-                        None => return Poll::Pending,
-                    },
-                    b';' => match buffer[digits_len..].iter().position(|&e| e == b'\n') {
-                        // trailing is index of '\n', therefore `+ 1` to include the '\n'
-                        Some(trailing) => trailing + 1,
-                        None => return Poll::Pending,
-                    },
-                    _ => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
-                };
-                buffer.advance(digits_len + trailing_header);
+        if buffer.is_empty() {
+            return Poll::Pending;
+        }
 
-                match NonZeroU64::new(chunk_len) {
-                    Some(nonzero_len) => {
-                        self.phase = Phase::Chunk(nonzero_len);
-                        // advance
-                        self.decode_chunk(buffer)
-                    }
-                    None => match buffer.first_chunk::<2>() {
-                        Some(b"\r\n") => {
-                            buffer.advance(2);
-                            Poll::Ready(None)
-                        }
-                        Some(_) => Poll::Ready(Some(Err(BodyError::InvalidChunked))),
-                        None => Poll::Pending,
-                    }
+        if self.is_header() {
+            let Some(digits_len) = buffer.iter().position(|e| !e.is_ascii_hexdigit()) else {
+                return Poll::Pending;
+            };
+            // SAFETY: `is_ascii_hexdigit` is subset of ASCII
+            let digits = unsafe { str::from_utf8_unchecked(&buffer[..digits_len]) };
+            let Ok(chunk_len) = u64::from_str_radix(digits, 16) else {
+                return Poll::Ready(Some(Err(BodyError::InvalidChunked)));
+            };
+            if chunk_len > MAX_CHUNKED_SIZE {
+                return Poll::Ready(Some(Err(BodyError::ChunkTooLarge)));
+            }
+
+            // extension / CRLF delimiter
+            let trailing_header = match buffer[digits_len] {
+                b'\r' => match buffer.get(digits_len + 1) {
+                    Some(b'\n') => 2,
+                    Some(_) => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
+                    None => return Poll::Pending,
+                },
+                b';' => match buffer[digits_len..].iter().position(|&e| e == b'\n') {
+                    // trailing is index of '\n', therefore `+ 1` to include the '\n'
+                    Some(trailing) => trailing + 1,
+                    None => return Poll::Pending,
+                },
+                _ => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
+            };
+
+            self.raw = chunk_len;
+
+            if chunk_len == 0 {
+                match buffer[digits_len..].first_chunk::<2>() {
+                    Some(b"\r\n") => buffer.advance(2),
+                    Some(_) => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
+                    None => return Poll::Pending,
                 }
             }
-            Phase::Chunk(remaining_mut) => {
-                let remaining = remaining_mut.get();
-                match remaining
-                    .checked_sub(buffer.len() as u64)
-                    .and_then(NonZeroU64::new)
-                {
-                    // buffer contains partial of the expected chunk
-                    Some(leftover) => {
-                        *remaining_mut = leftover;
-                        Poll::Ready(Some(Ok(buffer.split())))
-                    }
-                    // buffer contains exact or larger than expected content
-                    None => {
-                        #[allow(
-                            clippy::cast_possible_truncation,
-                            reason = "remaining <= buffer.len() which is usize"
-                        )]
-                        let remaining = remaining as usize;
-                        let body = buffer.split_to(remaining);
-                        match buffer.first_chunk::<2>() {
-                            Some(b"\r\n") => {
-                                self.phase = Phase::Header;
-                                buffer.advance(2);
-                            }
-                            Some(_) => return Poll::Ready(Some(Err(BodyError::InvalidChunked))),
-                            None => return Poll::Pending,
-                        }
-                        Poll::Ready(Some(Ok(body)))
-                    }
-                }
+
+            buffer.advance(digits_len + trailing_header);
+            self.decode_chunk(buffer)
+
+            // ...
+        } else {
+            let len = buffer.len() as u64;
+            let remaining = self.raw;
+
+            if matches!(len.wrapping_sub(remaining), 0 | u64::MAX)  {
+                // if the buffer is more than remaining, it needs to at least have the CRLF
+                return Poll::Pending;
             }
+
+            let chunk = match remaining.checked_sub(len) {
+                // buffer contains less than or equal to the remaining chunk
+                Some(leftover) => {
+                    debug_assert!(leftover > 0);
+                    self.raw = leftover;
+                    buffer.split()
+                },
+                // buffer contains larger than the remaining chunk
+                None => {
+                    let rem = remaining as usize;
+
+                    // SAFETY: checked that buffer remainder left is at least 2 bytes
+                    let crlf = unsafe { offset_chunk!{buffer, rem, 2} };
+                    if crlf != b"\r\n" {
+                        return Poll::Ready(Some(Err(BodyError::InvalidChunked)));
+                    }
+
+                    self.set_header_phase();
+
+                    let b = buffer.split_to(rem);
+                    buffer.advance(2);
+                    b
+                },
+            };
+
+            Poll::Ready(Some(Ok(chunk)))
         }
     }
 
@@ -115,8 +130,8 @@ impl ChunkedCoder {
         write_buffer: &mut BytesMut,
         is_last_chunk: bool,
     ) -> EncodedBuf<B> {
-        // caller give empty chunk
         let Some(clen) = NonZeroU64::new(chunk.remaining() as u64) else {
+            // caller give empty chunk
             return EncodedBuf::exact(chunk);
         };
 
@@ -130,13 +145,14 @@ impl ChunkedCoder {
         let s = b.format(clen.get()).as_bytes();
         let len = s.len();
 
-        header[..len].copy_from_slice(s);
-        header[len..len + CRLF_LEN].copy_from_slice(b"\r\n");
+        unsafe {
+            std::ptr::copy_nonoverlapping(s.as_ptr(), header.as_mut_ptr(), len);
+            std::ptr::copy_nonoverlapping(CRLF.as_ptr(), header.as_mut_ptr().add(len), 2);
+        }
         let header = write_buffer.split_to(len + CRLF_LEN).freeze();
 
-        let crlf = is_last_chunk as usize * 2;
+        let crlf = (is_last_chunk as usize) << 1;
 
-        self.phase = Phase::Chunk(clen);
         EncodedBuf::chunks(header, chunk, &CRLF[..crlf])
     }
 }
@@ -160,3 +176,14 @@ impl<B> EncodedBuf<B> {
         Self { header, chunk, trail }
     }
 }
+
+
+/// unchecked `&bytes[offset..offset + len]`
+macro_rules! offset_chunk {
+    ($b:ident, $offset:expr, $len:expr) => {
+        debug_assert!($b.len() >= $offset + $len);
+        &*($b.as_ptr().add($offset).cast::<[u8; $len]>())
+    };
+}
+
+use {offset_chunk};

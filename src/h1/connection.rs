@@ -179,6 +179,7 @@ where
                             return Poll::Ready(Err(err.into()));
                         }
                         Poll::Pending => {
+                            read_buffer.reserve(512);
                             shared.poll_read(read_buffer, decoder, io, cx);
                             return Poll::Pending;
                         }
@@ -222,11 +223,15 @@ where
                             },
                             None => {
                                 if body.is_end_stream() {
+                                    read_buffer.clear();
+                                    read_buffer.try_reclaim_full();
                                     phase.set(Phase::Cleanup);
                                     break;
                                 }
 
                                 let Some(frame) = ready!(Body::poll_data(body.as_mut(), cx)?) else {
+                                    read_buffer.clear();
+                                    read_buffer.try_reclaim_full();
                                     phase.set(Phase::Cleanup);
                                     break;
                                 };
