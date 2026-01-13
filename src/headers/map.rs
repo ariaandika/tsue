@@ -33,7 +33,6 @@ const fn mask_by_capacity(cap: Size, value: Size) -> Size {
 ///
 /// This implementation has a maximum capacity that is lower than the system limit. The exact limit
 /// is sufficient for all HTTP headers use cases.
-#[derive(Clone)]
 pub struct HeaderMap {
     /// the allocation where the header field stored
     /// `self.len` represent fields that is initialized
@@ -80,7 +79,23 @@ impl Drop for HeaderMap {
     }
 }
 
-
+impl Clone for HeaderMap {
+    fn clone(&self) -> Self {
+        if self.is_empty() {
+            return Self::new();
+        }
+        unsafe {
+            let mut cloned = Self::with_capacity_unchecked(self.cap);
+            cloned.len = self.len;
+            cloned.fields_mut().clone_from_slice(self.fields());
+            // `Slot` is `Copy`
+            cloned
+                .slots
+                .copy_from_nonoverlapping(self.slots, self.cap as usize);
+            cloned
+        }
+    }
+}
 
 impl HeaderMap {
     /// Create new empty [`HeaderMap`].
