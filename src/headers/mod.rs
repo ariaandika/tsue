@@ -24,6 +24,9 @@ mod field;
 mod map;
 mod iter;
 
+#[cfg(test)]
+mod test;
+
 pub mod error;
 
 pub use name::{HeaderName, standard};
