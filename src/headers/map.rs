@@ -1,41 +1,60 @@
-use std::{
-    mem::{ManuallyDrop, replace},
-    ptr::NonNull,
-};
+use std::mem::{ManuallyDrop, replace};
+use std::ptr::{self, NonNull};
+use std::slice;
 
-use super::{
-    HeaderName, HeaderValue,
-    field::{GetAll, HeaderField},
-    iter::Iter,
-    matches,
-};
+use crate::headers::HeaderName;
+use crate::headers::HeaderValue;
+use crate::headers::error::TryReserveError;
+use crate::headers::field::{GetAll, HeaderField};
+use crate::headers::iter::Iter;
+use crate::headers::matches;
 
 // space-time tradeoff
 // most of integer type is limited
 // this limit practically should never exceeded for header length
 type Size = u32;
 
-/// Panics if the new capacity exceeds the HeaderMap capacity limit.
-const fn limit_cap(cap: usize) -> Size {
-    if cap <= Size::MAX as usize {
-        cap as Size
-    } else {
-        panic!("HeaderMap capacity limit exceeded")
-    }
+const fn mask_by_capacity(cap: Size, value: Size) -> Size {
+    // capacity is always a power of two
+    // any power of two - 1 will have all the appropriate bit set to mask the hash value
+    // the result is always equal to to `hash % capacity`
+    value & (cap - 1)
 }
 
 /// HTTP Headers Multimap.
 ///
+/// # Hash Function
+///
+/// `HeaderMap` **DOES NOT** use hashing algorithm that provide resistance against HashDoS attacks.
+/// It is expected that user will limit the number of headers to much lower number than the amount
+/// of where HashDoS attack is a concern.
+///
 /// # Capacity Limitations
 ///
-/// This implementation has a maximum capacity that is lower than the theoretical system limit for
-/// performance reason. The exact limit is sufficient for all realistic HTTP header scenarios, as
-/// even extreme cases rarely approach this boundary.
+/// This implementation has a maximum capacity that is lower than the system limit. The exact limit
+/// is sufficient for all HTTP headers use cases.
 #[derive(Clone)]
 pub struct HeaderMap {
-    fields: NonNull<Option<HeaderField>>,
+    /// the allocation where the header field stored
+    /// `self.len` represent fields that is initialized
+    /// this list is sorted by insertion
+    fields: NonNull<HeaderField>,
+    /// (hash, index)
+    /// hash to the header name for lookup
+    /// index to the fields
+    /// `self.len` represent slots that is `Some`,
+    /// the entire memory is initialized
+    slots: NonNull<Slot>,
+    /// this `len` of the headers fields, excluding duplicate headers
     len: Size,
     cap: Size,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Slot {
+    None,
+    Some((Size, Size)),
+    Tombstone,
 }
 
 unsafe impl Send for HeaderMap {}
@@ -50,20 +69,18 @@ impl Default for HeaderMap {
 
 impl Drop for HeaderMap {
     fn drop(&mut self) {
-        // `self.len` is actually represent the field that `Some`
-        // the underlying memory is actually all initialized
-        // so we use `self.cap` here
         let cap = self.cap as usize;
-        unsafe { Vec::from_raw_parts(self.fields.as_ptr(), cap, cap) };
+        let len = self.len as usize;
+        unsafe {
+            // `len` is actually represent the slots that is `Some`,
+            // the underlying memory is initialized, so we use `cap` here
+            Vec::from_raw_parts(self.slots.as_ptr(), cap, cap);
+            Vec::from_raw_parts(self.fields.as_ptr(), len, cap);
+        }
     }
 }
 
-const fn new_dangling_ptr<T>() -> NonNull<T> {
-    let mut vec = Vec::<T>::new();
-    let ptr = unsafe { NonNull::new_unchecked(vec.as_mut_ptr()) };
-    let _ = ManuallyDrop::new(vec);
-    ptr
-}
+
 
 impl HeaderMap {
     /// Create new empty [`HeaderMap`].
@@ -72,49 +89,89 @@ impl HeaderMap {
     #[inline]
     pub const fn new() -> Self {
         Self {
-            fields: new_dangling_ptr(),
+            fields: unsafe { NonNull::new_unchecked(ptr::dangling_mut()) },
+            slots: unsafe { NonNull::new_unchecked(ptr::dangling_mut()) },
             len: 0,
             cap: 0,
         }
     }
 
-    /// Create new empty [`HeaderMap`] with at least the specified capacity.
+    /// Creates new empty [`HeaderMap`] with at least the specified capacity.
     ///
-    /// If the `capacity` is `0`, this function does not allocate.
+    /// The header map will be able to hold at least capacity headers without reallocating. If
+    /// capacity is zero, the header map will not allocate.
     ///
     /// # Panics
     ///
-    /// Panics if the new capacity exceeds the HeaderMap capacity limit.
+    /// Panics if the new capacity exceeds the capacity limit.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        if capacity == 0 {
-            return Self::new();
-        }
-        Self::with_capacity_unchecked(limit_cap(capacity).next_power_of_two())
+        Self::try_with_capacity(capacity).expect("failed to create HeaderMap")
     }
 
-    fn with_capacity_unchecked(cap: Size) -> Self {
+    /// Creates new empty [`HeaderMap`] with at least the specified capacity.
+    ///
+    /// The header map will be able to hold at least capacity headers without reallocating. If
+    /// capacity is zero, the header map will not allocate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the new capacity exceeds the capacity limit.
+    #[inline]
+    pub fn try_with_capacity(capacity: usize) -> Result<Self, TryReserveError> {
+        if capacity == 0 {
+            return Ok(Self::new());
+        }
+        match Size::try_from(capacity)
+            .ok()
+            .and_then(Size::checked_next_power_of_two)
+        {
+            Some(cap) => unsafe { Ok(Self::with_capacity_unchecked(cap)) },
+            None => Err(TryReserveError {}),
+        }
+    }
+
+    /// Creates new empty [`HeaderMap`] with at least the specified capacity.
+    ///
+    /// # Safety
+    ///
+    /// The capacity must be a power of two.
+    #[doc(hidden)]
+    pub unsafe fn with_capacity_unchecked(cap: Size) -> Self {
         // it is required that capacity is power of two,
-        // see `fn mask_capacity()`
+        // see `fn mask_by_capacity()`
         debug_assert!(cap.is_power_of_two());
 
-        let mut fields = ManuallyDrop::new(vec![None; cap as usize]);
+        let mut fields = ManuallyDrop::new(Vec::with_capacity(cap as usize));
+        let mut slots = ManuallyDrop::new(vec![Slot::None; cap as usize]);
 
-        debug_assert_eq!(fields.capacity(), cap as usize);
+        assert_eq!(
+            (fields.capacity(), slots.capacity()),
+            (cap as usize, cap as usize)
+        );
 
-        // `self.len` represent the field that is `Some`,
-        // the underlying memory is all initialized
         Self {
             fields: unsafe { NonNull::new_unchecked(fields.as_mut_ptr()) },
+            slots: unsafe { NonNull::new_unchecked(slots.as_mut_ptr()) },
             len: 0,
             cap,
         }
     }
 
     /// Returns headers length.
+    ///
+    /// Note that this does not include header name with multiple values.
     #[inline]
     pub const fn len(&self) -> usize {
         self.len as _
+    }
+
+    /// Returns headers length, including duplicate headers.
+    ///
+    /// This function performs a computation, thus it best to cache the result to prevent calling
+    /// it multiple time.
+    pub fn total_len(&self) -> usize {
+        self.fields().iter().fold(0, |acc, next| acc + next.len())
     }
 
     /// Returns the total number of elements the map can hold without reallocating.
@@ -129,13 +186,12 @@ impl HeaderMap {
     pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
-}
 
-const fn mask_capacity(cap: Size, hash: Size) -> Size {
-    // capacity is always a power of two
-    // any power of two - 1 will have all the appropriate bit set to mask the hash value
-    // the result is always equal to to `hash % capacity`
-    hash & (cap - 1)
+    /// Returns an iterator over headers as name and value pair.
+    #[inline]
+    pub fn iter(&self) -> Iter<'_> {
+        Iter::new(self)
+    }
 }
 
 // ===== Lookup =====
@@ -207,119 +263,6 @@ impl HeaderMap {
         }
     }
 
-    /// Returns an iterator over headers as name and value pair.
-    #[inline]
-    pub fn iter(&self) -> Iter<'_> {
-        Iter::new(self)
-    }
-
-    fn field(&self, name: &str, hash: Size) -> Option<&HeaderField> {
-        let start_index = mask_capacity(self.cap, hash);
-        let mut index = start_index;
-
-        loop {
-            // the `?` is the base case of the loop, there is always `None`
-            // because the load factor is capped to less than capacity
-            let field = self.get_index(index as usize)?;
-
-            if field.eq_hash_and_name(hash, name) {
-                return Some(field);
-            }
-
-            // hash collision, open address linear probing
-            index = mask_capacity(self.cap, index + 1);
-        }
-    }
-
-    const fn get_index(&self, index: usize) -> Option<&HeaderField> {
-        unsafe { self.fields.add(index).as_ref().as_ref() }
-    }
-
-    const fn get_index_mut(&mut self, index: usize) -> &mut Option<HeaderField> {
-        unsafe { self.fields.add(index).as_mut() }
-    }
-
-    // `self.len` represent the field that is `Some`
-    // the underlying memory is all initialized
-    // so we use `self.cap` here
-
-    pub(crate) const fn fields(&self) -> &[Option<HeaderField>] {
-        unsafe { std::slice::from_raw_parts(self.fields.as_ptr(), self.cap as usize) }
-    }
-
-    const fn fields_mut(&mut self) -> &mut [Option<HeaderField>] {
-        unsafe { std::slice::from_raw_parts_mut(self.fields.as_ptr(), self.cap as usize) }
-    }
-}
-
-// ===== Mutation =====
-
-impl HeaderMap {
-    /// Removes a header from the map, returning the first header value at the key if the key was
-    /// previously in the map.
-    ///
-    /// # Panics
-    ///
-    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
-    ///
-    /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
-    /// constant.
-    pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
-        if self.is_empty() {
-            return None;
-        }
-        // the rest of duplicate header values are dropped
-        self.try_remove_field(name.as_lowercase_str(), name.hash()).map(|field| field.into_parts().1)
-    }
-
-    fn try_remove_field(&mut self, name: &str, hash: Size) -> Option<HeaderField> {
-        let start_index = mask_capacity(self.cap, hash);
-        let mut index = start_index;
-
-        loop {
-            let slot = self.get_index_mut(index as usize);
-
-            if slot.as_ref()?.eq_hash_and_name(hash, name) {
-                let Some(field) = slot.take() else {
-                    // guaranteed by the `?` operator
-                    unsafe { std::hint::unreachable_unchecked() }
-                };
-                self.len -= 1;
-
-                // backward shifting
-                let cap = self.cap;
-                let mut next_index = mask_capacity(cap, index + 1);
-
-                loop {
-                    let Some(next_slot) = self.get_index_mut(next_index as usize) else {
-                        break;
-                    };
-
-                    let ideal_index = mask_capacity(cap, next_slot.cached_hash());
-
-                    if ideal_index == index {
-                        let Some(slot) = self.get_index_mut(next_index as usize).take() else {
-                            // guaranteed by the `let else` at the start of the loop
-                            unsafe { std::hint::unreachable_unchecked() }
-                        };
-                        self.get_index_mut(index as usize).replace(slot);
-                        self.len -= 1;
-
-                        index = next_index;
-                    }
-
-                    next_index = mask_capacity(cap, next_index + 1);
-                }
-
-
-                return Some(field);
-            }
-
-            // hash collision, open address linear probing
-            index = mask_capacity(self.cap, index + 1);
-        }
-    }
-
     /// Inserts a key-value pair into the map.
     ///
     /// If the map did have this key present, the value is updated, and the old
@@ -360,41 +303,266 @@ impl HeaderMap {
         self.insert_inner(HeaderField::new(name.into_header_name(), value), true);
     }
 
+    /// Removes a header from the map, returning the first header value at the key if the key was
+    /// previously in the map.
+    ///
+    /// Note: Because this shifts over the remaining elements, it has a worst-case performance of
+    /// *O*(*n*). If you don't need the order of headers to be preserved, use [`swap_remove`]
+    /// instead.
+    ///
+    /// # Panics
+    ///
+    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
+    ///
+    /// If it unsure that header name is valid, use [`HeaderValue`] directly or its corresponding
+    /// constant.
+    ///
+    /// [`swap_remove`]: Self::swap_remove
+    #[inline]
+    pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
+        if self.is_empty() {
+            return None;
+        }
+        // the rest of duplicate header values are dropped
+        self.shift_remove_inner(name.as_lowercase_str(), name.hash())
+    }
+
+    #[inline]
+    pub fn swap_remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderValue> {
+        if self.is_empty() {
+            return None;
+        }
+        // the rest of duplicate header values are dropped
+        self.swap_remove_inner(name.as_lowercase_str(), name.hash())
+    }
+
+    /// Reserves capacity for at least `additional` more headers.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new capacity exceeds the HeaderMap capacity limit.
+    #[inline]
+    pub fn reserve(&mut self, additional: usize) {
+        self.try_reserve(additional).unwrap()
+    }
+
+    // private
+
+    pub(crate) const fn fields(&self) -> &[HeaderField] {
+        unsafe { slice::from_raw_parts(self.fields.as_ptr(), self.len as usize) }
+    }
+
+    const fn fields_mut(&mut self) -> &mut [HeaderField] {
+        unsafe { slice::from_raw_parts_mut(self.fields.as_ptr(), self.len as usize) }
+    }
+
+    // `self.len` represent the slots that is `Some`
+    // the underlying memory is all initialized
+    // so we use `self.cap` here
+
+    const fn slots_mut(&mut self) -> &mut [Slot] {
+        unsafe { slice::from_raw_parts_mut(self.slots.as_ptr(), self.cap as usize) }
+    }
+}
+
+// ===== Implementation =====
+
+impl HeaderMap {
     fn insert_inner(&mut self, field: HeaderField, append: bool) -> Option<HeaderValue> {
         self.reserve_one();
 
         let hash = field.cached_hash();
-        let start_index = mask_capacity(self.cap, hash);
-        let mut index = start_index;
+        let mut index = mask_by_capacity(self.cap, hash);
 
         loop {
-            match self.get_index_mut(index as usize) {
-                Some(dup_field) => {
-                    if dup_field.eq_hash_and_name(hash, field.name().as_str()) {
-                        // duplicate header
-                        break if append {
-                            // Append
-                            dup_field.merge(field);
-                            self.len += 1;
-                            None
-                        } else {
-                            // Returns duplicate, rest of multiple header values are dropped
-                            Some(replace(dup_field, field).into_parts().1)
-                        };
+            // SAFETY: `index` is masked by capacity
+            let slot_mut = unsafe { self.slots.add(index as usize).as_mut() };
+            match slot_mut {
+                Slot::Some((dup_hash, dup_index)) => {
+                    if *dup_hash == hash {
+                        let dup_field = unsafe { self.fields.add(*dup_index as usize).as_mut() };
+                        if dup_field.name() == field.name() {
+                            // duplicate header
+                            let field = if append {
+                                // Append
+                                // note that `len` is unchanged because it represent the
+                                // initialization length *NOT* the total headers length
+                                dup_field.merge(field);
+                                None
+                            } else {
+                                // Returns duplicate, rest of multiple header values are dropped
+                                Some(replace(dup_field, field).into_parts().1)
+                            };
+                            return field;
+                        }
                     }
-                }
+
+                    // hash collision, open address linear probing
+                    index = mask_by_capacity(self.cap, index + 1);
+                },
                 // this is the base case of the loop, there is always `None`
-                // because the load factor is limited
-                slot @ None => {
-                    slot.replace(field);
+                // because the load factor is limited to less than capacity
+                slot_mut @ (Slot::None | Slot::Tombstone) => {
+                    *slot_mut = Slot::Some((hash, self.len));
+                    unsafe { self.fields.add(self.len as usize).write(field); }
                     self.len += 1;
                     return None;
+                },
+            }
+            // ..
+        }
+    }
+
+    fn field(&self, name: &str, hash: Size) -> Option<&HeaderField> {
+        let mut index = mask_by_capacity(self.cap, hash);
+
+        loop {
+            let slot = unsafe { self.slots.add(index as usize).as_ref() };
+            match *slot {
+                Slot::Some((fd_hash, fd_idx)) => {
+                    if fd_hash == hash {
+                        let field_ptr = unsafe { self.fields.add(fd_idx as usize) };
+                        let field = unsafe { field_ptr.as_ref() };
+                        if field.name().as_str() == name {
+                            return Some(field);
+                        }
+                    }
                 }
+                // base case of the loop, there is always `None` because the load factor is capped
+                // to less than capacity
+                Slot::None => return None,
+                // hash collision with previously removed field
+                Slot::Tombstone => {}
             }
 
             // hash collision, open address linear probing
-            index = mask_capacity(self.cap, index + 1);
+            index = mask_by_capacity(self.cap, index + 1);
         }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn field_pair_ptr(&mut self, name: &str, hash: Size) -> Option<(NonNull<Slot>, NonNull<HeaderField>)> {
+        let mut index = mask_by_capacity(self.cap, hash);
+
+        loop {
+            let slot_ptr = unsafe { self.slots.add(index as usize) };
+            match unsafe { slot_ptr.read() } {
+                Slot::Some((fd_hash, fd_idx)) => {
+                    if fd_hash == hash {
+                        let field_ptr = unsafe { self.fields.add(fd_idx as usize) };
+                        let field_mut = unsafe { field_ptr.as_ref() };
+                        if field_mut.name().as_str() == name {
+                            return Some((slot_ptr, field_ptr));
+                        }
+                    }
+                }
+                // base case of the loop, there is always `None` because the load factor is capped
+                // to less than capacity
+                Slot::None => return None,
+                // hash collision with previously removed field
+                Slot::Tombstone => {}
+            }
+
+            // hash collision, open address linear probing
+            index = mask_by_capacity(self.cap, index + 1);
+        }
+    }
+
+    fn shift_remove_inner(&mut self, name: &str, hash: Size) -> Option<HeaderValue> {
+        let (slot_ptr, field_ptr) = self.field_pair_ptr(name, hash)?;
+
+        unsafe {
+            // take out the target field ownership and remove the slot
+            let field = field_ptr.read();
+            slot_ptr.write(Slot::Tombstone);
+
+            // casting will not cause data loss because max length is u32::MAX
+            let index = field_ptr.offset_from_unsigned(self.fields) as u32;
+            let shifted_count = self.len - index - 1;
+
+            // update all shifted field's slots
+            let shifted_fields = slice::from_raw_parts(field_ptr.add(1).as_ptr(), shifted_count as usize);
+
+            for (field, i) in shifted_fields.iter().zip(0u32..) {
+                let new_index = i + index;
+
+                // all unchecked in this loop is safe because the fact that one field have one
+                // corresponding slot
+
+                let (slot_ptr, _) = self
+                    .field_pair_ptr(field.name().as_str(), field.cached_hash())
+                    .unwrap_unchecked();
+                let Slot::Some((hash, _)) = slot_ptr.read() else {
+                    std::hint::unreachable_unchecked()
+                };
+                slot_ptr.write(Slot::Some((hash, new_index)));
+            }
+
+            // backshift the fields memory
+            // note that we shift *AFTER* updating the slots, otherwise hash collision probing will
+            // not work
+            field_ptr.add(1).copy_to(field_ptr, shifted_count as usize);
+
+            // update the length
+            self.len -= 1;
+
+            Some(field.into_parts().1)
+        }
+    }
+
+    fn swap_remove_inner(&mut self, name: &str, hash: Size) -> Option<HeaderValue> {
+        let (slot_ptr, field_ptr) = self.field_pair_ptr(name, hash)?;
+
+        unsafe {
+            // take out the target field ownership and remove the slot
+            let field = field_ptr.read();
+            slot_ptr.write(Slot::Tombstone);
+
+            // casting will not cause data loss because max length is u32::MAX
+            let new_index = field_ptr.offset_from_unsigned(self.fields) as u32;
+            let last_field = self.fields.add(self.len as usize).as_mut();
+
+            // update the last field's slot
+            let (slot_ptr, _) = self.field_pair_ptr(
+                last_field.name().as_str(),
+                last_field.cached_hash()
+            ).unwrap_unchecked();
+            let Slot::Some((hash, _)) = slot_ptr.read() else {
+                std::hint::unreachable_unchecked()
+            };
+            slot_ptr.write(Slot::Some((hash, new_index)));
+
+            // move last element to target field position
+            field_ptr.copy_from_nonoverlapping(last_field.into(), 1);
+
+            // update the length
+            self.len -= 1;
+
+            Some(field.into_parts().1)
+        }
+    }
+
+    /// Reserves capacity for at least `additional` more headers.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the new capacity exceeds the HeaderMap capacity limit.
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        if (self.cap - self.len) as usize > additional {
+            return Ok(());
+        }
+
+        let Some(new_cap) = Size::try_from(additional)
+            .ok()
+            .and_then(|e|e.checked_add(self.cap))
+            .and_then(Size::checked_next_power_of_two)
+        else {
+            return Err(TryReserveError {});
+        };
+
+        // SAFETY: `new_cap` is power of two
+        unsafe { self.reserve_unchecked(new_cap) };
+        Ok(())
     }
 
     fn reserve_one(&mut self) {
@@ -408,41 +576,33 @@ impl HeaderMap {
             let cap = if self.cap == 0 {
                 DEFAULT_MIN_ALLOC
             } else {
-                limit_cap((self.cap as usize) << 1)
+                self.cap << 1
             };
-            let mut me = Self::with_capacity_unchecked(cap);
 
-            for field in self.fields_mut().iter_mut().filter_map(Option::take) {
-                me.insert_inner(field, true);
-            }
-
-            *self = me;
-
-            debug_assert!({
-                const LOAD_FACTOR: f64 = 3.0 / 4.0;
-
-                (self.len as f64 / self.cap as f64) < LOAD_FACTOR
-            })
+            // SAFETY: `cap` is derived from `self.cap` or literal DEFAULT_MIN_ALLOC
+            unsafe { self.reserve_unchecked(cap) };
         }
     }
 
-    /// Reserves capacity for at least `additional` more headers.
+    /// Reserves capacity for exactly `new_cap` headers.
     ///
-    /// # Panics
+    /// # Safety
     ///
-    /// Panics if the new capacity exceeds the HeaderMap capacity limit.
-    pub fn reserve(&mut self, additional: usize) {
-        if (self.cap - self.len) as usize > additional {
-            return;
+    /// `new_cap` must be a power of two.
+    unsafe fn reserve_unchecked(&mut self, new_cap: Size) {
+        debug_assert!(new_cap.is_power_of_two());
+
+        // SAFETY: `new_cap` is power of two
+        let mut new_map = unsafe { Self::with_capacity_unchecked(new_cap) };
+
+        // move all values to the newly allocated map
+        for field in self.fields() {
+            let field = unsafe { ptr::read(field) };
+            new_map.insert_inner(field, false);
         }
 
-        let mut me = Self::with_capacity_unchecked(limit_cap(self.cap.next_power_of_two() as usize));
-
-        for field in self.fields_mut().iter_mut().filter_map(Option::take) {
-            me.insert_inner(field, true);
-        }
-
-        *self = me;
+        self.len = 0;
+        *self = new_map;
     }
 
     /// Clear headers map, removing all the value.
@@ -450,9 +610,16 @@ impl HeaderMap {
         if self.is_empty() {
             return;
         }
-        for _ in self.fields_mut().iter_mut().map(Option::take) { }
+        for slot_mut in self.slots_mut() {
+            *slot_mut = Slot::None;
+        }
+        for field_mut in self.fields_mut() {
+            // we set `self.len` to 0 below to prevent deallocation in `Drop` implementation
+            unsafe { ptr::drop_in_place(field_mut) };
+        }
         self.len = 0;
     }
+
 }
 
 impl std::fmt::Debug for HeaderMap {
@@ -541,6 +708,8 @@ impl Sealed for HeaderName {
     }
 }
 
+// ===== Test =====
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -549,20 +718,18 @@ mod test {
     fn header_map() {
         let mut map = HeaderMap::new();
 
-        assert!(map.get("content-type").is_none());
-
         map.insert("content-type", HeaderValue::from_string("FOO"));
         assert!(map.contains_key("content-type"));
 
         let ptr = map.fields.as_ptr();
         let cap = map.capacity();
 
-        map.insert("accept", HeaderValue::from_string("BAR"));
-        map.insert("content-length", HeaderValue::from_string("LEN"));
-        map.insert("host", HeaderValue::from_string("BAR"));
-        map.insert("date", HeaderValue::from_string("BAR"));
-        map.insert("referer", HeaderValue::from_string("BAR"));
-        map.insert("rim", HeaderValue::from_string("BAR"));
+        assert!(map.insert("accept", HeaderValue::from_string("BAR")).is_none());
+        assert!(map.insert("content-length", HeaderValue::from_string("LEN")).is_none());
+        assert!(map.insert("host", HeaderValue::from_string("BAR")).is_none());
+        assert!(map.insert("date", HeaderValue::from_string("BAR")).is_none());
+        assert!(map.insert("referer", HeaderValue::from_string("BAR")).is_none());
+        assert!(map.insert("rim", HeaderValue::from_string("BAR")).is_none());
 
         assert!(map.contains_key("content-type"));
         assert!(map.contains_key("accept"));
@@ -577,7 +744,7 @@ mod test {
 
         // Insert Allocate
 
-        map.insert("lea", HeaderValue::from_string("BAR"));
+        assert!(map.insert("lea", HeaderValue::from_string("BAR")).is_none());
 
         assert_ne!(ptr, map.fields.as_ptr());
         assert_ne!(cap, map.capacity());
@@ -640,5 +807,53 @@ mod test {
         assert!(!map.contains_key("referer"));
         assert!(!map.contains_key("rim"));
     }
+
+    // const fn slots(map: &HeaderMap) -> &[Slot] {
+    //     unsafe { slice::from_raw_parts(map.slots.as_ptr(), map.cap as usize) }
+    // }
+    //
+    // pub struct MapDbg<'a>(pub &'a HeaderMap);
+    // pub struct FieldsDbg<'a>(pub &'a HeaderMap);
+    // pub struct SlotsDbg<'a>(pub &'a HeaderMap);
+    //
+    // impl std::fmt::Debug for MapDbg<'_> {
+    //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    //         let mut m = f.debug_struct("HeaderMap");
+    //         m.field("len", &self.0.len);
+    //         m.field("cap", &self.0.cap);
+    //         m.field("fields", &FieldsDbg(self.0));
+    //         m.field("slots", &SlotsDbg(self.0));
+    //         m.finish()
+    //     }
+    // }
+    //
+    // impl std::fmt::Debug for FieldsDbg<'_> {
+    //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    //         let mut m = f.debug_list();
+    //         for field in self.0.fields() {
+    //             m.entry(&format_args!(
+    //                 "{}({}): {:?}",
+    //                 field.name().as_str(),
+    //                 field.cached_hash(),
+    //                 field.value(),
+    //             ));
+    //         }
+    //         m.finish()
+    //     }
+    // }
+    //
+    // impl std::fmt::Debug for SlotsDbg<'_> {
+    //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    //         let mut m = f.debug_list();
+    //         for slot in slots(self.0) {
+    //             match slot {
+    //                 Slot::None => m.entry(&None::<()>),
+    //                 Slot::Some((hash, index)) => m.entry(&format_args!("{}: {}", hash, index)),
+    //                 Slot::Tombstone => m.entry(&"Tombstone"),
+    //             };
+    //         }
+    //         m.finish()
+    //     }
+    // }
 }
 

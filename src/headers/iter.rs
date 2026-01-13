@@ -13,7 +13,7 @@ impl<'a> IntoIterator for &'a HeaderMap {
 
 #[derive(Debug)]
 pub struct Iter<'a> {
-    iter: std::slice::Iter<'a, Option<HeaderField>>,
+    iter: std::slice::Iter<'a, HeaderField>,
     current: Option<(&'a HeaderName, GetAll<'a>)>,
 }
 
@@ -21,7 +21,7 @@ impl<'a> Iter<'a> {
     pub(crate) fn new(map: &'a HeaderMap) -> Self {
         let mut iter = map.fields().iter();
         Self {
-            current: iter.find_map(Option::as_ref).map(|e| (e.name(), e.iter())),
+            current: iter.next().map(|e| (e.name(), e.iter())),
             iter,
         }
     }
@@ -38,7 +38,7 @@ impl<'a> Iterator for Iter<'a> {
                 return Some((name, value));
             }
 
-            let field = self.iter.find_map(Option::as_ref)?;
+            let field = self.iter.next()?;
             self.current = Some((field.name(), field.iter()));
         }
     }

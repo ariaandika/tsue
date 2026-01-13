@@ -14,6 +14,9 @@
 // function is not implemented, as it is expected that user limit the header length to much lower
 // number than the hard limit
 
+// NOTE: current it is not possible to provide generic for custom hasher because a const evaluation
+// is needed to compute a static header hash at compile time
+
 mod matches;
 mod name;
 mod value;
@@ -23,8 +26,8 @@ mod iter;
 
 pub mod error;
 
-pub use name::{HeaderName, HeaderNameError, standard};
-pub use value::{HeaderValue, HeaderValueError};
+pub use name::{HeaderName, standard};
+pub use value::HeaderValue;
 pub use field::{HeaderField, GetAll};
 pub use map::{HeaderMap, AsHeaderName, IntoHeaderName};
 pub use iter::Iter;

@@ -34,11 +34,6 @@ impl HeaderField {
     }
 
     /// name must be in lowercase
-    pub(crate) fn eq_hash_and_name(&self, hash: Size, name: &str) -> bool {
-        self.hash == hash && self.name.as_str() == name
-    }
-
-    /// name must be in lowercase
     pub(crate) fn cached_hash(&self) -> Size {
         self.hash
     }
