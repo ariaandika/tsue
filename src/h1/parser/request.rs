@@ -4,7 +4,7 @@ use tcio::bytes::BytesMut;
 use super::{Target, error::ParseError, matches};
 use crate::common::ParseResult;
 use crate::http::{Method, Version};
-use crate::proto::control_data::Reqline;
+use crate::proto::Reqline;
 
 const VERSION_SIZE: usize = b"HTTP/1.1".len();
 

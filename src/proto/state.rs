@@ -7,9 +7,8 @@ use crate::headers::standard::HOST;
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
 use crate::http::{Extensions, httpdate_now};
 use crate::http::{request, response};
-use crate::proto::HttpContext;
-use crate::proto::control_data::Reqline;
 use crate::proto::error::ProtoError;
+use crate::proto::{HttpContext, Reqline};
 use crate::uri::HttpScheme;
 
 #[derive(Debug)]

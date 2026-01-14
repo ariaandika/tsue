@@ -8,12 +8,10 @@ use tcio::io::{AsyncIoRead, AsyncIoWrite};
 use crate::body::BodyCoder;
 use crate::body::handle::SendHandle;
 use crate::body::{Body, EncodedBuf};
-use crate::h1::parser::Header;
-use crate::h1::parser::request::parse_reqline_chunk;
+use crate::h1::parser::{parse_reqline_chunk, parse_header_chunk};
 use crate::headers::HeaderMap;
 use crate::http::Request;
-use crate::proto::control_data::Reqline;
-use crate::proto::{self, HttpContext, HttpState};
+use crate::proto::{self, Header, HttpContext, HttpState, Reqline};
 use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -144,7 +142,7 @@ where
                     }
 
                     loop {
-                        match Header::parse_chunk(read_buffer).into_poll_result()? {
+                        match parse_header_chunk(read_buffer).into_poll_result()? {
                             Poll::Ready(Some(Header { name, value })) => {
                                 proto::insert_header(header_map, name, value)?;
                             }

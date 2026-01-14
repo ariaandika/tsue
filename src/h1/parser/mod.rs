@@ -13,14 +13,16 @@
 //! [`ParseResult::Ok(None)`]: crate::common::ParseResult::Ok
 mod matches;
 
-pub mod request;
+mod request;
 mod target;
 mod header;
 mod error;
 
 pub use target::{Target, Kind};
-pub use header::Header;
 pub use error::ParseError;
+
+pub use request::parse_reqline_chunk;
+pub use header::parse_header_chunk;
 
 #[cfg(test)]
 mod test;

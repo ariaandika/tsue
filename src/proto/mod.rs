@@ -16,10 +16,11 @@
 //!
 //! [`Request`]: crate::request::Request
 
-pub mod control_data;
+mod shared;
 mod state;
 mod context;
 pub mod error;
 
+pub use shared::{Reqline, Header};
 pub(crate) use state::{HttpState, insert_header, write_response_head};
 pub(crate) use context::HttpContext;

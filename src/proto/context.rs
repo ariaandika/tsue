@@ -5,7 +5,7 @@
 // Priority - HTTP/2/3 stream prioritization
 use crate::headers::{HeaderMap, standard::CONNECTION};
 use crate::http::{Method, Version};
-use crate::proto::control_data::Reqline;
+use crate::proto::Reqline;
 use crate::proto::error::ProtoError;
 
 // TODO: protocol upgrade www.rfc-editor.org/rfc/rfc9110.html#name-upgrade

@@ -1,7 +1,7 @@
 use tcio::bytes::BytesMut;
 
-use super::Kind;
 use crate::common::ParseResult;
+use crate::h1::parser::Kind;
 use crate::h1::parser::request::parse_reqline_chunk;
 use crate::http::{Method, Version};
 
@@ -136,13 +136,13 @@ fn test_parse_reqline() {
 }
 
 #[test]
-fn test_parse_header() {
-    use super::Header;
+fn test_h1_parse_header() {
+    use crate::h1::parser::header::parse_header_chunk;
 
     macro_rules! test {
         (#[end] $input:literal, $remain:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            assert!(ready!(Header::parse_chunk(&mut bytes)).is_none());
+            assert!(ready!(parse_header_chunk(&mut bytes)).is_none());
             assert_eq!(bytes.as_slice(), $remain);
         };
         (#[pending] $input:literal) => {
@@ -163,7 +163,7 @@ fn test_parse_header() {
             $rest:expr
         } => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            let header = ready!(Header::parse_chunk(&mut bytes)).unwrap();
+            let header = ready!(parse_header_chunk(&mut bytes)).unwrap();
             assert_eq!(&header.name, &$name[..]);
             assert_eq!(&header.value, &$value[..]);
             assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");

@@ -1,7 +1,9 @@
 use tcio::bytes::{Buf, BytesMut};
 
-use super::{error::ParseError, matches};
 use crate::common::ParseResult;
+use crate::h1::parser::error::ParseError;
+use crate::h1::parser::matches;
+use crate::proto::Header;
 
 macro_rules! ready {
     ($e:expr) => {
@@ -12,20 +14,7 @@ macro_rules! ready {
     };
 }
 
-#[derive(Debug)]
-pub struct Header {
-    pub name: BytesMut,
-    pub value: BytesMut,
-}
-
-impl Header {
-    #[inline]
-    pub fn parse_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, ParseError> {
-        parse_chunk_header(bytes)
-    }
-}
-
-fn parse_chunk_header(bytes: &mut BytesMut) -> ParseResult<Option<Header>, ParseError> {
+pub fn parse_header_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, ParseError> {
     use ParseResult as Result;
 
     if let b @ (b'\r' | b'\n') = ready!(bytes.first()) {
