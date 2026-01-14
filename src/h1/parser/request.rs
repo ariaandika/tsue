@@ -4,26 +4,13 @@ use tcio::bytes::BytesMut;
 use super::{Target, error::ParseError, matches};
 use crate::common::ParseResult;
 use crate::http::{Method, Version};
+use crate::proto::control_data::Reqline;
 
 const VERSION_SIZE: usize = b"HTTP/1.1".len();
 
-#[derive(Debug)]
-pub struct Reqline {
-    pub method: Method,
-    pub target: Target,
-    pub version: Version,
-}
-
-impl Reqline {
-    #[inline]
-    pub fn parse_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError> {
-        parse_chunk_reqline(bytes)
-    }
-}
-
 // ===== Request Line =====
 
-fn parse_chunk_reqline(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError> {
+pub fn parse_reqline_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseError> {
     use ParseResult as Result;
 
     if bytes.is_empty() {

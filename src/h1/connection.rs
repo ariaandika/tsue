@@ -8,9 +8,11 @@ use tcio::io::{AsyncIoRead, AsyncIoWrite};
 use crate::body::BodyCoder;
 use crate::body::handle::SendHandle;
 use crate::body::{Body, EncodedBuf};
-use crate::h1::parser::{Header, Reqline};
+use crate::h1::parser::Header;
+use crate::h1::parser::request::parse_reqline_chunk;
 use crate::headers::HeaderMap;
 use crate::http::Request;
+use crate::proto::control_data::Reqline;
 use crate::proto::{self, HttpContext, HttpState};
 use crate::service::HttpService;
 
@@ -130,7 +132,7 @@ where
             match phase.as_mut().project() {
                 PhaseProject::Reqline(reqline) => {
                     if reqline.is_none() {
-                        match Reqline::parse_chunk(&mut *read_buffer).into_poll_result()? {
+                        match parse_reqline_chunk(&mut *read_buffer).into_poll_result()? {
                             Poll::Ready(ok) => {
                                 *reqline = Some(ok);
                             },

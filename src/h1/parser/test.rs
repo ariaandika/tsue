@@ -1,7 +1,9 @@
 use tcio::bytes::BytesMut;
 
 use super::Kind;
-use crate::{http::{Method, Version}, common::ParseResult};
+use crate::common::ParseResult;
+use crate::h1::parser::request::parse_reqline_chunk;
+use crate::http::{Method, Version};
 
 macro_rules! ready {
     ($e:expr) => {
@@ -15,12 +17,10 @@ macro_rules! ready {
 
 #[test]
 fn test_parse_reqline() {
-    use super::Reqline;
-
     macro_rules! test {
         (#[pending] $input:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            match Reqline::parse_chunk(&mut bytes) {
+            match parse_reqline_chunk(&mut bytes) {
                 ParseResult::Pending => { }
                 ParseResult::Ok(val) => panic!("expected `Poll::Pending`, but its `Ok` with: {val:?}"),
                 ParseResult::Err(val) => panic!("expected `Poll::Pending`, but its `Err` with: {val:?}"),
@@ -29,7 +29,7 @@ fn test_parse_reqline() {
         };
         (#[error] $input:expr) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
-            match Reqline::parse_chunk(&mut bytes) {
+            match parse_reqline_chunk(&mut bytes) {
                 ParseResult::Ok(ok) => panic!("expected `Err` but returns `Ok` with {ok:?}"),
                 ParseResult::Err(err) => err,
                 ParseResult::Pending => panic!("line {}, unexpected Poll::Pending",line!()),
@@ -42,7 +42,7 @@ fn test_parse_reqline() {
         } => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);
 
-            let reqline = ready!(Reqline::parse_chunk(&mut bytes));
+            let reqline = ready!(parse_reqline_chunk(&mut bytes));
 
             assert_eq!(reqline.method, Method::$m);
             assert_eq!(reqline.target.kind, Kind::$k);

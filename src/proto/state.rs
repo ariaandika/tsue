@@ -1,14 +1,14 @@
 use tcio::bytes::{Bytes, BytesMut};
 
-use crate::body::Codec;
 use crate::body::BodyCoder;
+use crate::body::Codec;
 use crate::body::error::BodyError;
-use crate::h1::parser::Reqline;
 use crate::headers::standard::HOST;
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
 use crate::http::{Extensions, httpdate_now};
 use crate::http::{request, response};
 use crate::proto::HttpContext;
+use crate::proto::control_data::Reqline;
 use crate::proto::error::ProtoError;
 use crate::uri::HttpScheme;
 

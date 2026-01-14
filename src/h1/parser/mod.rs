@@ -13,12 +13,11 @@
 //! [`ParseResult::Ok(None)`]: crate::common::ParseResult::Ok
 mod matches;
 
-mod request;
+pub mod request;
 mod target;
 mod header;
 mod error;
 
-pub use request::Reqline;
 pub use target::{Target, Kind};
 pub use header::Header;
 pub use error::ParseError;
