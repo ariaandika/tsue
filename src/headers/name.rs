@@ -116,13 +116,6 @@ impl HeaderName {
         self.as_str().eq_ignore_ascii_case(name)
     }
 
-    /// Used in iterator.
-    pub(crate) const fn placeholder() -> Self {
-        Self {
-            repr: Repr::Arbitrary(Bytes::new())
-        }
-    }
-
     pub(crate) const fn hash(&self) -> u32 {
         match &self.repr {
             Repr::Static(s) => s.hash,

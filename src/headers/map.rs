@@ -5,7 +5,8 @@ use std::slice;
 use crate::headers::HeaderName;
 use crate::headers::HeaderValue;
 use crate::headers::error::TryReserveError;
-use crate::headers::field::{GetAll, HeaderField};
+use crate::headers::field::HeaderField;
+use crate::headers::iter::{GetAll, Iter};
 use crate::headers::matches;
 
 // space-time tradeoff
@@ -191,8 +192,8 @@ impl HeaderMap {
 
     /// Returns an iterator over headers as name and value pair.
     #[inline]
-    pub fn iter(&self) -> crate::headers::iter::Iter<'_> {
-        <&Self>::into_iter(self)
+    pub fn iter(&self) -> Iter<'_> {
+        self.into_iter()
     }
 
     /// Returns `true` if the map contains a header value for given header name.
@@ -259,7 +260,7 @@ impl HeaderMap {
             return GetAll::empty();
         }
         match self.field(name.as_lowercase_str(), name.hash()) {
-            Some(field) => GetAll::new(field),
+            Some(field) => field.iter(),
             None => GetAll::empty(),
         }
     }
@@ -340,7 +341,7 @@ impl HeaderMap {
         unsafe { slice::from_raw_parts(self.fields.as_ptr(), self.cap as usize) }
     }
 
-    const fn fields_mut(&mut self) -> &mut [Option<HeaderField>] {
+    pub(crate) const fn fields_mut(&mut self) -> &mut [Option<HeaderField>] {
         unsafe { slice::from_raw_parts_mut(self.fields.as_ptr(), self.cap as usize) }
     }
 }

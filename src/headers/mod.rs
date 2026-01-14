@@ -19,7 +19,7 @@ mod name;
 mod value;
 mod field;
 mod map;
-mod iter;
+pub mod iter;
 
 #[cfg(test)]
 mod test;
@@ -28,6 +28,5 @@ pub mod error;
 
 pub use name::{HeaderName, standard};
 pub use value::HeaderValue;
-pub use field::{HeaderField, GetAll};
+pub use field::HeaderField;
 pub use map::{HeaderMap, AsHeaderName, IntoHeaderName};
-pub use iter::Iter;

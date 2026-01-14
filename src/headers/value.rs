@@ -1,9 +1,8 @@
 use std::fmt;
 use std::str::FromStr;
-use tcio::bytes::ByteStr;
-use tcio::bytes::Bytes;
+use tcio::bytes::{ByteStr, Bytes};
 
-use super::matches;
+use crate::headers::matches;
 
 /// HTTP Header Value.
 #[derive(Clone)]
@@ -13,14 +12,6 @@ pub struct HeaderValue {
 }
 
 impl HeaderValue {
-    /// used in iterator.
-    pub(crate) fn placeholder() -> Self {
-        Self {
-            bytes: Bytes::new(),
-            is_utf8: false,
-        }
-    }
-
     /// Parse header value from static bytes.
     ///
     /// # Panics

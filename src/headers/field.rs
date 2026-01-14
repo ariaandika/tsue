@@ -1,9 +1,7 @@
-use std::mem::replace;
-
-use super::{HeaderName, HeaderValue};
+use crate::headers::{HeaderName, HeaderValue};
+use crate::headers::iter::GetAll;
 
 type Size = u32;
-
 type NonZeroSize = std::num::NonZeroU32;
 
 /// Header Field.
@@ -17,8 +15,9 @@ pub struct HeaderField {
     len: NonZeroSize,
 }
 
+/// A linked list node of `HeaderValue`.
 #[derive(Clone)]
-struct FieldEntry {
+pub(crate) struct FieldEntry {
     value: HeaderValue,
     next: Option<Box<FieldEntry>>,
 }
@@ -64,11 +63,15 @@ impl HeaderField {
 
     /// Returns an iterator over [`HeaderValue`].
     #[inline]
-    pub const fn iter(&self) -> GetAll<'_> {
-        GetAll::new(self)
+    pub fn iter(&self) -> GetAll<'_> {
+        self.into_iter()
     }
 
     /// Push header value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new length exceeds `u32::MAX`.
     #[inline]
     pub fn push(&mut self, value: HeaderValue) {
         let new_len = self.len.checked_add(1).unwrap();
@@ -76,6 +79,11 @@ impl HeaderField {
         self.len = new_len;
     }
 
+    /// Combine all headers from two [`HeaderField`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new length exceeds `u32::MAX`.
     pub fn merge(&mut self, other: Self) {
         let mut entry = other.entry;
         loop {
@@ -91,11 +99,12 @@ impl HeaderField {
     ///
     /// Extra header value will be dropped.
     #[inline]
-    pub fn into_parts(mut self) -> (HeaderName, HeaderValue) {
-        (
-            replace(&mut self.name, HeaderName::placeholder()),
-            replace(&mut self.entry.value, HeaderValue::placeholder()),
-        )
+    pub fn into_parts(self) -> (HeaderName, HeaderValue) {
+        (self.name, self.entry.value)
+    }
+
+    pub(crate) const fn entry(&self) -> &FieldEntry {
+        &self.entry
     }
 }
 
@@ -114,88 +123,21 @@ impl FieldEntry {
             None => self.next = Self::new_option_box(value),
         }
     }
+
+    pub(crate) const fn value(&self) -> &HeaderValue {
+        &self.value
+    }
+
+    pub(crate) fn next_entry(&self) -> Option<&FieldEntry> {
+        self.next.as_deref()
+    }
 }
 
 impl std::fmt::Debug for HeaderField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HeaderField")
             .field("name", &self.name)
-            .field("values", &GetAll::new(self))
+            .field("values", &self.iter())
             .finish()
-    }
-}
-
-// ===== Iterator =====
-
-impl<'a> IntoIterator for &'a HeaderField {
-    type Item = &'a HeaderValue;
-
-    type IntoIter = GetAll<'a>;
-
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        GetAll::new(self)
-    }
-}
-
-/// Iterator returned from [`HeaderMap::get_all`][super::HeaderMap::get_all].
-#[derive(Clone)]
-pub struct GetAll<'a> {
-    entry: Option<&'a FieldEntry>,
-}
-
-impl<'a> GetAll<'a> {
-    pub(crate) const fn empty() -> Self {
-        Self { entry: None }
-    }
-
-    /// Returns `Some` if there is only single value for given name in the map.
-    ///
-    /// This method exists because it is common that duplicate header is forbidden.
-    #[inline]
-    pub fn as_single(self) -> Option<&'a HeaderValue> {
-        match self.entry {
-            Some(current) => {
-                if current.next.is_some() {
-                    None
-                } else {
-                    Some(&current.value)
-                }
-            }
-            None => None,
-        }
-    }
-
-    pub(crate) const fn new(field: &'a HeaderField) -> Self {
-        Self {
-            entry: Some(&field.entry),
-        }
-    }
-
-    /// Returns `true` if there is still remaining value.
-    #[inline]
-    pub const fn has_remaining(&self) -> bool {
-        self.entry.is_some()
-    }
-}
-
-impl<'a> Iterator for GetAll<'a> {
-    type Item = &'a HeaderValue;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.entry.take() {
-            Some(entry) => {
-                self.entry = entry.next.as_deref();
-                Some(&entry.value)
-            }
-            None => None,
-        }
-    }
-}
-
-impl<'a> std::fmt::Debug for GetAll<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.clone()).finish()
     }
 }
