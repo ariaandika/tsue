@@ -1,30 +1,9 @@
 use super::{HeaderField, HeaderMap, HeaderName, HeaderValue, field::GetAll};
 
-impl<'a> IntoIterator for &'a HeaderMap {
-    type Item = <Iter<'a> as Iterator>::Item;
-
-    type IntoIter = Iter<'a>;
-
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Iter<'a> {
-    iter: std::slice::Iter<'a, HeaderField>,
+    iter: std::slice::Iter<'a, Option<HeaderField>>,
     current: Option<(&'a HeaderName, GetAll<'a>)>,
-}
-
-impl<'a> Iter<'a> {
-    pub(crate) fn new(map: &'a HeaderMap) -> Self {
-        let mut iter = map.fields().iter();
-        Self {
-            current: iter.next().map(|e| (e.name(), e.iter())),
-            iter,
-        }
-    }
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -38,8 +17,23 @@ impl<'a> Iterator for Iter<'a> {
                 return Some((name, value));
             }
 
-            let field = self.iter.next()?;
+            let field = self.iter.find_map(|e| e.as_ref())?;
             self.current = Some((field.name(), field.iter()));
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a HeaderMap {
+    type Item = <Iter<'a> as Iterator>::Item;
+
+    type IntoIter = Iter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        let mut iter = self.fields().iter();
+        Iter {
+            current: iter.find_map(|e| e.as_ref().map(|e| (e.name(), e.iter()))),
+            iter,
         }
     }
 }

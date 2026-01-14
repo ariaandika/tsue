@@ -101,21 +101,19 @@ fn header_map() {
     assert!(!map.contains_key("rim"));
 }
 
-// const fn slots(map: &HeaderMap) -> &[Slot] {
-//     unsafe { slice::from_raw_parts(map.slots.as_ptr(), map.cap as usize) }
+// const fn mask(cap: usize, value: u32) -> u32 {
+//     value & (cap as u32 - 1)
 // }
 //
 // pub struct MapDbg<'a>(pub &'a HeaderMap);
 // pub struct FieldsDbg<'a>(pub &'a HeaderMap);
-// pub struct SlotsDbg<'a>(pub &'a HeaderMap);
 //
 // impl std::fmt::Debug for MapDbg<'_> {
 //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 //         let mut m = f.debug_struct("HeaderMap");
-//         m.field("len", &self.0.len);
-//         m.field("cap", &self.0.cap);
+//         m.field("len", &self.0.len());
+//         m.field("cap", &self.0.capacity());
 //         m.field("fields", &FieldsDbg(self.0));
-//         m.field("slots", &SlotsDbg(self.0));
 //         m.finish()
 //     }
 // }
@@ -124,25 +122,15 @@ fn header_map() {
 //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 //         let mut m = f.debug_list();
 //         for field in self.0.fields() {
-//             m.entry(&format_args!(
-//                 "{}({}): {:?}",
-//                 field.name().as_str(),
-//                 field.cached_hash(),
-//                 field.value(),
-//             ));
-//         }
-//         m.finish()
-//     }
-// }
-//
-// impl std::fmt::Debug for SlotsDbg<'_> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let mut m = f.debug_list();
-//         for slot in slots(self.0) {
-//             match slot {
-//                 Slot::None => m.entry(&None::<()>),
-//                 Slot::Some((hash, index)) => m.entry(&format_args!("{}: {}", hash, index)),
-//                 Slot::Tombstone => m.entry(&"Tombstone"),
+//             match field {
+//                 Some(field) => m.entry(&format_args!(
+//                     "{}({}->{}): {:?}",
+//                     field.name().as_str(),
+//                     field.cached_hash(),
+//                     mask(self.0.capacity(), field.cached_hash()),
+//                     field.value(),
+//                 )),
+//                 None => m.entry(&None::<()>),
 //             };
 //         }
 //         m.finish()
