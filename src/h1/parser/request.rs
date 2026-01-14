@@ -1,8 +1,8 @@
 use std::slice::from_raw_parts;
 use tcio::bytes::BytesMut;
 
-use super::{Target, error::ParseError, matches};
 use crate::common::ParseResult;
+use crate::h1::parser::{error::ParseError, matches};
 use crate::http::{Method, Version};
 use crate::proto::Reqline;
 
@@ -92,11 +92,10 @@ pub fn parse_reqline_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseEr
         reqline.advance_to_ptr(target.as_ptr());
         reqline.truncate(len);
     }
-    let target = Target::new(&method, reqline);
 
     ParseResult::Ok(Reqline {
         method,
-        target,
+        target: reqline,
         version,
     })
 }

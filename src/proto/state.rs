@@ -1,15 +1,15 @@
 use tcio::bytes::{Bytes, BytesMut};
 
-use crate::body::BodyCoder;
-use crate::body::Codec;
-use crate::body::error::BodyError;
+use crate::body::{BodyCoder, Codec, error::BodyError};
+use crate::h1::parser::ParseError;
 use crate::headers::standard::HOST;
 use crate::headers::{HeaderMap, HeaderName, HeaderValue};
 use crate::http::{Extensions, httpdate_now};
 use crate::http::{request, response};
 use crate::proto::error::ProtoError;
+use crate::proto::shared::TargetKind;
 use crate::proto::{HttpContext, Reqline};
-use crate::uri::HttpScheme;
+use crate::uri::{Host, HttpScheme, HttpUri, Path};
 
 #[derive(Debug)]
 pub struct HttpState {
@@ -31,17 +31,53 @@ impl HttpState {
     }
 
     pub fn build_parts(self) -> Result<request::Parts, ProtoError> {
-        let host = match self.headers.get(HOST) {
-            Some(ok) => Bytes::from(ok.clone()),
+        let HttpState { reqline, headers } = self;
+        let Reqline { method, target, version } = reqline;
+
+        let host = match headers.get(HOST) {
+            Some(value) => Bytes::from(value.clone()),
             None => return Err(ProtoError::MissingHost),
         };
-        let uri = self.reqline.target.build_origin(host, HttpScheme::HTTP)?;
+
+        // TODO: infer http scheme ?
+        let scheme = HttpScheme::HTTP;
+        let kind = TargetKind::new(&method, &target);
+        let uri_host;
+        let path;
+
+        match kind {
+            TargetKind::Origin => {
+                uri_host = Host::from_bytes(host)?;
+                path = Path::from_bytes(target)?;
+            }
+            TargetKind::Absolute => {
+                let uri = HttpUri::from_bytes(target)?;
+                if uri.host().as_bytes() == host.as_slice() {
+                    return Err(ParseError::MissmatchHost.into());
+                }
+                let (_, h, p) = uri.into_parts();
+                uri_host = h;
+                path = p;
+            }
+            TargetKind::Asterisk => {
+                uri_host = Host::from_bytes(host)?;
+                path = Path::from_static(b"*");
+            }
+            TargetKind::Authority => {
+                if target != host {
+                    return Err(ParseError::MissmatchHost.into());
+                }
+                uri_host = Host::from_bytes(target)?;
+                path = Path::from_static(b"");
+            }
+        }
+        let uri = HttpUri::from_parts(scheme, uri_host, path);
 
         Ok(request::Parts {
-            method: self.reqline.method,
+            method,
             uri,
-            version: self.reqline.version,
-            headers: self.headers,
+            version,
+            headers,
             extensions: Extensions::new(),
         })
     }

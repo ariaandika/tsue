@@ -1,12 +1,11 @@
 use tcio::bytes::BytesMut;
 
-use crate::h1::parser::Target;
 use crate::http::{Method, Version};
 
 #[derive(Debug)]
 pub struct Reqline {
     pub method: Method,
-    pub target: Target,
+    pub target: BytesMut,
     pub version: Version,
 }
 
@@ -16,3 +15,27 @@ pub struct Header {
     pub value: BytesMut,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    Asterisk,
+    Origin,
+    Absolute,
+    Authority,
+}
+
+impl TargetKind {
+    /// Get the target kind of a request line.
+    pub fn new(method: &Method, target: &[u8]) -> Self {
+        match target {
+            [b'/', ..] => Self::Origin,
+            b"*" => Self::Asterisk,
+            _ => {
+                if method != &Method::CONNECT {
+                    Self::Absolute
+                } else {
+                    Self::Authority
+                }
+            }
+        }
+    }
+}

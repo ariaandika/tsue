@@ -12,15 +12,11 @@
 //! [`ParseResult::Pending`]: crate::common::ParseResult::Pending
 //! [`ParseResult::Ok(None)`]: crate::common::ParseResult::Ok
 mod matches;
-
 mod request;
-mod target;
 mod header;
 mod error;
 
-pub use target::{Target, Kind};
 pub use error::ParseError;
-
 pub use request::parse_reqline_chunk;
 pub use header::parse_header_chunk;
 

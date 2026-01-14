@@ -1,5 +1,6 @@
 use crate::h1::parser::ParseError;
 use crate::headers::error::{HeaderError, HeaderNameError, HeaderValueError};
+use crate::uri::UriError;
 
 /// HTTP Semantic error.
 #[derive(Debug)]
@@ -39,6 +40,13 @@ impl std::fmt::Display for ProtoError {
             Self::HeaderError(err) => write!(f, "header error: {err}"),
             Self::ParseError(err) => write!(f, "parse error: {err}"),
         }
+    }
+}
+
+impl From<UriError> for ProtoError {
+    #[inline]
+    fn from(value: UriError) -> Self {
+        Self::ParseError(value.into())
     }
 }
 

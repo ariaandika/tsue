@@ -1,9 +1,9 @@
 use tcio::bytes::BytesMut;
 
 use crate::common::ParseResult;
-use crate::h1::parser::Kind;
 use crate::h1::parser::request::parse_reqline_chunk;
 use crate::http::{Method, Version};
+use crate::proto::TargetKind;
 
 macro_rules! ready {
     ($e:expr) => {
@@ -45,8 +45,8 @@ fn test_parse_reqline() {
             let reqline = ready!(parse_reqline_chunk(&mut bytes));
 
             assert_eq!(reqline.method, Method::$m);
-            assert_eq!(reqline.target.kind, Kind::$k);
-            assert_eq!(reqline.target.value.as_slice(), $u);
+            assert_eq!(TargetKind::new(&reqline.method, &reqline.target), TargetKind::$k);
+            assert_eq!(reqline.target.as_slice(), $u);
             assert_eq!(reqline.version, Version::$v);
             assert_eq!(bytes.as_slice(), $rest, "invalid remaining bytes");
         };
