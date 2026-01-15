@@ -36,39 +36,29 @@ pub const HEADER_NAME: [u8; 256] = {
     bytes
 };
 
-/// Returns (is_valid_header_name, is_valid_ascii).
+/// Returns `true` if byte is valid header name.
 ///
 /// field-value    = *field-content
 /// field-content  = field-vchar
 ///                  [ 1*( SP / HTAB / field-vchar ) field-vchar ]
 /// field-vchar    = VCHAR / obs-text
 /// obs-text       = %x80-FF
+///
+/// Note, `obs-text` is NOT supported.
 #[inline(always)]
-pub const fn is_header_value(byte: u8) -> (bool, bool) {
-    const fn vchar(byte: u8) -> bool {
-        matches!(byte, 0x21..=0x7E)
-    }
-
-    const fn obs_text(byte: u8) -> bool {
-        matches!(byte, 0x80..=0xFF)
-    }
-
+pub const fn is_header_value(byte: u8) -> bool {
     const fn valid(byte: u8) -> bool {
-        vchar(byte) || obs_text(byte) || matches!(byte, b' ' | b'\t')
+        // VCHAR                    || SP / HTAB
+        matches!(byte, 0x21..=0x7E) || matches!(byte, b' ' | b'\t')
     }
 
-    const OK: u8 = 0b01;
-    const ASCII: u8 = 0b10;
-
-    const PAT: [u8; 256] = {
-        let mut bytes = [0b00; 256];
+    const PAT: [bool; 256] = {
+        let mut bytes = [false; 256];
         let mut byte = 0u8;
         loop {
-            if valid(byte) {
-                // `(bool as u8) << 1` will mimic the ASCII flag
-                bytes[byte as usize] = OK | (byte.is_ascii() as u8) << 1;
-            }
-            if byte == 255 {
+            bytes[byte as usize] = valid(byte);
+            // 127 > is non-ascii
+            if byte == 127 {
                 break;
             }
             byte += 1;
@@ -76,8 +66,7 @@ pub const fn is_header_value(byte: u8) -> (bool, bool) {
         bytes
     };
 
-    let flag = unsafe { *PAT.as_ptr().add(byte as usize) };
-    (flag & OK == OK, flag & ASCII == ASCII)
+    PAT[byte as usize]
 }
 
 pub const fn hash_32(mut bytes: &[u8]) -> u32 {
