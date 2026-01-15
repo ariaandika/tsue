@@ -1,8 +1,9 @@
 use std::task::Poll;
 
+/// The result of a chunked parsing.
 #[derive(Debug)]
 pub enum ParseResult<T, E> {
-    /// Bytes is not sufficient for parsing, more IO read is required.
+    /// Bytes is not sufficient for parsing, more data is required.
     Pending,
     /// Parse success.
     Ok(T),

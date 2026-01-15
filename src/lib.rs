@@ -18,7 +18,7 @@
 //! ## Behaviors
 //!
 //! - [`h1`] HTTP/1.1 ([RFC9112])
-//! - [`h2`] HTTP/2.0 (RFC9113)
+//! - [`h2`] HTTP/2.0 ([RFC9113])
 //!
 //! ## User Abstraction
 //!
@@ -38,6 +38,7 @@
 //! [RFC9110 Section 5]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-fields>
 //! [RFC9110 Section 6]: <https://www.rfc-editor.org/rfc/rfc9110.html#name-message-abstraction>
 //! [RFC9112]: <https://www.rfc-editor.org/rfc/rfc9112.html>
+//! [RFC9113]: <https://www.rfc-editor.org/rfc/rfc9112.html>
 #![warn(missing_debug_implementations)]
 
 mod log;

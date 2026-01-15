@@ -1,3 +1,4 @@
+//! Error types that can occur during header related operation.
 pub use crate::headers::name::HeaderNameError;
 pub use crate::headers::value::HeaderValueError;
 

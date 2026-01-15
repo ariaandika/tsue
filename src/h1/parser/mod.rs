@@ -1,13 +1,12 @@
 //! HTTP/1.1 Parser.
 //!
-//! [`Reqline`] work on chunk read, given unknown length of bytes, [`Reqline::parse_chunk`] will
-//! find the next separator, and advance the bytes to it. If crlf is not found, then it returns
+//! [`parse_reqline_chunk`] works on chunked read, given any length of bytes, the parser will find
+//! the next separator and advance the bytes to it. If crlf is not found, then the parser returns
 //! [`ParseResult::Pending`].
 //!
-//! [`Header`] works the same way. Additionally, if [`Header::parse_chunk`] encounter an empty line
-//! with crlf, it returns [`ParseResult::Ok(None)`] denoting that its the end of header fields.
-//!
-//! [`Target`] handles request target with its different representation.
+//! [`parse_header_chunk`] works the same way. Additionally, if the parser encounter an empty line
+//! with separator, it returns [`ParseResult::Ok(None)`] denoting that its the end of header
+//! fields.
 //!
 //! [`ParseResult::Pending`]: crate::common::ParseResult::Pending
 //! [`ParseResult::Ok(None)`]: crate::common::ParseResult::Ok
