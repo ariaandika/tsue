@@ -1,7 +1,8 @@
 use tcio::bytes::BytesMut;
 
 use crate::common::ParseResult;
-use crate::h1::parser::request::parse_reqline_chunk;
+use crate::h1::parser::parse_header_chunk;
+use crate::h1::parser::parse_reqline_chunk;
 use crate::http::{Method, Version};
 use crate::proto::TargetKind;
 
@@ -137,8 +138,6 @@ fn test_parse_reqline() {
 
 #[test]
 fn test_h1_parse_header() {
-    use crate::h1::parser::header::parse_header_chunk;
-
     macro_rules! test {
         (#[end] $input:literal, $remain:literal) => {
             let mut bytes = BytesMut::copy_from_slice(&$input[..]);

@@ -1,20 +1,12 @@
-//! HTTP/1.1 Semantics.
+//! HTTP Semantics ([RFC9110]).
 //!
-//! - [`HttpContext`] per request context
+//! This module contains types that represent HTTP Semantics.
 //!
-//! - [`BodyDecoder`] message body decoder
-//! - [`Coding`] body coding information
-//! - [`Chunked`] transfer chunked encoding values
-//! - [`Encoding`] chunked encoding kinds
+//! Parsing implementation is provided in the [`h1`] and [`h2`] module.
 //!
-//! - [`HttpContext`] statefull http request context builder
-//!
-//! # Usage
-//!
-//! Create [`HttpState`] after parsing reqest line. Add header for each header parsed. Finally
-//! call `build_*` method to retrieve [`HttpContext`], [`BodyDecoder`], and [`Request`].
-//!
-//! [`Request`]: crate::request::Request
+//! [RFC9110]: <https://www.rfc-editor.org/rfc/rfc9110>
+//! [`h1`]: crate::h1
+//! [`h2`]: crate::h2
 
 mod shared;
 mod state;

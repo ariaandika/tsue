@@ -214,6 +214,20 @@ impl PartialEq<[u8]> for HeaderValue {
     }
 }
 
+impl PartialEq<str> for HeaderValue {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        self.bytes.as_slice() == other.as_bytes()
+    }
+}
+
+impl PartialEq<String> for HeaderValue {
+    #[inline]
+    fn eq(&self, other: &String) -> bool {
+        self.bytes.as_slice() == other.as_bytes()
+    }
+}
+
 impl From<HeaderValue> for Bytes {
     #[inline]
     fn from(value: HeaderValue) -> Self {
