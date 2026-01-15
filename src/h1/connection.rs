@@ -246,7 +246,7 @@ where
                     }
                 }
                 PhaseProject::Cleanup => {
-                    ready!(shared.poll_close(read_buffer, decoder, io, cx));
+                    ready!(shared.poll_close(read_buffer, decoder, io, cx))?;
 
                     if !context.is_keep_alive {
                         return Poll::Ready(Ok(()));

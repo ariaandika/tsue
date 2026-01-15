@@ -313,14 +313,13 @@ impl SendHandle {
         decoder: &mut BodyCoder,
         io: &mut IO,
         cx: &mut std::task::Context,
-    ) -> Poll<()> {
+    ) -> Poll<io::Result<()>> {
         let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Acquire);
 
         if flag.is_set::<SHARED_MASK>() {
             self.poll_read(buf, decoder, io, cx);
             buf.clear();
             Poll::Pending
-
         } else {
             // recv handle is already dropped, and the state should be reset
             // TODO: drain request body
@@ -330,18 +329,16 @@ impl SendHandle {
                     Poll::Ready(Some(Err(err))) => todo!("body error when draining: {err}"),
                     Poll::Ready(None) => break,
                     Poll::Pending => {
-                        let Poll::Ready(result) = io.poll_read_buf(&mut *buf, cx) else {
+                        let Poll::Ready(read) = io.poll_read_buf(&mut *buf, cx)? else {
                             return Poll::Pending;
                         };
-                        match result {
-                            Ok(0) => break,
-                            Ok(_) => { },
-                            Err(_) => todo!("io error when draining"),
+                        if read == 0 {
+                            break;
                         }
                     }
                 }
             }
-            Poll::Ready(())
+            Poll::Ready(Ok(()))
         }
     }
 }
