@@ -27,7 +27,7 @@ impl ChunkedCoder {
         self.raw == u64::MAX
     }
 
-    fn is_eof(&self) -> bool {
+    pub fn is_eof(&self) -> bool {
         self.raw == 0
     }
 

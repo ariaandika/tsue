@@ -207,10 +207,16 @@ where
                     phase.set(next_phase);
                 },
                 PhaseProject::ResponseNoBody => {
+                    // if recv handle is still alive, user may read the body concurrently
+                    let _ = shared.poll_close(read_buffer, decoder, io, cx)?;
+
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
                     phase.set(Phase::Cleanup);
                 },
                 PhaseProject::Response { mut body, encoder, chunk } => {
+                    // if recv handle is still alive, user may read the body concurrently
+                    let _ = shared.poll_close(read_buffer, decoder, io, cx)?;
+
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
 
                     loop {
@@ -223,16 +229,10 @@ where
                             },
                             None => {
                                 if body.is_end_stream() {
-                                    read_buffer.clear();
-                                    read_buffer.try_reclaim_full();
-                                    phase.set(Phase::Cleanup);
                                     break;
                                 }
 
                                 let Some(frame) = ready!(Body::poll_data(body.as_mut(), cx)?) else {
-                                    read_buffer.clear();
-                                    read_buffer.try_reclaim_full();
-                                    phase.set(Phase::Cleanup);
                                     break;
                                 };
 
@@ -244,22 +244,17 @@ where
                             },
                         }
                     }
+
+                    phase.set(Phase::Cleanup);
                 }
                 PhaseProject::Cleanup => {
+                    // if recv handle is still alive, user may read the body concurrently, this will
+                    // either block subsequent request, or fail because connection dropped
                     ready!(shared.poll_close(read_buffer, decoder, io, cx))?;
 
                     if !context.is_keep_alive {
                         return Poll::Ready(Ok(()));
                     }
-
-                    // `reserve` will try to reclaim buffer, but if the underlying buffer is grow
-                    // thus reallocated, and the new allocated capacity is not at least
-                    // DEFAULT_BUFFER_CAP, reclaiming does not work, so another reallocation
-                    // required
-                    //
-                    // `clear()` will also ensure this allocation does not need to copy any data
-                    read_buffer.clear();
-                    read_buffer.reserve(DEFAULT_BUFFER_CAP);
 
                     phase.set(Phase::Reqline(None));
                 }
@@ -279,7 +274,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Self::Output> {
         if let Err(err) = ready!(self.try_poll(cx)) {
-            eprintln!("{err}")
+            eprintln!("Connection error: {err}")
         }
         Poll::Ready(())
     }

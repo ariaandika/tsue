@@ -205,15 +205,23 @@ impl RecvHandle {
 impl SendHandle {
     pub fn new() -> Self {
         let inner = SharedInner {
-            flag: AtomicU8::new(INITIAL_FLAG),
+            data: Data::default(),
             waker: WakerHandle::None,
-            data: Data::None,
+            flag: AtomicU8::new(INITIAL_FLAG),
         };
         Self {
             inner: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(inner))) },
         }
     }
 
+    /// Create `RecvHandle`.
+    ///
+    /// It is required that there is no other `RecvHandle` still alive. Use
+    /// [`SendHandle::poll_close`] to ensure it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is `RecvHandle` that still alive.
     pub fn handle(&mut self, cx: &mut std::task::Context) -> RecvHandle {
         // set `shared` flag
         let flag = unsafe { self.inner.as_ref() }.flag.fetch_or(SHARED_MASK, Ordering::Relaxed);
@@ -224,7 +232,10 @@ impl SendHandle {
         // SAFETY: it is ensured that no other handle are holding the shared data
         let inner = unsafe { self.inner.as_mut() };
 
+        // in case if there is previous recv handle, reset the data
+        inner.data = Data::default();
         inner.waker = WakerHandle::Send(cx.waker().clone());
+        *inner.flag.get_mut() = INITIAL_FLAG;
 
         RecvHandle {
             inner: self.inner
@@ -246,19 +257,14 @@ impl SendHandle {
     {
         let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Relaxed);
 
-        // DATA is set, or WANT is unset
-        if flag.is_set::<DATA_MASK>() | flag.is_unset::<WANT_MASK>() {
-            // data is still available, or recv have not set WANT flag yet
-            return;
-        }
-
-        if flag.is_unset::<SHARED_MASK>() {
-            // SAFETY: recv handle is already dropped, no other handle is holding the memory
-            unsafe {
-                let inner = self.inner.as_mut();
-                drop(mem::take(&mut inner.data));
-                *inner.flag.get_mut() = INITIAL_FLAG;
-            }
+        if flag.is_set::<DATA_MASK>()
+            | flag.is_unset::<WANT_MASK>()
+            | flag.is_unset::<SHARED_MASK>()
+        {
+            // either:
+            // - data still available
+            // - recv does not want data yet
+            // - recv already dropped
             return;
         }
 
@@ -314,19 +320,24 @@ impl SendHandle {
         io: &mut IO,
         cx: &mut std::task::Context,
     ) -> Poll<io::Result<()>> {
-        let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Acquire);
+        let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Relaxed);
 
         if flag.is_set::<SHARED_MASK>() {
+            // recv handle is still alive, user may read the body concurrently
             self.poll_read(buf, decoder, io, cx);
-            buf.clear();
             Poll::Pending
         } else {
-            // recv handle is already dropped, and the state should be reset
-            // TODO: drain request body
-            loop {
+            const MIN_BODY_DRAIN: u64 = 64 * 1024;
+
+            // recv handle is dropped, drain body if it small enough or in chunked
+            if decoder.remaining().unwrap_or(u64::MAX) > MIN_BODY_DRAIN {
+                return Poll::Ready(Err(io::ErrorKind::QuotaExceeded.into()))
+            }
+
+            while decoder.has_remaining() {
                 match decoder.decode_chunk(&mut *buf) {
                     Poll::Ready(Some(Ok(_))) => {}
-                    Poll::Ready(Some(Err(err))) => todo!("body error when draining: {err}"),
+                    Poll::Ready(Some(Err(err))) => return Poll::Ready(Err(io::Error::other(err))),
                     Poll::Ready(None) => break,
                     Poll::Pending => {
                         let Poll::Ready(read) = io.poll_read_buf(&mut *buf, cx)? else {

@@ -68,13 +68,13 @@ impl BodyCoder {
     }
 
     pub fn has_remaining(&self) -> bool {
-        match self.kind {
-            Kind::Chunked(_) => true,
-            Kind::ContentLength(len) => len != 0,
+        match &self.kind {
+            Kind::Chunked(chunked) => !chunked.is_eof(),
+            Kind::ContentLength(len) => *len != 0,
         }
     }
 
-    pub fn size_hint(&self) -> Option<u64> {
+    pub fn remaining(&self) -> Option<u64> {
         match self.kind {
             Kind::Chunked(_) => None,
             Kind::ContentLength(len) => Some(len),
