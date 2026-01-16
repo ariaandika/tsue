@@ -1,4 +1,4 @@
-use std::mem;
+use std::{io, mem};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Poll, ready};
@@ -180,7 +180,19 @@ where
                         }
                         Poll::Pending => {
                             read_buffer.reserve(512);
-                            shared.poll_read(read_buffer, decoder, io, cx);
+                            while shared.poll_read(read_buffer, decoder, cx).is_pending() {
+                                match ready!(io.poll_read_buf(&mut *read_buffer, cx)) {
+                                    Ok(0) => {
+                                        shared.set_io_error(io::ErrorKind::ConnectionAborted.into(), cx);
+                                        break
+                                    },
+                                    Ok(_) => {},
+                                    Err(err) => {
+                                        shared.set_io_error(err, cx);
+                                        break
+                                    },
+                                }
+                            }
                             return Poll::Pending;
                         }
                     };
@@ -208,14 +220,18 @@ where
                 },
                 PhaseProject::ResponseNoBody => {
                     // if recv handle is still alive, user may read the body concurrently
-                    let _ = shared.poll_close(read_buffer, decoder, io, cx)?;
+                    if shared.poll_close(read_buffer, decoder, cx)?.is_pending() {
+                        let _ = io.poll_read_buf(&mut *read_buffer, cx)?;
+                    }
 
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
                     phase.set(Phase::Cleanup);
                 },
                 PhaseProject::Response { mut body, encoder, chunk } => {
                     // if recv handle is still alive, user may read the body concurrently
-                    let _ = shared.poll_close(read_buffer, decoder, io, cx)?;
+                    if shared.poll_close(read_buffer, decoder, cx)?.is_pending() {
+                        let _ = io.poll_read_buf(&mut *read_buffer, cx)?;
+                    }
 
                     ready!(io.poll_write_all_buf(write_buffer, cx))?;
 
@@ -250,9 +266,15 @@ where
                 PhaseProject::Cleanup => {
                     // if recv handle is still alive, user may read the body concurrently, this will
                     // either block subsequent request, or fail because connection dropped
-                    ready!(shared.poll_close(read_buffer, decoder, io, cx))?;
+                    let keep_alive = match shared.poll_close(read_buffer, decoder, cx)? {
+                        Poll::Ready(keep_alive) => keep_alive,
+                        Poll::Pending => {
+                            io_read!(io.poll_read_buf(&mut *read_buffer, cx));
+                            continue;
+                        }
+                    };
 
-                    if !context.is_keep_alive {
+                    if !(context.is_keep_alive && keep_alive) {
                         return Poll::Ready(Ok(()));
                     }
 

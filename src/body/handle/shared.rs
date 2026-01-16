@@ -1,9 +1,8 @@
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU8, Ordering, fence};
-use std::task::{Poll, Waker};
+use std::task::{Poll, Waker, ready};
 use std::{io, mem};
 use tcio::bytes::{Bytes, BytesMut};
-use tcio::io::AsyncIoRead;
 
 use crate::body::coder::BodyCoder;
 use crate::body::error::{BodyError, ReadError};
@@ -245,16 +244,34 @@ impl SendHandle {
     /// Check for data request from recv handle.
     ///
     /// Any IO error is propagated to recv handle.
-    pub fn poll_read<IO>(
+    ///
+    /// Returns `Poll::Pending` if more data read is required.
+    pub fn poll_read(
         &mut self,
         buf: &mut BytesMut,
         decoder: &mut BodyCoder,
-        io: &mut IO,
         cx: &mut std::task::Context,
-    )
-    where
-        IO: AsyncIoRead,
-    {
+    ) -> Poll<()> {
+        self.with_mut(cx, || {
+            Poll::Ready(match ready!(decoder.decode_chunk(&mut *buf)) {
+                Some(Ok(data)) => Data::Ok(data.freeze()),
+                Some(Err(err)) => Data::BodyErr(err),
+                None => Data::Eof,
+            })
+        })
+    }
+
+    /// Signal recv handle that an IO error has occured.
+    ///
+    /// Because the IO read happens outside of the handle, it is caller responsibility to forward
+    /// the IO error. If the recv handle is in userspace, we dont want to cancel the userspace
+    /// `Future` polling.
+    pub fn set_io_error(&mut self, err: io::Error, cx: &mut std::task::Context) {
+        let _ = self.with_mut(cx, move || Poll::Ready(Data::IoErr(err)));
+    }
+
+    /// Call function if recv wants data.
+    fn with_mut(&mut self, cx: &mut std::task::Context, f: impl FnOnce() -> Poll<Data>) -> Poll<()> {
         let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Relaxed);
 
         if flag.is_set::<DATA_MASK>()
@@ -265,7 +282,7 @@ impl SendHandle {
             // - data still available
             // - recv does not want data yet
             // - recv already dropped
-            return;
+            return Poll::Ready(());
         }
 
         fence(Ordering::Acquire);
@@ -273,31 +290,11 @@ impl SendHandle {
         // recv handle wants data
         debug_assert!(flag.is_set::<WANT_MASK>());
 
-        let result = loop {
-            break match decoder.decode_chunk(&mut *buf) {
-                Poll::Ready(Some(Ok(data))) => Data::Ok(data.freeze()),
-                Poll::Ready(Some(Err(err))) => Data::BodyErr(err),
-                Poll::Ready(None) => Data::Eof,
-                Poll::Pending => {
-                    let Poll::Ready(result) = io.poll_read_buf(&mut *buf, cx) else {
-                        return;
-                    };
-                    match result {
-                        Ok(read) => {
-                            if read == 0 {
-                                break Data::IoErr(io::ErrorKind::ConnectionAborted.into());
-                            }
-                            continue;
-                        },
-                        Err(err) => Data::IoErr(err),
-                    }
-                }
-            }
-        };
+        let data = ready!(f());
 
         // WANT flag is set, thus recv is idle and the data is owned by send handle
         let inner = unsafe { self.inner.as_mut() };
-        inner.data = result;
+        inner.data = data;
 
         // wake recv handle
         let waker = WakerHandle::Send(cx.waker().clone());
@@ -308,48 +305,44 @@ impl SendHandle {
 
         // unset WANT and set DATA flag
         inner.flag.store(flag & !WANT_MASK | DATA_MASK, Ordering::Release);
+
+        Poll::Ready(())
     }
 
     /// Wait for recv handle to be dropped.
     ///
     /// Otherwise supply data by calling `SendHandle::poll_read`.
-    pub fn poll_close<IO: AsyncIoRead>(
+    ///
+    /// Returns `Poll::Pending` if more data read is required.
+    ///
+    /// Returns `Poll::Ready(bool)` indicating whether a connection can be kept alive.
+    pub fn poll_close(
         &mut self,
         buf: &mut BytesMut,
         decoder: &mut BodyCoder,
-        io: &mut IO,
         cx: &mut std::task::Context,
-    ) -> Poll<io::Result<()>> {
+    ) -> Poll<Result<bool, BodyError>> {
         let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Relaxed);
 
         if flag.is_set::<SHARED_MASK>() {
             // recv handle is still alive, user may read the body concurrently
-            self.poll_read(buf, decoder, io, cx);
-            Poll::Pending
+            self.poll_read(buf, decoder, cx).map(|()|Ok(true))
         } else {
             const MIN_BODY_DRAIN: u64 = 64 * 1024;
 
             // recv handle is dropped, drain body if it small enough or in chunked
             if decoder.remaining().unwrap_or(u64::MAX) > MIN_BODY_DRAIN {
-                return Poll::Ready(Err(io::ErrorKind::QuotaExceeded.into()))
+                return Poll::Ready(Ok(false));
             }
 
             while decoder.has_remaining() {
-                match decoder.decode_chunk(&mut *buf) {
-                    Poll::Ready(Some(Ok(_))) => {}
-                    Poll::Ready(Some(Err(err))) => return Poll::Ready(Err(io::Error::other(err))),
-                    Poll::Ready(None) => break,
-                    Poll::Pending => {
-                        let Poll::Ready(read) = io.poll_read_buf(&mut *buf, cx)? else {
-                            return Poll::Pending;
-                        };
-                        if read == 0 {
-                            break;
-                        }
-                    }
+                match ready!(decoder.decode_chunk(&mut *buf)) {
+                    Some(Ok(_)) => {}
+                    Some(Err(err)) => return Poll::Ready(Err(err)),
+                    None => break,
                 }
             }
-            Poll::Ready(Ok(()))
+            Poll::Ready(Ok(true))
         }
     }
 }
