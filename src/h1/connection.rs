@@ -1,14 +1,15 @@
-use std::{io, mem};
+use std::io::IoSlice;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Poll, ready};
-use tcio::bytes::BytesMut;
-use tcio::io::{AsyncIoRead, AsyncIoWrite};
+use std::{io, mem};
+use tcio::bytes::{Buf, BytesMut};
+use tcio::io::{AsyncRead, AsyncWrite};
 
 use crate::body::BodyCoder;
 use crate::body::handle::SendHandle;
 use crate::body::{Body, EncodedBuf};
-use crate::h1::parser::{parse_reqline_chunk, parse_header_chunk};
+use crate::h1::parser::{parse_header_chunk, parse_reqline_chunk};
 use crate::headers::HeaderMap;
 use crate::http::Request;
 use crate::proto::{self, Header, HttpContext, HttpState, Reqline};
@@ -23,15 +24,31 @@ const DEFAULT_BUFFER_CAP: usize = 1024;
 ///
 /// Handle zero read and max buffer length.
 macro_rules! io_read {
-    ($io:ident.$read:ident($buffer:expr, $cx:expr)) => {
-        let read = ready!($io.$read($buffer, $cx)?);
-        if read == 0 {
+    ($io:expr, $buffer:ident, $cx:expr) => {
+        let len = $buffer.len();
+        ready!($io.as_mut().poll_read(&mut *$buffer, $cx))?;
+        if $buffer.len() - len == 0 {
             return Poll::Ready(Ok(()));
         }
         if $buffer.len() > MAX_FIELD_CAP {
             return Poll::Ready(Err("excessive field size".into()));
         }
     };
+    ($io:expr, $buffer:ident, $shared:expr, $cx:ident else $el:expr) => {{
+        let len = $buffer.len();
+        match ready!($io.as_mut().poll_read(&mut *$buffer, $cx)) {
+            Ok(()) => {
+                if $buffer.len() - len == 0 {
+                    $shared.set_io_error(io::ErrorKind::ConnectionAborted.into(), $cx);
+                    $el
+                }
+            },
+            Err(err) => {
+                $shared.set_io_error(err, $cx);
+                $el
+            },
+        }
+    }};
 }
 
 pub struct Connection<IO, S, B, D, F> {
@@ -48,7 +65,7 @@ pub struct Connection<IO, S, B, D, F> {
 }
 
 type ConnectionProject<'a, IO, S, B, D, F> = (
-    &'a mut IO,
+    Pin<&'a mut IO>,
     &'a mut SendHandle,
     &'a mut BytesMut,
     &'a mut BytesMut,
@@ -108,14 +125,14 @@ where
 
     fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<(), BoxError>>
     where
-        IO: AsyncIoRead + AsyncIoWrite,
+        IO: AsyncRead + AsyncWrite,
         B: Body,
         B::Error: std::error::Error + Send + Sync + 'static,
     {
         // TODO: create custom error type that can generate Response
 
         let (
-            io,
+            mut io,
             shared,
             read_buffer,
             write_buffer,
@@ -135,7 +152,7 @@ where
                                 *reqline = Some(ok);
                             },
                             Poll::Pending => {
-                                io_read!(io.poll_read_buf(&mut *read_buffer, cx));
+                                io_read!(io, read_buffer, cx);
                                 continue;
                             }
                         }
@@ -148,7 +165,7 @@ where
                             }
                             Poll::Ready(None) => break,
                             Poll::Pending => {
-                                io_read!(io.poll_read_buf(&mut *read_buffer, cx));
+                                io_read!(io, read_buffer, cx);
                                 continue;
                             }
                         }
@@ -181,17 +198,9 @@ where
                         Poll::Pending => {
                             read_buffer.reserve(512);
                             while shared.poll_read(read_buffer, decoder, cx).is_pending() {
-                                match ready!(io.poll_read_buf(&mut *read_buffer, cx)) {
-                                    Ok(0) => {
-                                        shared.set_io_error(io::ErrorKind::ConnectionAborted.into(), cx);
-                                        break
-                                    },
-                                    Ok(_) => {},
-                                    Err(err) => {
-                                        shared.set_io_error(err, cx);
-                                        break
-                                    },
-                                }
+                                io_read!(io, read_buffer, shared, cx else {
+                                    break
+                                });
                             }
                             return Poll::Pending;
                         }
@@ -203,7 +212,7 @@ where
 
                     let encoder = BodyCoder::from_len(body.size_hint().1);
                     let coding = is_res_body.then_some(encoder.coding());
-                    proto::write_response_head(&parts, write_buffer, coding);
+                    proto::write_response_head(&parts, &mut *write_buffer, coding);
 
                     // reuse header map allocation
                     let mut headers = parts.headers;
@@ -221,26 +230,32 @@ where
                 PhaseProject::ResponseNoBody => {
                     // if recv handle is still alive, user may read the body concurrently
                     if shared.poll_close(read_buffer, decoder, cx)?.is_pending() {
-                        let _ = io.poll_read_buf(&mut *read_buffer, cx)?;
+                        io_read!(io, read_buffer, shared, cx else {});
                     }
 
-                    ready!(io.poll_write_all_buf(write_buffer, cx))?;
+                    ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx))?;
                     phase.set(Phase::Cleanup);
                 },
                 PhaseProject::Response { mut body, encoder, chunk } => {
                     // if recv handle is still alive, user may read the body concurrently
                     if shared.poll_close(read_buffer, decoder, cx)?.is_pending() {
-                        let _ = io.poll_read_buf(&mut *read_buffer, cx)?;
+                        io_read!(io, read_buffer, shared, cx else {});
                     }
 
-                    ready!(io.poll_write_all_buf(write_buffer, cx))?;
+                    ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx))?;
 
                     loop {
                         match chunk {
                             Some(EncodedBuf { header, chunk: chunk_mut, trail }) => {
-                                ready!(io.poll_write_all_buf(header, cx))?;
-                                ready!(io.poll_write_all_buf(chunk_mut, cx))?;
-                                ready!(io.poll_write_all_buf(trail, cx))?;
+                                let mut buf = header.chain(chunk_mut).chain(trail);
+                                while buf.has_remaining() {
+                                    let mut io_slice = [IoSlice::new(&[]);3];
+                                    buf.chunks_vectored(&mut io_slice);
+                                    let read = ready!(
+                                        io.as_mut().poll_write_vectored(&io_slice, cx)
+                                    )?;
+                                    buf.advance(read);
+                                }
                                 *chunk = None;
                             },
                             None => {
@@ -267,9 +282,10 @@ where
                     // if recv handle is still alive, user may read the body concurrently, this will
                     // either block subsequent request, or fail because connection dropped
                     let keep_alive = match shared.poll_close(read_buffer, decoder, cx)? {
-                        Poll::Ready(keep_alive) => keep_alive,
+                        Poll::Ready(Some(keep_alive)) => keep_alive,
+                        Poll::Ready(None) => return Poll::Pending,
                         Poll::Pending => {
-                            io_read!(io.poll_read_buf(&mut *read_buffer, cx));
+                            io_read!(io, read_buffer, shared, cx else {});
                             continue;
                         }
                     };
@@ -287,7 +303,7 @@ where
 
 impl<IO, S, B> Future for Connection<IO, S, B, B::Data, S::Future>
 where
-    IO: AsyncIoRead + AsyncIoWrite,
+    IO: AsyncRead + AsyncWrite,
     S: HttpService<ResBody = B, Error: Into<BoxError>>,
     B: Body,
     B::Error: std::error::Error + Send + Sync + 'static,
@@ -298,6 +314,7 @@ where
         if let Err(err) = ready!(self.try_poll(cx)) {
             eprintln!("Connection error: {err}")
         }
+        println!("Client closed");
         Poll::Ready(())
     }
 }
@@ -316,7 +333,7 @@ impl<IO, S, B, D, F> Connection<IO, S, B, D, F> {
         unsafe {
             let me = self.get_unchecked_mut();
             (
-                &mut me.io,
+                Pin::new_unchecked(&mut me.io),
                 &mut me.shared,
                 &mut me.read_buffer,
                 &mut me.write_buffer,

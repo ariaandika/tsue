@@ -1,11 +1,8 @@
-use std::{
-    marker::PhantomData,
-    pin::Pin,
-    sync::Arc,
-    task::{Poll, ready},
-};
-
-use tcio::io::{AsyncIoRead, AsyncIoWrite};
+use std::marker::PhantomData;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Poll, ready};
+use tcio::io::{AsyncRead, AsyncWrite};
 
 pub use driver::Driver;
 pub use listener::Listener;
@@ -31,7 +28,7 @@ impl<L, S, D> Server<L, S, D> {
 
 impl<L, S, D> Future for Server<L, S, D>
 where
-    L: Listener<Stream: AsyncIoRead + AsyncIoWrite>,
+    L: Listener<Stream: AsyncRead + AsyncWrite>,
     D: Driver<L::Stream, S, Future: Future<Output: Send> + Send + 'static>,
 {
     type Output = ();
@@ -81,14 +78,14 @@ pub mod driver {
 
 mod listener {
     use std::{io, net::SocketAddr, task::Poll};
-    use tcio::io::{AsyncIoRead, AsyncIoWrite};
+    use tcio::io::{AsyncRead, AsyncWrite};
     use tokio::net::{TcpListener, TcpStream};
 
     #[cfg(unix)]
     use tokio::net::{UnixListener, UnixStream};
 
     pub trait Listener {
-        type Stream: AsyncIoRead + AsyncIoWrite;
+        type Stream: AsyncRead + AsyncWrite;
 
         type Addr;
 

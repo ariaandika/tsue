@@ -234,7 +234,7 @@ impl SendHandle {
         // in case if there is previous recv handle, reset the data
         inner.data = Data::default();
         inner.waker = WakerHandle::Send(cx.waker().clone());
-        *inner.flag.get_mut() = INITIAL_FLAG;
+        *inner.flag.get_mut() = SHARED_MASK;
 
         RecvHandle {
             inner: self.inner
@@ -315,34 +315,38 @@ impl SendHandle {
     ///
     /// Returns `Poll::Pending` if more data read is required.
     ///
-    /// Returns `Poll::Ready(bool)` indicating whether a connection can be kept alive.
+    /// Returns `Poll::Ready(None)` when recv handle have not been dropped yet, the waker will be
+    /// assigned to wake the task on further action.
+    ///
+    /// Returns `Poll::Ready(Some(Ok(bool)))` when recv handle have been dropped, the boolean
+    /// indicating whether a connection can be kept alive.
     pub fn poll_close(
         &mut self,
         buf: &mut BytesMut,
         decoder: &mut BodyCoder,
         cx: &mut std::task::Context,
-    ) -> Poll<Result<bool, BodyError>> {
+    ) -> Poll<Option<Result<bool, BodyError>>> {
         let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Relaxed);
 
         if flag.is_set::<SHARED_MASK>() {
             // recv handle is still alive, user may read the body concurrently
-            self.poll_read(buf, decoder, cx).map(|()|Ok(true))
+            self.poll_read(buf, decoder, cx).map(|()|None)
         } else {
             const MIN_BODY_DRAIN: u64 = 64 * 1024;
 
             // recv handle is dropped, drain body if it small enough or in chunked
             if decoder.remaining().unwrap_or(u64::MAX) > MIN_BODY_DRAIN {
-                return Poll::Ready(Ok(false));
+                return Poll::Ready(Some(Ok(false)));
             }
 
             while decoder.has_remaining() {
                 match ready!(decoder.decode_chunk(&mut *buf)) {
                     Some(Ok(_)) => {}
-                    Some(Err(err)) => return Poll::Ready(Err(err)),
+                    Some(Err(err)) => return Poll::Ready(Some(Err(err))),
                     None => break,
                 }
             }
-            Poll::Ready(Ok(true))
+            Poll::Ready(Some(Ok(true)))
         }
     }
 }
