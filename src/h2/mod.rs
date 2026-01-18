@@ -1,6 +1,6 @@
 pub mod settings;
-mod frame;
 mod conn;
+pub mod frame;
 
 pub use frame::Header;
 pub use conn::Connection;

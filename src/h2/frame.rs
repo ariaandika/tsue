@@ -1,4 +1,3 @@
-#![allow(unused, reason = "TODO: h2 implementation")]
 
 /// Frame Type.
 #[derive(Debug)]
@@ -29,14 +28,39 @@ impl Type {
 
 /// Frame Header.
 #[derive(Debug)]
-pub struct Header {
+pub struct FrameHeader {
+    /// The length of the frame payload expressed as an unsigned 24-bit integer in units of octets.
+    ///
+    /// Values greater than 2^14 (16,384) MUST NOT be sent unless the receiver has set a larger
+    /// value for SETTINGS_MAX_FRAME_SIZE.
+    ///
+    /// The 9 octets of the frame header are not included in this value.
     pub len: u32,
+    /// The 8-bit type of the frame.
+    ///
+    /// The frame type determines the format and semantics of the frame. Implementations MUST
+    /// ignore and discard frames of unknown types.
     pub ty: u8,
+    /// An 8-bit field reserved for boolean flags specific to the frame type.
+    ///
+    /// Flags are assigned semantics specific to the indicated frame type. Unused flags are those
+    /// that have no defined semantics for a particular frame type. Unused flags MUST be ignored on
+    /// receipt and MUST be left unset (0x00) when sending.
     pub flags: u8,
+    // /// A reserved 1-bit field.
+    // ///
+    // /// The semantics of this bit are undefined, and the bit MUST remain
+    // /// unset (0x00) when sending and MUST be ignored when receiving.
+    // pub reserved: bool,
+    /// A stream identifier expressed as an unsigned 31-bit integer.
+    ///
+    /// The value 0x00 is reserved for frames that are associated with the connection as a whole as
+    /// opposed to an individual stream.
     pub stream_id: u32,
 }
 
-impl Header {
+impl FrameHeader {
+    #[allow(unused, reason = "TODO")]
     pub(crate) fn decode(bytes: [u8; 9]) -> Self {
         // Length (24),
         // Type (8),
@@ -47,12 +71,14 @@ impl Header {
         let len = u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]);
         let ty = bytes[3];
         let flags = bytes[4];
+        // let reserved = bytes[5] & 0b10000000 != 0;
         let stream_id = u32::from_be_bytes([bytes[5] & 0b01111111, bytes[6], bytes[7], bytes[8]]);
 
-        Header {
+        FrameHeader {
             len,
             ty,
             flags,
+            // reserved,
             stream_id,
         }
     }
