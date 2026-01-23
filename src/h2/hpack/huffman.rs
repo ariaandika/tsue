@@ -38,10 +38,10 @@ pub fn decode(bytes: &[u8], buf: &mut BytesMut) -> Result<(), HuffmanError> {
 
     for &byte in bytes {
         if let Some(byte) = decoder.byte(byte >> 4)? {
-            put_u8(byte, buf);
+            buf.put_u8(byte);
         }
         if let Some(byte) = decoder.byte(byte & 0b1111)? {
-            put_u8(byte, buf);
+            buf.put_u8(byte);
         }
     }
 
@@ -50,12 +50,6 @@ pub fn decode(bytes: &[u8], buf: &mut BytesMut) -> Result<(), HuffmanError> {
     } else {
         Err(HuffmanError)
     }
-}
-
-fn put_u8(int: u8, bytes_mut: &mut BytesMut) {
-    bytes_mut.reserve(1);
-    bytes_mut.chunk_mut()[0].write(int);
-    unsafe { bytes_mut.set_len(bytes_mut.len() + 1) };
 }
 
 #[derive(Debug)]

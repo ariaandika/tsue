@@ -1,5 +1,4 @@
 use std::slice::from_raw_parts;
-use tcio::num::atou;
 
 use super::{Authority, Host, HttpScheme, HttpUri, Path, Scheme, Uri, matches};
 
@@ -107,11 +106,7 @@ impl Authority {
     #[inline]
     pub const fn port(&self) -> Option<u16> {
         match self.split_port() {
-            // with port validation in constructor, should we do unsafe calculation ?
-            Some((_, port)) => match atou(port) {
-                Some(ok) => Some(ok as u16),
-                None => None,
-            }
+            Some((_, port)) => Some(atou(port)),
             None => None,
         }
     }
@@ -181,11 +176,7 @@ impl Host {
     #[inline]
     pub const fn port(&self) -> Option<u16> {
         match self.split_port() {
-            // with port validation in constructor, should we do unsafe calculation ?
-            Some((_, port)) => match atou(port) {
-                Some(ok) => Some(ok as u16),
-                None => None,
-            }
+            Some((_, port)) => Some(atou(port)),
             None => None,
         }
     }
@@ -533,3 +524,16 @@ macro_rules! impl_from_str {
 }
 
 impl_from_str!(Scheme, Authority, Host, Path, Uri, HttpUri);
+
+// ===== Util =====
+
+const fn atou(mut bytes: &[u8]) -> u16 {
+    let mut o = 0;
+    while let [lead, rest @ ..] = bytes {
+        o *= 10;
+        o += lead.wrapping_sub(b'0') as u16;
+        bytes = rest;
+    }
+    o
+}
+

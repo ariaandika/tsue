@@ -25,9 +25,8 @@ const DEFAULT_BUFFER_CAP: usize = 1024;
 /// Handle zero read and max buffer length.
 macro_rules! io_read {
     ($io:expr, $buffer:ident, $cx:expr) => {
-        let len = $buffer.len();
-        ready!($io.as_mut().poll_read(&mut *$buffer, $cx))?;
-        if $buffer.len() - len == 0 {
+        let read = ready!($io.as_mut().poll_read(&mut *$buffer, $cx))?;
+        if read == 0 {
             return Poll::Ready(Ok(()));
         }
         if $buffer.len() > MAX_FIELD_CAP {
@@ -35,10 +34,9 @@ macro_rules! io_read {
         }
     };
     ($io:expr, $buffer:ident, $shared:expr, $cx:ident else $el:expr) => {{
-        let len = $buffer.len();
         match ready!($io.as_mut().poll_read(&mut *$buffer, $cx)) {
-            Ok(()) => {
-                if $buffer.len() - len == 0 {
+            Ok(read) => {
+                if read == 0 {
                     $shared.set_io_error(io::ErrorKind::ConnectionAborted.into(), $cx);
                     $el
                 }
