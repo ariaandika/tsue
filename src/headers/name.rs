@@ -218,6 +218,14 @@ standard_header! {
     /// HTTP Standard Headers
     mod standard;
 
+    // ===== Pseudo Headers =====
+
+    pub(crate) const PSEUDO_METHOD: HeaderName = ":method";
+    pub(crate) const PSEUDO_SCHEME: HeaderName = ":scheme";
+    pub(crate) const PSEUDO_AUTHORITY: HeaderName = ":authority";
+    pub(crate) const PSEUDO_PATH: HeaderName = ":path";
+    pub(crate) const PSEUDO_STATUS: HeaderName = ":status";
+
     // ===== Authentication =====
 
     /// Defines the authentication method that should be used to access a resource.
@@ -622,13 +630,12 @@ macro_rules! standard_header {
     (@CORE
         $(
             $(#[$doc:meta])*
-            pub const $id:ident: $t:ty = $name:literal;
+            $vis:vis const $id:ident: $t:ty = $name:literal;
         )*
     ) => {
         $(
-
             $(#[$doc])*
-            pub const $id: $t = {
+            $vis const $id: $t = {
                 static $id: Static = Static {
                     string: $name,
                     hash: matches::hash_32($name.as_bytes()),
