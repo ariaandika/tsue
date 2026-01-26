@@ -22,7 +22,7 @@ pub struct Table {
     max_size: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Field {
     pub name: HeaderName,
     pub value: HeaderValue,
@@ -51,6 +51,16 @@ impl Table {
             size: 0,
             max_size: 4096,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fields(&self) -> &VecDeque<Field> {
+        &self.fields
+    }
+
+    #[cfg(test)]
+    pub(crate) fn size(&self) -> usize {
+        self.size
     }
 
     fn update_size(&mut self, max_size: usize) {
