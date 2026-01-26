@@ -53,16 +53,6 @@ impl Table {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn fields(&self) -> &VecDeque<Field> {
-        &self.fields
-    }
-
-    #[cfg(test)]
-    pub(crate) fn size(&self) -> usize {
-        self.size
-    }
-
     fn update_size(&mut self, max_size: usize) {
         self.max_size = max_size;
         while self.max_size < self.size {
@@ -214,6 +204,25 @@ impl Table {
         }
 
         Ok(field)
+    }
+}
+
+#[cfg(test)]
+impl Table {
+    pub(crate) fn fields(&self) -> &VecDeque<Field> {
+        &self.fields
+    }
+
+    pub(crate) fn size(&self) -> usize {
+        self.size
+    }
+
+    pub(crate) fn decode_test(
+        &mut self,
+        bytes: &mut Bytes,
+        write_buffer: &mut BytesMut,
+    ) -> Result<Field, DecodeError> {
+        self.decode(bytes, write_buffer)
     }
 }
 
@@ -394,3 +403,15 @@ static STATIC_HEADER: [(HeaderName, Option<HeaderValue>); 61] = [
     /* 68 */(standard::VIA, None),
     /* 70 */(standard::WWW_AUTHENTICATE, None),
 ];
+
+#[test]
+fn test_hpack_appendix_c1_2() -> Result<(), Box<dyn std::error::Error>> {
+    let mut bytes = Bytes::copy_from_slice(&[
+        0b00011111u8,
+        0b10011010,
+        0b00001010,
+    ]);
+    let prefix = bytes[0];
+    parse_int!(U5, prefix, &mut bytes);
+    Ok(())
+}
