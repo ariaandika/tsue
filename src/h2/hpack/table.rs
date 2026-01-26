@@ -163,7 +163,7 @@ impl Table {
                         name: name.clone(),
                         value: val.clone(),
                     }),
-                    None => Err(E::NoValueIndex)
+                    None => Err(E::NotFound)
                 },
                 None => match self.fields.get(index.strict_sub(STATIC_HEADER.len())) {
                     Some(field) => Ok(field.clone()),
@@ -285,11 +285,9 @@ pub enum DecodeError {
     /// Bytes given is insufficient.
     Incomplete,
     /// Unknown header block kind.
-    Unknown,
+    UnknownRepr,
     /// Found `0` index.
     ZeroIndex,
-    /// Indexed header reference to static table with no value.
-    NoValueIndex,
     /// Indexed header not found.
     NotFound,
     /// Huffman coding error.
@@ -298,6 +296,21 @@ pub enum DecodeError {
     InvalidHeader,
     /// Size update is too large or is not at the beginning of header block.
     InvalidSizeUpdate,
+}
+
+impl std::error::Error for DecodeError { }
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Incomplete => f.write_str("data incomplete"),
+            Self::UnknownRepr => f.write_str("unknown header block representation"),
+            Self::ZeroIndex => f.write_str("index cannot be 0"),
+            Self::NotFound => f.write_str("field with given index not found"),
+            Self::Huffman => f.write_str("huffman coding error"),
+            Self::InvalidHeader => f.write_str("invalid header"),
+            Self::InvalidSizeUpdate => f.write_str("invalid size update"),
+        }
+    }
 }
 
 impl From<HeaderNameError> for DecodeError {
