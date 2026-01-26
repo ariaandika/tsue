@@ -8,7 +8,7 @@ use crate::headers::{HeaderMap, standard};
 use crate::headers::{HeaderName, HeaderValue};
 
 const MSB: u8 = 0b1000_0000;
-const BIT7: u8 = 1 << 7;
+const BIT7: u8 = 1 << 6;
 const U5: u8 = u8::MAX >> 3;
 const U4: u8 = u8::MAX >> 4;
 const U6: u8 = u8::MAX >> 2;
@@ -175,7 +175,8 @@ impl Table {
 
         let name = match NonZeroUsize::new(index) {
             Some(index) => {
-                let index = index.get();
+                // HPACK is 1 indexed
+                let index = index.get() - 1;
                 match STATIC_HEADER.get(index) {
                     Some((name, _)) => name.clone(),
                     None => self
@@ -307,7 +308,7 @@ impl From<HuffmanError> for DecodeError {
     }
 }
 
-static STATIC_HEADER: [(HeaderName, Option<HeaderValue>); 60] = [
+static STATIC_HEADER: [(HeaderName, Option<HeaderValue>); 61] = [
     /* 1 */(standard::PSEUDO_AUTHORITY, None),
     /* 2 */(standard::PSEUDO_METHOD, Some(HeaderValue::from_static(b"GET"))),
     /* 3 */(standard::PSEUDO_METHOD, Some(HeaderValue::from_static(b"POST"))),
@@ -359,13 +360,14 @@ static STATIC_HEADER: [(HeaderName, Option<HeaderValue>); 60] = [
     /* 49 */(standard::PROXY_AUTHORIZATION, None),
     /* 50 */(standard::RANGE, None),
     /* 51 */(standard::REFERER, None),
-    /* 52 */(standard::RETRY_AFTER, None),
-    /* 53 */(standard::SERVER, None),
-    /* 54 */(standard::SET_COOKIE, None),
-    /* 55 */(standard::STRICT_TRANSPORT_SECURITY, None),
-    /* 56 */(standard::TRANSFER_ENCODING, None),
-    /* 57 */(standard::USER_AGENT, None),
-    /* 58 */(standard::VARY, None),
-    /* 59 */(standard::VIA, None),
-    /* 60 */(standard::WWW_AUTHENTICATE, None),
+    /* 52 */(standard::REFRESH, None),
+    /* 54 */(standard::RETRY_AFTER, None),
+    /* 56 */(standard::SERVER, None),
+    /* 58 */(standard::SET_COOKIE, None),
+    /* 60 */(standard::STRICT_TRANSPORT_SECURITY, None),
+    /* 62 */(standard::TRANSFER_ENCODING, None),
+    /* 64 */(standard::USER_AGENT, None),
+    /* 66 */(standard::VARY, None),
+    /* 68 */(standard::VIA, None),
+    /* 70 */(standard::WWW_AUTHENTICATE, None),
 ];
