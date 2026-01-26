@@ -8,11 +8,10 @@ use crate::headers::{HeaderMap, standard};
 use crate::headers::{HeaderName, HeaderValue};
 
 const MSB: u8 = 0b1000_0000;
-const BIT7: u8 = 1 << 6;
+const U7: u8 = u8::MAX >> 1;
+const U6: u8 = u8::MAX >> 2;
 const U5: u8 = u8::MAX >> 3;
 const U4: u8 = u8::MAX >> 4;
-const U6: u8 = u8::MAX >> 2;
-const U7: u8 = u8::MAX >> 1;
 
 /// HPACK Table.
 #[derive(Debug)]
@@ -36,18 +35,26 @@ impl Field {
 
 impl Table {
     #[inline]
-    pub const fn new() -> Table {
+    pub const fn new(max_size: usize) -> Table {
         Self {
             fields: VecDeque::new(),
             size: 0,
-            max_size: 4096,
+            max_size,
         }
     }
 
     #[inline]
-    pub fn with_capacity(capacity: usize) -> Table {
+    pub fn with_capacity(max_size: usize, capacity: usize) -> Table {
         Self {
             fields: VecDeque::with_capacity(capacity),
+            size: 0,
+            max_size,
+        }
+    }
+
+    fn default_inner() -> Table {
+        Self {
+            fields: VecDeque::new(),
             size: 0,
             max_size: 4096,
         }
@@ -96,13 +103,14 @@ impl Table {
         // +---+---------------------------+
         const SIZE_UPDATE: u8 = 0b0010_0000;
         const SIZE_UPDATE_MASK: u8 = 0b1110_0000;
+        const SIZE_UPDATE_INT: u8 = U5;
 
         let Some(prefix) = block.first() else {
             return Ok(());
         };
         if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
             let prefix = block.get_u8();
-            let max_size = parse_int!(U5, prefix, &mut block);
+            let max_size = parse_int!(SIZE_UPDATE_INT, prefix, &mut block);
             self.update_size(max_size);
         }
 
@@ -120,15 +128,18 @@ impl Table {
         // +---+---+---+---+---+---+---+---+
         // | 1 |        Index (7+)         |
         // +---+---------------------------+
-        const INDEXED: u8       = 0b1000_0000;
+        const INDEXED: u8 = 0b1000_0000;
+        const INDEXED_INT: u8 = U7;
         // +---+---+---+---+---+---+---+---+
         // | 0 | 1 |      Index (6+)       |
         // +---+---+-----------------------+
         const LITERAL_INDEXED: u8 = 0b0100_0000;
+        const LITERAL_INDEXED_INT: u8 = U6;
         // +---+---+---+---+---+---+---+---+
         // | 0 | 0 | 1 |   Max size (5+)   |
         // +---+---------------------------+
         const SIZE_UPDATE: u8 = 0b0010_0000;
+        // const SIZE_UPDATE_INT: u8 = U5;
 
         // # Literal without indexing
         // +---+---+---+---+---+---+---+---+
@@ -138,6 +149,12 @@ impl Table {
         // +---+---+---+---+---+---+---+---+
         // | 0 | 0 | 0 | 1 |  Index (4+)   |
         // +---+---+-----------------------+
+        // const LITERAL_NINDEX: u8 = 0b0001_0000;
+        const LITERAL_NINDEX_INT: u8 = U4;
+
+        /// 0bx1xx_xxxx = literal with indexed
+        /// 0bx0xx_xxxx = literal without/never indexed
+        const LITERAL_IS_INDEXED_MASK: u8 = 0b0100_0000;
 
         debug_assert!(write_buffer.is_empty());
 
@@ -146,7 +163,9 @@ impl Table {
         // decoding
 
         let index = if prefix & INDEXED == INDEXED {
-            let index = parse_int!(U7, prefix, bytes).checked_sub(1).ok_or(E::ZeroIndex)?;
+            let index = parse_int!(INDEXED_INT, prefix, bytes)
+                .checked_sub(1)
+                .ok_or(E::ZeroIndex)?;
             return match STATIC_HEADER.get(index) {
                 Some((name, val)) => match val {
                     Some(val) => Ok(Field {
@@ -161,14 +180,14 @@ impl Table {
                 },
             }
         } else if prefix & LITERAL_INDEXED == LITERAL_INDEXED {
-            parse_int!(U6, prefix, bytes)
+            parse_int!(LITERAL_INDEXED_INT, prefix, bytes)
 
         } else if prefix & SIZE_UPDATE == SIZE_UPDATE {
             return Err(E::InvalidSizeUpdate);
 
         } else {
             // Literal without/never indexed
-            parse_int!(U4, prefix, bytes)
+            parse_int!(LITERAL_NINDEX_INT, prefix, bytes)
         };
 
         // processing
@@ -198,8 +217,8 @@ impl Table {
             value,
         };
 
-        let is_added = prefix & BIT7 == BIT7;
-        if is_added {
+        let is_indexed = prefix & LITERAL_IS_INDEXED_MASK == LITERAL_IS_INDEXED_MASK;
+        if is_indexed {
             self.insert(field.clone());
         }
 
@@ -227,8 +246,9 @@ impl Table {
 }
 
 impl Default for Table {
+    #[inline]
     fn default() -> Self {
-        Self::new()
+        Self::default_inner()
     }
 }
 
@@ -257,13 +277,15 @@ fn parse_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes,
     let prefix = bytes.try_get_u8().ok_or(DecodeError::Incomplete)?;
 
     let len = parse_int!(U7, prefix, bytes);
-    let Some(name) = bytes.get(..len) else {
+    let Some(value) = bytes.get(..len) else {
         return Err(DecodeError::Incomplete);
     };
 
     if prefix & MSB == MSB {
-        huffman::decode(name, write_buffer)?;
-        Ok(write_buffer.split().freeze())
+        huffman::decode(value, write_buffer)?;
+        let value = write_buffer.split().freeze();
+        bytes.advance(len);
+        Ok(value)
     } else {
         bytes.try_split_to(len).ok_or(DecodeError::Incomplete)
     }
