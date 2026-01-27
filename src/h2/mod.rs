@@ -1,9 +1,8 @@
 pub mod settings;
-mod conn;
 pub mod frame;
 pub mod hpack;
 
-pub use frame::Header;
+mod conn;
 pub use conn::Connection;
 
 #[derive(Clone, Copy, Debug)]

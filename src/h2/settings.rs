@@ -1,8 +1,6 @@
 // https://www.rfc-editor.org/rfc/rfc9113.html#name-settings
 use std::num::NonZeroU32;
 
-use crate::h2::Role;
-
 /// HTTP/2 Settings.
 #[derive(Debug)]
 pub struct Settings {
@@ -22,12 +20,6 @@ pub struct Settings {
     /// This advisory setting informs a peer of the maximum field section size that the sender is
     /// prepared to accept, in units of octets.
     pub max_header_list_size: Option<NonZeroU32>,
-    /// The role of the current endpoint
-    ///
-    /// This is not a HTTP/2 setting.
-    ///
-    /// Some settings have different restriction in different endpoint role.
-    pub role: Role,
 }
 
 /// HTTP/2 defined settings.
@@ -78,7 +70,7 @@ impl SettingId {
 
 impl Settings {
     /// Creates new [`Settings`].
-    pub fn new(role: Role) -> Self {
+    pub fn new() -> Self {
         Self {
             header_table_size: 4096,
             enable_push: true,
@@ -86,7 +78,6 @@ impl Settings {
             initial_window_size: 65535,
             max_frame_size: 16384, // hard limit: 16_777_215
             max_header_list_size: None, // default is unlimited
-            role,
         }
     }
 
@@ -100,6 +91,13 @@ impl Settings {
             SettingId::MaxFrameSize => self.max_frame_size = value,
             SettingId::MaxHeaderListSize => self.max_header_list_size = NonZeroU32::new(value),
         }
+    }
+}
+
+impl Default for Settings {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }
 
