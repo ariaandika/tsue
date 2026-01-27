@@ -70,6 +70,9 @@ impl Table {
     fn insert(&mut self, field: Field) {
         let size = field.size();
 
+        // It is not an error to attempt to add an entry that is larger than the maximum size; an
+        // attempt to add an entry larger than the maximum size causes the table to be emptied of
+        // all existing entries and results in an empty table.
         if self.max_size < size {
             self.fields.clear();
             return;
@@ -108,6 +111,8 @@ impl Table {
         let Some(prefix) = block.first() else {
             return Ok(());
         };
+        // Dynamic table size update MUST occur at the beginning of the first header block
+        // following the change to the dynamic table size.
         if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
             let prefix = block.get_u8();
             let max_size = parse_int!(SIZE_UPDATE_INT, prefix, &mut block);
@@ -258,12 +263,31 @@ macro_rules! parse_int {
         if int != $int {
             int as usize
         } else {
-            ((int - 1) as usize) + continue_parse_int($bytes)?
+            (int as usize) + continue_parse_int($bytes)?
         }
     }};
 }
 
 use {parse_int};
+
+fn continue_parse_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
+    let mut shift = 0;
+    let mut value = 0;
+
+    loop {
+        let prefix = bytes.try_get_u8().ok_or(DecodeError::Incomplete)?;
+        let u7 = prefix & U7;
+
+        value += (u7 as usize) << shift;
+        shift += 7;
+
+        if prefix & MSB != MSB {
+            break
+        }
+    }
+
+    Ok(value)
+}
 
 fn parse_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes, DecodeError> {
     //   0   1   2   3   4   5   6   7
@@ -287,25 +311,6 @@ fn parse_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes,
     } else {
         bytes.try_split_to(len).ok_or(DecodeError::Incomplete)
     }
-}
-
-fn continue_parse_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
-    let mut shift = 0;
-    let mut value = 0;
-
-    loop {
-        let prefix = bytes.try_get_u8().ok_or(DecodeError::Incomplete)?;
-        let u7 = prefix & U7;
-
-        value += (u7 as usize) << shift;
-        shift += 1;
-
-        if prefix & MSB != MSB {
-            break
-        }
-    }
-
-    Ok(value)
 }
 
 /// HPACK Decoding Error.
@@ -427,11 +432,26 @@ static STATIC_HEADER: [(HeaderName, Option<HeaderValue>); 61] = [
 #[test]
 fn test_hpack_int() -> Result<(), Box<dyn std::error::Error>> {
     let mut bytes = Bytes::copy_from_slice(&[
-        0b00011111u8,
-        0b10011010,
-        0b00001010,
+        0b0001_1111,
+        0b1001_1010,
+        0b0000_1010,
     ]);
-    let prefix = bytes[0];
-    parse_int!(U5, prefix, &mut bytes);
+    let prefix = bytes.get_u8();
+    let int = parse_int!(U5, prefix, &mut bytes);
+    assert!(bytes.is_empty());
+    assert_eq!(int, 1337);
+    Ok(())
+}
+
+#[test]
+fn test_hpack_int2() -> Result<(), Box<dyn std::error::Error>> {
+    let mut bytes = Bytes::copy_from_slice(&[
+        0b0001_1111,
+        0b0000_0000,
+    ]);
+    let prefix = bytes.get_u8();
+    let int = parse_int!(U5, prefix, &mut bytes);
+    assert!(bytes.is_empty());
+    assert_eq!(int, 31);
     Ok(())
 }
