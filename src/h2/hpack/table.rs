@@ -8,10 +8,10 @@ use crate::headers::{HeaderMap, standard};
 use crate::headers::{HeaderName, HeaderValue};
 
 const MSB: u8 = 0b1000_0000;
-const U7: u8 = u8::MAX >> 1;
-const U6: u8 = u8::MAX >> 2;
-const U5: u8 = u8::MAX >> 3;
-const U4: u8 = u8::MAX >> 4;
+const U7: u8 = 0b0111_1111;
+const U6: u8 = 0b0011_1111;
+const U5: u8 = 0b0001_1111;
+const U4: u8 = 0b0000_1111;
 
 /// HPACK Table.
 #[derive(Debug)]
@@ -254,13 +254,11 @@ impl Default for Table {
 
 macro_rules! parse_int {
     ($int:expr, $prefix:expr, $bytes:expr) => {{
-        const CONTINUE_FLAG: u8 = 1 << ($int.count_ones() - 1);
-        const INT_MASK: u8 = $int >> 1;
-        let init = ($prefix & INT_MASK) as usize;
-        if $prefix & CONTINUE_FLAG != CONTINUE_FLAG {
-            init
+        let int = ($prefix & $int);
+        if int != $int {
+            int as usize
         } else {
-            init + continue_parse_int($bytes)?
+            ((int - 1) as usize) + continue_parse_int($bytes)?
         }
     }};
 }
@@ -427,7 +425,7 @@ static STATIC_HEADER: [(HeaderName, Option<HeaderValue>); 61] = [
 ];
 
 #[test]
-fn test_hpack_appendix_c1_2() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hpack_int() -> Result<(), Box<dyn std::error::Error>> {
     let mut bytes = Bytes::copy_from_slice(&[
         0b00011111u8,
         0b10011010,
