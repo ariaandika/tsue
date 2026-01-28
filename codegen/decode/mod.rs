@@ -2,16 +2,16 @@
 #[derive(Clone)]
 pub enum DecodeEntry {
     None,
-    Partial {
+    Some {
         next: usize,
         maybe_eos: bool,
-        shifted: usize,
+        shifts: usize,
     },
     Decoded {
-        byte: u8,
-        shifted: usize,
-        maybe_eos: bool,
         next: usize,
+        maybe_eos: bool,
+        shifts: usize,
+        byte: u8,
         tagged_bit_mask: u8,
     },
     #[allow(dead_code)]
@@ -21,7 +21,7 @@ pub enum DecodeEntry {
 #[derive(Clone, Copy, Debug)]
 pub struct EntryData {
     pub byte: u8,
-    pub shifted: usize,
+    pub shifts: usize,
 }
 
 impl DecodeEntry {
@@ -29,18 +29,18 @@ impl DecodeEntry {
         Self::None
     }
 
-    pub fn partial(data: EntryData, maybe_eos: bool, next: usize) -> Self {
-        Self::Partial {
+    pub fn some(data: EntryData, maybe_eos: bool, next: usize) -> Self {
+        Self::Some {
             next,
             maybe_eos,
-            shifted: data.shifted,
+            shifts: data.shifts,
         }
     }
 
     pub const fn decoded(data: EntryData, maybe_eos: bool, next: usize, tagged_bit_mask: u8) -> Self {
         Self::Decoded {
             byte: data.byte,
-            shifted: data.shifted,
+            shifts: data.shifts,
             maybe_eos,
             next,
             tagged_bit_mask,
@@ -65,29 +65,29 @@ impl std::fmt::Debug for DecodeEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::None => write!(f, "None"),
-            Self::Partial {
+            Self::Some {
                 next,
                 maybe_eos,
-                shifted,
+                shifts,
             } => f
                 .debug_struct("Partial")
                 .field("next", next)
                 .field("maybe_eos", maybe_eos)
-                .field("shifted", shifted)
+                .field("shifts", shifts)
                 .finish(),
             Self::Decoded {
                 byte,
                 maybe_eos,
                 next,
                 tagged_bit_mask,
-                shifted,
+                shifts,
             } => f
                 .debug_struct("Decoded")
                 .field("byte", &(*byte as char))
                 .field("maybe_eos", maybe_eos)
                 .field("next", next)
                 .field("tagged_bit_mask", &format_args!("{tagged_bit_mask:0>4b}"))
-                .field("shifted", shifted)
+                .field("shifts", shifts)
                 .finish(),
             Self::Error => write!(f, "Error"),
         }

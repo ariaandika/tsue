@@ -1,13 +1,11 @@
 // This implementation is highly inspired by the h2 crate
 //
 // in the future it will be interesting to explore different approaches
-use huffman::{TableParser, Bits};
+use huffman::{source_iter, Bits};
 use decode::{DecodeEntry, EntryData};
 
 mod huffman;
 mod decode;
-
-type DecodeTable = Vec<[DecodeEntry; 16]>;
 
 fn main() {
     let decode = gen_decode_table();
@@ -20,139 +18,162 @@ fn main() {
 
 #[derive(Debug)]
 struct Lookup {
-    /// the shifted leading bits
-    untagged_bits: u8,
-    shifted: usize,
+    untagged_bit_mask: u8,
+    shifts: usize,
     next: usize,
 }
 
+/// Decode table can be thought as a graph, where each node (represented as entry), have 16 edges.
+/// Each edge is assigned with an ID from 0 to 15 (represented as index in an entry).
+///
+/// Decoding process starts by dividing input bytes into 4 bits. From initial node, these bits
+/// (which represent a number from 0 to 15) is used to choose an edge to traverse the graph from
+/// node to node. For each node, there will be flag that denote whether a character has been
+/// decoded.
+type DecodeTable = Vec<[DecodeEntry; 16]>;
+
+/// Generate the decode table.
+///
+/// The first phase, just by iterating from the source string, basic entries can be created.
+///
+/// But not all bits is exactly at multiple of 4. This represent an intersection between 2 encoded
+/// character. The second character bits is represented as **shifted** bits.
+///
+/// ```not_rust
+/// first char bits
+/// \
+///  1 001
+///    --- second char bits (shifted by 1)
+/// ```
+///
+/// The second phase, is to generate all the characters bits again, shifted by 1 to 3. But
+/// generation is not starting from the initial node, instead it starts from partial bits node in
+/// the last character bits node that is not multiply by 4, which can be multiple nodes connected
+/// to the same shifted bits node.
+///
+/// The current strategy is to track all the last partial bits node in separate list, traverse the
+/// node again, and generation can be decided by whether current shifted bits has been generated or
+/// not.
 fn gen_decode_table() -> DecodeTable {
     let mut decode: DecodeTable = vec![DecodeEntry::new_entries()];
     let mut lookup = vec![];
 
-    for entry in table_iter() {
-        let byte = entry.byte();
-        let bits = entry.bits();
-        let data = EntryData {
-            byte,
-            shifted: 0,
-        };
+    // first phase
+    for source_line in source_iter() {
+        let byte = source_line.byte();
+        let bits = source_line.bits();
+        let data = EntryData { byte, shifts: 0 };
         let initial = 0;
-        process_entry(data, bits, initial, &mut decode, &mut lookup);
+        process_decode_entry(data, bits, initial, &mut decode, &mut lookup);
     }
 
-    for shift_bits in [b"0" as &[u8], b"00", b"000"] {
-        for entry in table_iter() {
-            let byte = entry.byte();
+    // second phase
+    for shift_bits in [b"0", b"00", b"000"] as [&[u8]; _] {
+        for source_line in source_iter() {
+            let byte = source_line.byte();
+            let shifts = shift_bits.len();
+            let data = EntryData { byte, shifts };
 
-            let mut bits = entry.bits().shifted(shift_bits);
+            let mut bits = source_line.bits().into_shifted(shift_bits);
+            let untagged_bit_mask = bits.take_4() & (0b1111 >> shifts);
 
-            let shifted = shift_bits.len();
-            let untagged_bits = bits.take_4() & (0b1111 >> shifted);
+            // generate shifted bits entry only when it is tracked in lookup table
 
-            let Some(next) = lookup.iter().find_map(|e|{
-                let ok = e.shifted == shifted
-                && e.untagged_bits == untagged_bits;
-                ok.then_some(e.next)
-            }) else {
-                continue;
-            };
-
-            let data = EntryData {
-                byte,
-                shifted: shift_bits.len(),
-            };
-            process_entry(data, bits, next, &mut decode, &mut lookup);
+            for l in &lookup {
+                if l.shifts == shifts && l.untagged_bit_mask == untagged_bit_mask {
+                    process_decode_entry(data, bits, l.next, &mut decode, &mut lookup);
+                    break;
+                }
+            }
         }
     }
 
     decode
 }
 
-fn process_entry(
+fn process_decode_entry(
     data: EntryData,
-    mut bits_iter: Bits<'_, impl Iterator<Item = u8>>,
-    initial: usize,
+    mut bits_iter: Bits,
+    starting_index: usize,
     decode: &mut Vec<[DecodeEntry; 16]>,
     lookup: &mut Vec<Lookup>,
 ) {
-    let mut decode_len = decode.len();
-    let mut current_index = initial;
+    // entry generation not always start from first entry, because shifted bits is connected to
+    // partial bits entry, not first entry
+    let mut current_index = starting_index;
 
-    // next 1-4 bit chunk
-    loop {
+    while bits_iter.remaining() >= 4 {
         let remaining = bits_iter.remaining();
         let id = bits_iter.take_4();
+        let maybe_eos = id == 0b1111;
+        let new_index = decode.len();
+        let entry = &mut decode[current_index][id as usize];
 
-        // traverse or create new branches
-        if remaining > 4 {
-            let maybe_eos = id == 0b1111;
-            let entry = &mut decode[current_index][id as usize];
+        if remaining == 4 {
+            // total bits length is multiple of 4, no partial bits
+            // - is eos
+            // - next node is initial node
+            entry.set(DecodeEntry::decoded(data, true, 0, 0b1111));
+            return;
+        }
 
-            current_index = match entry {
-                setter @ DecodeEntry::None => {
-                    let new_index = decode_len;
-                    setter.set(DecodeEntry::partial(data, maybe_eos, new_index));
-                    decode_len += 1;
-                    decode.push(DecodeEntry::new_entries());
-                    new_index
-                }
-                DecodeEntry::Partial { next, .. } => *next,
-                _ => unreachable!("conflicting branch"),
-            };
-
+        if let DecodeEntry::Some { next, .. } = entry {
+            // current entry has been generated, just traverse the entry
+            current_index = *next;
             continue;
         }
 
-        // ===== padded / partial bits =====
+        // current entry has not been generated
+        entry.set(DecodeEntry::some(data, maybe_eos, new_index));
+        decode.push(DecodeEntry::new_entries());
+        current_index = new_index;
+    }
 
-        let eos_bit_mask = 0b1111 >> remaining;
-        let untagged_len = 4 - remaining;
+    // ===== padded / partial bits =====
 
-        // shuffled untagged id into also as decoded
-        for shuffled_id in 0..1 << untagged_len {
-            let id = shuffled_id | id;
+    // last bits is partial, thus it also contains partial shifted bits from other character, the
+    // goal here is to iterate to all posssible partial shifted bits, and put it to `lookup` for
+    // later shifted bits entry generation
 
-            let next = if remaining == 4 {
-                0
-            } else {
-                let shifted = remaining;
-                let untagged_bit_mask = id & eos_bit_mask;
+    let remaining = bits_iter.remaining();
+    let last_id = bits_iter.take_4();
+    let eos_bit_mask = 0b1111 >> remaining;
 
-                // see if the *next id* after *decoded entry* already created
-                let found = lookup.iter().find(|lookup|{
-                    lookup.untagged_bits == untagged_bit_mask
-                    && lookup.shifted == shifted
+    for shifted_id in 0..1 << (4 - remaining) {
+        let id = shifted_id | last_id;
+
+        let next;
+        let shifts = remaining;
+        let untagged_bit_mask = id & eos_bit_mask;
+        let maybe_eos = (id & eos_bit_mask) == eos_bit_mask;
+        let tagged_bit_mask = !eos_bit_mask & 0b1111;
+
+        // multiple partial bits entry can point to the same shifted bits entry, if the shifted
+        // entry already created, just point to it
+        let lookup_entry = lookup.iter().find(|lookup|{
+            lookup.untagged_bit_mask == untagged_bit_mask
+            && lookup.shifts == shifts
+        });
+        match lookup_entry {
+            Some(e) => next = e.next,
+            None => {
+                next = decode.len();
+                lookup.push(Lookup {
+                    untagged_bit_mask,
+                    shifts,
+                    next,
                 });
-
-                match found {
-                    Some(e) => e.next,
-                    None => {
-                        let next = decode_len;
-                        lookup.push(Lookup {
-                            untagged_bits: untagged_bit_mask,
-                            shifted,
-                            next,
-                        });
-                        decode.push(DecodeEntry::new_entries());
-                        decode_len += 1;
-                        next
-                    },
-                }
-            };
-
-            let maybe_eos = (id & eos_bit_mask) == eos_bit_mask;
-            let tagged_bit_mask = !eos_bit_mask & 0b1111;
-
-            decode[current_index][id as usize].set(DecodeEntry::decoded(
-                data,
-                maybe_eos,
-                next,
-                tagged_bit_mask,
-            ));
+                decode.push(DecodeEntry::new_entries());
+            },
         }
 
-        break;
+        // all partial bits is decoded entry
+        decode[current_index][id as usize].set(DecodeEntry::decoded(
+            data,
+            maybe_eos,
+            next,
+            tagged_bit_mask,
+        ));
     }
 }
 
@@ -168,7 +189,7 @@ fn print_decode(decode: DecodeTable) {
                 DecodeEntry::None => {
                     print!("(0,0,0b100),");
                 }
-                DecodeEntry::Partial { next, maybe_eos, .. } => {
+                DecodeEntry::Some { next, maybe_eos, .. } => {
                     print!("({},0,0b0{}0),", next, maybe_eos as u8);
                 }
                 DecodeEntry::Decoded { byte, maybe_eos, next, .. } => {
@@ -193,7 +214,7 @@ fn print_decode_pretty(decode: DecodeTable) {
                 DecodeEntry::None => {
                     println!("        (  0,    0, 0b100), // ERROR");
                 }
-                DecodeEntry::Partial { next, .. } => {
+                DecodeEntry::Some { next, .. } => {
                     println!("        ({: >3},    0, 0b000), // {:0>4b} Partial", next, i);
                 }
                 DecodeEntry::Decoded { byte, maybe_eos, next, tagged_bit_mask: t, .. } => {
@@ -214,273 +235,3 @@ fn print_decode_pretty(decode: DecodeTable) {
 
     println!("];");
 }
-
-// ===== Sources =====
-
-fn table_iter() -> TableParser {
-    TableParser::new(TABLE_STRING)
-}
-
-const BYTE_RANGE: std::ops::Range<usize> = 8..11;
-const BITS_RANGE: std::ops::Range<usize> = 15..49;
-const BITS_LEN_RANGE: std::ops::Range<usize> = 65..67;
-
-/// https://www.rfc-editor.org/rfc/rfc7541.html#appendix-B
-const TABLE_STRING: &str = r##"
-       (  0)  |11111111|11000                             1ff8  [13]
-       (  1)  |11111111|11111111|1011000                7fffd8  [23]
-       (  2)  |11111111|11111111|11111110|0010         fffffe2  [28]
-       (  3)  |11111111|11111111|11111110|0011         fffffe3  [28]
-       (  4)  |11111111|11111111|11111110|0100         fffffe4  [28]
-       (  5)  |11111111|11111111|11111110|0101         fffffe5  [28]
-       (  6)  |11111111|11111111|11111110|0110         fffffe6  [28]
-       (  7)  |11111111|11111111|11111110|0111         fffffe7  [28]
-       (  8)  |11111111|11111111|11111110|1000         fffffe8  [28]
-       (  9)  |11111111|11111111|11101010               ffffea  [24]
-       ( 10)  |11111111|11111111|11111111|111100      3ffffffc  [30]
-       ( 11)  |11111111|11111111|11111110|1001         fffffe9  [28]
-       ( 12)  |11111111|11111111|11111110|1010         fffffea  [28]
-       ( 13)  |11111111|11111111|11111111|111101      3ffffffd  [30]
-       ( 14)  |11111111|11111111|11111110|1011         fffffeb  [28]
-       ( 15)  |11111111|11111111|11111110|1100         fffffec  [28]
-       ( 16)  |11111111|11111111|11111110|1101         fffffed  [28]
-       ( 17)  |11111111|11111111|11111110|1110         fffffee  [28]
-       ( 18)  |11111111|11111111|11111110|1111         fffffef  [28]
-       ( 19)  |11111111|11111111|11111111|0000         ffffff0  [28]
-       ( 20)  |11111111|11111111|11111111|0001         ffffff1  [28]
-       ( 21)  |11111111|11111111|11111111|0010         ffffff2  [28]
-       ( 22)  |11111111|11111111|11111111|111110      3ffffffe  [30]
-       ( 23)  |11111111|11111111|11111111|0011         ffffff3  [28]
-       ( 24)  |11111111|11111111|11111111|0100         ffffff4  [28]
-       ( 25)  |11111111|11111111|11111111|0101         ffffff5  [28]
-       ( 26)  |11111111|11111111|11111111|0110         ffffff6  [28]
-       ( 27)  |11111111|11111111|11111111|0111         ffffff7  [28]
-       ( 28)  |11111111|11111111|11111111|1000         ffffff8  [28]
-       ( 29)  |11111111|11111111|11111111|1001         ffffff9  [28]
-       ( 30)  |11111111|11111111|11111111|1010         ffffffa  [28]
-       ( 31)  |11111111|11111111|11111111|1011         ffffffb  [28]
-   ' ' ( 32)  |010100                                       14  [ 6]
-   '!' ( 33)  |11111110|00                                 3f8  [10]
-   '"' ( 34)  |11111110|01                                 3f9  [10]
-   '#' ( 35)  |11111111|1010                               ffa  [12]
-   '$' ( 36)  |11111111|11001                             1ff9  [13]
-   '%' ( 37)  |010101                                       15  [ 6]
-   '&' ( 38)  |11111000                                     f8  [ 8]
-   ''' ( 39)  |11111111|010                                7fa  [11]
-   '(' ( 40)  |11111110|10                                 3fa  [10]
-   ')' ( 41)  |11111110|11                                 3fb  [10]
-   '*' ( 42)  |11111001                                     f9  [ 8]
-   '+' ( 43)  |11111111|011                                7fb  [11]
-   ',' ( 44)  |11111010                                     fa  [ 8]
-   '-' ( 45)  |010110                                       16  [ 6]
-   '.' ( 46)  |010111                                       17  [ 6]
-   '/' ( 47)  |011000                                       18  [ 6]
-   '0' ( 48)  |00000                                         0  [ 5]
-   '1' ( 49)  |00001                                         1  [ 5]
-   '2' ( 50)  |00010                                         2  [ 5]
-   '3' ( 51)  |011001                                       19  [ 6]
-   '4' ( 52)  |011010                                       1a  [ 6]
-   '5' ( 53)  |011011                                       1b  [ 6]
-   '6' ( 54)  |011100                                       1c  [ 6]
-   '7' ( 55)  |011101                                       1d  [ 6]
-   '8' ( 56)  |011110                                       1e  [ 6]
-   '9' ( 57)  |011111                                       1f  [ 6]
-   ':' ( 58)  |1011100                                      5c  [ 7]
-   ';' ( 59)  |11111011                                     fb  [ 8]
-   '<' ( 60)  |11111111|1111100                           7ffc  [15]
-   '=' ( 61)  |100000                                       20  [ 6]
-   '>' ( 62)  |11111111|1011                               ffb  [12]
-   '?' ( 63)  |11111111|00                                 3fc  [10]
-   '@' ( 64)  |11111111|11010                             1ffa  [13]
-   'A' ( 65)  |100001                                       21  [ 6]
-   'B' ( 66)  |1011101                                      5d  [ 7]
-   'C' ( 67)  |1011110                                      5e  [ 7]
-   'D' ( 68)  |1011111                                      5f  [ 7]
-   'E' ( 69)  |1100000                                      60  [ 7]
-   'F' ( 70)  |1100001                                      61  [ 7]
-   'G' ( 71)  |1100010                                      62  [ 7]
-   'H' ( 72)  |1100011                                      63  [ 7]
-   'I' ( 73)  |1100100                                      64  [ 7]
-   'J' ( 74)  |1100101                                      65  [ 7]
-   'K' ( 75)  |1100110                                      66  [ 7]
-   'L' ( 76)  |1100111                                      67  [ 7]
-   'M' ( 77)  |1101000                                      68  [ 7]
-   'N' ( 78)  |1101001                                      69  [ 7]
-   'O' ( 79)  |1101010                                      6a  [ 7]
-   'P' ( 80)  |1101011                                      6b  [ 7]
-   'Q' ( 81)  |1101100                                      6c  [ 7]
-   'R' ( 82)  |1101101                                      6d  [ 7]
-   'S' ( 83)  |1101110                                      6e  [ 7]
-   'T' ( 84)  |1101111                                      6f  [ 7]
-   'U' ( 85)  |1110000                                      70  [ 7]
-   'V' ( 86)  |1110001                                      71  [ 7]
-   'W' ( 87)  |1110010                                      72  [ 7]
-   'X' ( 88)  |11111100                                     fc  [ 8]
-   'Y' ( 89)  |1110011                                      73  [ 7]
-   'Z' ( 90)  |11111101                                     fd  [ 8]
-   '[' ( 91)  |11111111|11011                             1ffb  [13]
-   '\' ( 92)  |11111111|11111110|000                     7fff0  [19]
-   ']' ( 93)  |11111111|11100                             1ffc  [13]
-   '^' ( 94)  |11111111|111100                            3ffc  [14]
-   '_' ( 95)  |100010                                       22  [ 6]
-   '`' ( 96)  |11111111|1111101                           7ffd  [15]
-   'a' ( 97)  |00011                                         3  [ 5]
-   'b' ( 98)  |100011                                       23  [ 6]
-   'c' ( 99)  |00100                                         4  [ 5]
-   'd' (100)  |100100                                       24  [ 6]
-   'e' (101)  |00101                                         5  [ 5]
-   'f' (102)  |100101                                       25  [ 6]
-   'g' (103)  |100110                                       26  [ 6]
-   'h' (104)  |100111                                       27  [ 6]
-   'i' (105)  |00110                                         6  [ 5]
-   'j' (106)  |1110100                                      74  [ 7]
-   'k' (107)  |1110101                                      75  [ 7]
-   'l' (108)  |101000                                       28  [ 6]
-   'm' (109)  |101001                                       29  [ 6]
-   'n' (110)  |101010                                       2a  [ 6]
-   'o' (111)  |00111                                         7  [ 5]
-   'p' (112)  |101011                                       2b  [ 6]
-   'q' (113)  |1110110                                      76  [ 7]
-   'r' (114)  |101100                                       2c  [ 6]
-   's' (115)  |01000                                         8  [ 5]
-   't' (116)  |01001                                         9  [ 5]
-   'u' (117)  |101101                                       2d  [ 6]
-   'v' (118)  |1110111                                      77  [ 7]
-   'w' (119)  |1111000                                      78  [ 7]
-   'x' (120)  |1111001                                      79  [ 7]
-   'y' (121)  |1111010                                      7a  [ 7]
-   'z' (122)  |1111011                                      7b  [ 7]
-   '{' (123)  |11111111|1111110                           7ffe  [15]
-   '|' (124)  |11111111|100                                7fc  [11]
-   '}' (125)  |11111111|111101                            3ffd  [14]
-   '~' (126)  |11111111|11101                             1ffd  [13]
-       (127)  |11111111|11111111|11111111|1100         ffffffc  [28]
-       (128)  |11111111|11111110|0110                    fffe6  [20]
-       (129)  |11111111|11111111|010010                 3fffd2  [22]
-       (130)  |11111111|11111110|0111                    fffe7  [20]
-       (131)  |11111111|11111110|1000                    fffe8  [20]
-       (132)  |11111111|11111111|010011                 3fffd3  [22]
-       (133)  |11111111|11111111|010100                 3fffd4  [22]
-       (134)  |11111111|11111111|010101                 3fffd5  [22]
-       (135)  |11111111|11111111|1011001                7fffd9  [23]
-       (136)  |11111111|11111111|010110                 3fffd6  [22]
-       (137)  |11111111|11111111|1011010                7fffda  [23]
-       (138)  |11111111|11111111|1011011                7fffdb  [23]
-       (139)  |11111111|11111111|1011100                7fffdc  [23]
-       (140)  |11111111|11111111|1011101                7fffdd  [23]
-       (141)  |11111111|11111111|1011110                7fffde  [23]
-       (142)  |11111111|11111111|11101011               ffffeb  [24]
-       (143)  |11111111|11111111|1011111                7fffdf  [23]
-       (144)  |11111111|11111111|11101100               ffffec  [24]
-       (145)  |11111111|11111111|11101101               ffffed  [24]
-       (146)  |11111111|11111111|010111                 3fffd7  [22]
-       (147)  |11111111|11111111|1100000                7fffe0  [23]
-       (148)  |11111111|11111111|11101110               ffffee  [24]
-       (149)  |11111111|11111111|1100001                7fffe1  [23]
-       (150)  |11111111|11111111|1100010                7fffe2  [23]
-       (151)  |11111111|11111111|1100011                7fffe3  [23]
-       (152)  |11111111|11111111|1100100                7fffe4  [23]
-       (153)  |11111111|11111110|11100                  1fffdc  [21]
-       (154)  |11111111|11111111|011000                 3fffd8  [22]
-       (155)  |11111111|11111111|1100101                7fffe5  [23]
-       (156)  |11111111|11111111|011001                 3fffd9  [22]
-       (157)  |11111111|11111111|1100110                7fffe6  [23]
-       (158)  |11111111|11111111|1100111                7fffe7  [23]
-       (159)  |11111111|11111111|11101111               ffffef  [24]
-       (160)  |11111111|11111111|011010                 3fffda  [22]
-       (161)  |11111111|11111110|11101                  1fffdd  [21]
-       (162)  |11111111|11111110|1001                    fffe9  [20]
-       (163)  |11111111|11111111|011011                 3fffdb  [22]
-       (164)  |11111111|11111111|011100                 3fffdc  [22]
-       (165)  |11111111|11111111|1101000                7fffe8  [23]
-       (166)  |11111111|11111111|1101001                7fffe9  [23]
-       (167)  |11111111|11111110|11110                  1fffde  [21]
-       (168)  |11111111|11111111|1101010                7fffea  [23]
-       (169)  |11111111|11111111|011101                 3fffdd  [22]
-       (170)  |11111111|11111111|011110                 3fffde  [22]
-       (171)  |11111111|11111111|11110000               fffff0  [24]
-       (172)  |11111111|11111110|11111                  1fffdf  [21]
-       (173)  |11111111|11111111|011111                 3fffdf  [22]
-       (174)  |11111111|11111111|1101011                7fffeb  [23]
-       (175)  |11111111|11111111|1101100                7fffec  [23]
-       (176)  |11111111|11111111|00000                  1fffe0  [21]
-       (177)  |11111111|11111111|00001                  1fffe1  [21]
-       (178)  |11111111|11111111|100000                 3fffe0  [22]
-       (179)  |11111111|11111111|00010                  1fffe2  [21]
-       (180)  |11111111|11111111|1101101                7fffed  [23]
-       (181)  |11111111|11111111|100001                 3fffe1  [22]
-       (182)  |11111111|11111111|1101110                7fffee  [23]
-       (183)  |11111111|11111111|1101111                7fffef  [23]
-       (184)  |11111111|11111110|1010                    fffea  [20]
-       (185)  |11111111|11111111|100010                 3fffe2  [22]
-       (186)  |11111111|11111111|100011                 3fffe3  [22]
-       (187)  |11111111|11111111|100100                 3fffe4  [22]
-       (188)  |11111111|11111111|1110000                7ffff0  [23]
-       (189)  |11111111|11111111|100101                 3fffe5  [22]
-       (190)  |11111111|11111111|100110                 3fffe6  [22]
-       (191)  |11111111|11111111|1110001                7ffff1  [23]
-       (192)  |11111111|11111111|11111000|00           3ffffe0  [26]
-       (193)  |11111111|11111111|11111000|01           3ffffe1  [26]
-       (194)  |11111111|11111110|1011                    fffeb  [20]
-       (195)  |11111111|11111110|001                     7fff1  [19]
-       (196)  |11111111|11111111|100111                 3fffe7  [22]
-       (197)  |11111111|11111111|1110010                7ffff2  [23]
-       (198)  |11111111|11111111|101000                 3fffe8  [22]
-       (199)  |11111111|11111111|11110110|0            1ffffec  [25]
-       (200)  |11111111|11111111|11111000|10           3ffffe2  [26]
-       (201)  |11111111|11111111|11111000|11           3ffffe3  [26]
-       (202)  |11111111|11111111|11111001|00           3ffffe4  [26]
-       (203)  |11111111|11111111|11111011|110          7ffffde  [27]
-       (204)  |11111111|11111111|11111011|111          7ffffdf  [27]
-       (205)  |11111111|11111111|11111001|01           3ffffe5  [26]
-       (206)  |11111111|11111111|11110001               fffff1  [24]
-       (207)  |11111111|11111111|11110110|1            1ffffed  [25]
-       (208)  |11111111|11111110|010                     7fff2  [19]
-       (209)  |11111111|11111111|00011                  1fffe3  [21]
-       (210)  |11111111|11111111|11111001|10           3ffffe6  [26]
-       (211)  |11111111|11111111|11111100|000          7ffffe0  [27]
-       (212)  |11111111|11111111|11111100|001          7ffffe1  [27]
-       (213)  |11111111|11111111|11111001|11           3ffffe7  [26]
-       (214)  |11111111|11111111|11111100|010          7ffffe2  [27]
-       (215)  |11111111|11111111|11110010               fffff2  [24]
-       (216)  |11111111|11111111|00100                  1fffe4  [21]
-       (217)  |11111111|11111111|00101                  1fffe5  [21]
-       (218)  |11111111|11111111|11111010|00           3ffffe8  [26]
-       (219)  |11111111|11111111|11111010|01           3ffffe9  [26]
-       (220)  |11111111|11111111|11111111|1101         ffffffd  [28]
-       (221)  |11111111|11111111|11111100|011          7ffffe3  [27]
-       (222)  |11111111|11111111|11111100|100          7ffffe4  [27]
-       (223)  |11111111|11111111|11111100|101          7ffffe5  [27]
-       (224)  |11111111|11111110|1100                    fffec  [20]
-       (225)  |11111111|11111111|11110011               fffff3  [24]
-       (226)  |11111111|11111110|1101                    fffed  [20]
-       (227)  |11111111|11111111|00110                  1fffe6  [21]
-       (228)  |11111111|11111111|101001                 3fffe9  [22]
-       (229)  |11111111|11111111|00111                  1fffe7  [21]
-       (230)  |11111111|11111111|01000                  1fffe8  [21]
-       (231)  |11111111|11111111|1110011                7ffff3  [23]
-       (232)  |11111111|11111111|101010                 3fffea  [22]
-       (233)  |11111111|11111111|101011                 3fffeb  [22]
-       (234)  |11111111|11111111|11110111|0            1ffffee  [25]
-       (235)  |11111111|11111111|11110111|1            1ffffef  [25]
-       (236)  |11111111|11111111|11110100               fffff4  [24]
-       (237)  |11111111|11111111|11110101               fffff5  [24]
-       (238)  |11111111|11111111|11111010|10           3ffffea  [26]
-       (239)  |11111111|11111111|1110100                7ffff4  [23]
-       (240)  |11111111|11111111|11111010|11           3ffffeb  [26]
-       (241)  |11111111|11111111|11111100|110          7ffffe6  [27]
-       (242)  |11111111|11111111|11111011|00           3ffffec  [26]
-       (243)  |11111111|11111111|11111011|01           3ffffed  [26]
-       (244)  |11111111|11111111|11111100|111          7ffffe7  [27]
-       (245)  |11111111|11111111|11111101|000          7ffffe8  [27]
-       (246)  |11111111|11111111|11111101|001          7ffffe9  [27]
-       (247)  |11111111|11111111|11111101|010          7ffffea  [27]
-       (248)  |11111111|11111111|11111101|011          7ffffeb  [27]
-       (249)  |11111111|11111111|11111111|1110         ffffffe  [28]
-       (250)  |11111111|11111111|11111101|100          7ffffec  [27]
-       (251)  |11111111|11111111|11111101|101          7ffffed  [27]
-       (252)  |11111111|11111111|11111101|110          7ffffee  [27]
-       (253)  |11111111|11111111|11111101|111          7ffffef  [27]
-       (254)  |11111111|11111111|11111110|000          7fffff0  [27]
-       (255)  |11111111|11111111|11111011|10           3ffffee  [26]
-   EOS (256)  |11111111|11111111|11111111|111111      3fffffff  [30]"##;
