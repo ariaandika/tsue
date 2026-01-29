@@ -9,40 +9,52 @@ const ERROR: u8     = 0b100;
 
 pub fn encode(bytes: &[u8], buf: &mut BytesMut) {
     let mut tmp = 0u64;
-    let mut remaining = 64u8;
+    let mut remaining_bits = 64u8;
 
     for &byte in bytes {
         let (bits_len, bits) = ENCODE_TABLE[byte as usize];
         let bits = bits as u64;
 
-        match remaining.checked_sub(bits_len) {
+        match remaining_bits.checked_sub(bits_len) {
             Some(remain) => {
-                remaining = remain;
+                remaining_bits = remain;
                 tmp |= bits << remain;
             }
             None => {
-                let overflow = bits_len - remaining;
-                remaining = 64 - overflow;
+                let overflow = bits_len - remaining_bits;
+                remaining_bits = 64 - overflow;
 
                 buf.put_u64(tmp | (bits >> overflow));
-                tmp = bits << remaining;
+                tmp = bits << remaining_bits;
             }
         }
     }
 
-    if remaining == 64 {
+    if remaining_bits >= 64 {
         return;
     }
-    let bits_len = 64 - remaining;
 
-    let be_bytes = tmp.to_be_bytes();
+    let bits_len = 64 - remaining_bits;
     let len = (bits_len / 8) as usize;
 
-    buf.extend_from_slice(&be_bytes[..len]);
+    let be_bytes = tmp.to_be_bytes();
+
+    // compiler did not remove bounds checking here, thus unsafe is used
+
+    // SAFETY:
+    // - bits_len == 1..64, bits_len / 8 == 0..8
+    // - len == 0..8, u64::to_be_bytes() == [u8; 8]
+    let filled = unsafe { be_bytes.get_unchecked(..len) };
+
+    buf.extend_from_slice(filled);
 
     let bits_remain = bits_len % 8;
     if bits_remain != 0 {
-        let bits = be_bytes[len];
+        // SAFETY:
+        // - bits_len != 64, because 64 % 8 == 0
+        // - thus len != 8
+        let bits = unsafe { be_bytes.get_unchecked(len) };
+
         let eos = u8::MAX >> bits_remain;
         buf.put_u8(bits | eos);
     }
