@@ -16,21 +16,9 @@ const U4: u8 = 0b0000_1111;
 /// HPACK Table.
 #[derive(Debug)]
 pub struct Table {
-    fields: VecDeque<Field>,
+    fields: VecDeque<(HeaderName, HeaderValue)>,
     size: usize,
     max_size: usize,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Field {
-    pub name: HeaderName,
-    pub value: HeaderValue,
-}
-
-impl Field {
-    fn size(&self) -> usize {
-        self.name.as_str().len() + self.value.as_bytes().len() + 32
-    }
 }
 
 impl Table {
@@ -67,8 +55,8 @@ impl Table {
         }
     }
 
-    fn insert(&mut self, field: Field) {
-        let size = field.size();
+    fn insert(&mut self, name: HeaderName, val: HeaderValue) {
+        let size = field_size(&name, &val);
 
         // It is not an error to attempt to add an entry that is larger than the maximum size; an
         // attempt to add an entry larger than the maximum size causes the table to be emptied of
@@ -82,17 +70,17 @@ impl Table {
             self.evict_entry();
         }
 
-        self.fields.push_front(field);
+        self.fields.push_front((name, val));
         self.size += size;
 
         debug_assert!(self.size <= self.max_size);
     }
 
-    fn evict_entry(&mut self) -> Option<Field> {
-        let evicted = self.fields.pop_back()?;
-        let size = evicted.size();
+    fn evict_entry(&mut self) -> Option<(HeaderName, HeaderValue)> {
+        let (name, val) = self.fields.pop_back()?;
+        let size = field_size(&name, &val);
         self.size -= size;
-        Some(evicted)
+        Some((name, val))
     }
 
     pub fn decode_block(
@@ -120,13 +108,17 @@ impl Table {
         }
 
         while !block.is_empty() {
-            let Field { name, value } = self.decode(&mut block, write_buffer)?;
+            let (name, value) = self.decode(&mut block, write_buffer)?;
             maps.append(name, value);
         }
         Ok(())
     }
 
-    fn decode(&mut self, bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Field, DecodeError> {
+    fn decode(
+        &mut self,
+        bytes: &mut Bytes,
+        write_buffer: &mut BytesMut,
+    ) -> Result<(HeaderName, HeaderValue), DecodeError> {
         use DecodeError as E;
 
         //   0   1   2   3   4   5   6   7
@@ -173,10 +165,7 @@ impl Table {
                 .ok_or(E::ZeroIndex)?;
             return match STATIC_HEADER.get(index) {
                 Some((name, val)) => match val {
-                    Some(val) => Ok(Field {
-                        name: name.clone(),
-                        value: val.clone(),
-                    }),
+                    Some(val) => Ok((name.clone(), val.clone())),
                     None => Err(E::NotFound)
                 },
                 None => match self.fields.get(index.strict_sub(STATIC_HEADER.len())) {
@@ -207,7 +196,7 @@ impl Table {
                         .fields
                         .get(index.strict_sub(STATIC_HEADER.len()))
                         .ok_or(E::NotFound)?
-                        .name
+                        .0
                         .clone(),
                 }
             }
@@ -217,23 +206,18 @@ impl Table {
         };
         let value = HeaderValue::from_bytes(parse_string(bytes, write_buffer)?)?;
 
-        let field = Field {
-            name,
-            value,
-        };
-
         let is_indexed = prefix & LITERAL_IS_INDEXED_MASK == LITERAL_IS_INDEXED_MASK;
         if is_indexed {
-            self.insert(field.clone());
+            self.insert(name.clone(), value.clone());
         }
 
-        Ok(field)
+        Ok((name, value))
     }
 }
 
 #[cfg(test)]
 impl Table {
-    pub(crate) fn fields(&self) -> &VecDeque<Field> {
+    pub(crate) fn fields(&self) -> &VecDeque<(HeaderName, HeaderValue)> {
         &self.fields
     }
 
@@ -245,7 +229,7 @@ impl Table {
         &mut self,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
-    ) -> Result<Field, DecodeError> {
+    ) -> Result<(HeaderName, HeaderValue), DecodeError> {
         self.decode(bytes, write_buffer)
     }
 }
@@ -311,6 +295,10 @@ fn parse_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes,
     } else {
         bytes.try_split_to(len).ok_or(DecodeError::Incomplete)
     }
+}
+
+fn field_size(name: &HeaderName, val: &HeaderValue) -> usize {
+    name.as_str().len() + val.as_bytes().len() + 32
 }
 
 /// HPACK Decoding Error.

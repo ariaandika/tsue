@@ -5,7 +5,7 @@ mod table;
 mod decode_table;
 mod encode_table;
 
-pub use table::{Table, Field, DecodeError};
+pub use table::{Table, DecodeError};
 
 #[cfg(test)]
 mod test;

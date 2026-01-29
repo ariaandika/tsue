@@ -5,14 +5,14 @@ use crate::headers::{HeaderMap, HeaderName, standard};
 
 macro_rules! field_eq {
     ($field:expr, $name:literal, $val:literal) => {{
-        let f = $field;
-        assert_eq!(f.name.as_str(), $name);
-        assert_eq!(f.value.as_str(), $val);
+        let (name, val) = $field;
+        assert_eq!(name.as_str(), $name);
+        assert_eq!(val.as_str(), $val);
     }};
     ($field:expr, $std:ident, $val:literal) => {{
-        let f = $field;
-        assert_eq!(f.name, standard::$std);
-        assert_eq!(f.value.as_str(), $val);
+        let (name, val) = $field;
+        assert_eq!(name.as_str(), standard::$std.as_str());
+        assert_eq!(val.as_str(), $val);
     }};
 }
 
