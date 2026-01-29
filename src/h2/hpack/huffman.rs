@@ -1,6 +1,6 @@
 use tcio::bytes::{BufMut, BytesMut};
 
-use super::huffman_table::DECODE_TABLE;
+use super::decode_table::DECODE_TABLE;
 use super::encode_table::ENCODE_TABLE;
 
 const DECODED: u8   = 0b001;

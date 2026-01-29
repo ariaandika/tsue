@@ -3,6 +3,10 @@ name = "codegen"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "huffman"
+path = "lib.rs"
+
 [[bin]]
 name = "huffman-decode"
 path = "huffman-decode.rs"

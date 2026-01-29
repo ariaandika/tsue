@@ -2,7 +2,7 @@ mod huffman;
 mod table;
 
 // generated code
-mod huffman_table;
+mod decode_table;
 mod encode_table;
 
 pub use table::{Table, Field, DecodeError};

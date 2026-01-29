@@ -2,7 +2,6 @@
 //
 // in the future it will be interesting to explore different approaches
 use huffman::{source_iter, Bits};
-mod huffman;
 
 fn main() {
     let decode = gen_decode_table();
