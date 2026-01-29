@@ -1,32 +1,50 @@
 use tcio::bytes::{BufMut, BytesMut};
 
 use super::huffman_table::DECODE_TABLE;
+use super::encode_table::ENCODE_TABLE;
 
 const DECODED: u8   = 0b001;
 const MAYBE_EOS: u8 = 0b010;
 const ERROR: u8     = 0b100;
 
-struct Decoder {
-    state: u8,
-    maybe_eos: bool,
-}
+pub fn encode(bytes: &[u8], buf: &mut BytesMut) {
+    let mut tmp = 0u64;
+    let mut remaining = 64u8;
 
-impl Decoder {
-    fn byte(&mut self, byte: u8) -> Result<Option<u8>, HuffmanError> {
-        let (next, byte, flags) = DECODE_TABLE[self.state as usize][byte as usize];
+    for &byte in bytes {
+        let (bits_len, bits) = ENCODE_TABLE[byte as usize];
+        let bits = bits as u64;
 
-        if flags & ERROR == ERROR {
-            return Err(HuffmanError);
+        match remaining.checked_sub(bits_len) {
+            Some(remain) => {
+                remaining = remain;
+                tmp |= bits << remain;
+            }
+            None => {
+                let overflow = bits_len - remaining;
+                remaining = 64 - overflow;
+
+                buf.put_u64(tmp | (bits >> overflow));
+                tmp = bits << remaining;
+            }
         }
+    }
 
-        self.maybe_eos = flags & MAYBE_EOS == MAYBE_EOS;
-        self.state = next;
+    if remaining == 64 {
+        return;
+    }
+    let bits_len = 64 - remaining;
 
-        if flags & DECODED == DECODED {
-            Ok(Some(byte))
-        } else {
-            Ok(None)
-        }
+    let be_bytes = tmp.to_be_bytes();
+    let len = (bits_len / 8) as usize;
+
+    buf.extend_from_slice(&be_bytes[..len]);
+
+    let bits_remain = bits_len % 8;
+    if bits_remain != 0 {
+        let bits = be_bytes[len];
+        let eos = u8::MAX >> bits_remain;
+        buf.put_u8(bits | eos);
     }
 }
 
@@ -49,6 +67,30 @@ pub fn decode(bytes: &[u8], buf: &mut BytesMut) -> Result<(), HuffmanError> {
         Ok(())
     } else {
         Err(HuffmanError)
+    }
+}
+
+struct Decoder {
+    state: u8,
+    maybe_eos: bool,
+}
+
+impl Decoder {
+    fn byte(&mut self, byte: u8) -> Result<Option<u8>, HuffmanError> {
+        let (next, byte, flags) = DECODE_TABLE[self.state as usize][byte as usize];
+
+        if flags & ERROR == ERROR {
+            return Err(HuffmanError);
+        }
+
+        self.maybe_eos = flags & MAYBE_EOS == MAYBE_EOS;
+        self.state = next;
+
+        if flags & DECODED == DECODED {
+            Ok(Some(byte))
+        } else {
+            Ok(None)
+        }
     }
 }
 
