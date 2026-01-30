@@ -38,6 +38,7 @@ enum Repr {
 struct Static {
     string: &'static str,
     hash: u32,
+    hpack_idx: Option<std::num::NonZeroU8>
 }
 
 impl HeaderName {
@@ -120,6 +121,16 @@ impl HeaderName {
     pub(crate) const fn validate_lowercase(s: &[u8]) {
         if let Err(err) = validate_header_name_lowercase(s) {
             err.panic_const();
+        }
+    }
+
+    /// Returns hpack static header index if any.
+    ///
+    /// Note that this value only available in constant headers.
+    pub(crate) const fn hpack_idx(&self) -> Option<std::num::NonZero<u8>> {
+        match &self.repr {
+            Repr::Static(s) => s.hpack_idx,
+            Repr::Arbitrary(_) => None,
         }
     }
 }
@@ -212,40 +223,40 @@ standard_header! {
 
     // ===== Pseudo Headers =====
 
-    pub(crate) const PSEUDO_METHOD: HeaderName = ":method";
-    pub(crate) const PSEUDO_SCHEME: HeaderName = ":scheme";
-    pub(crate) const PSEUDO_AUTHORITY: HeaderName = ":authority";
-    pub(crate) const PSEUDO_PATH: HeaderName = ":path";
-    pub(crate) const PSEUDO_STATUS: HeaderName = ":status";
+    pub(crate) const PSEUDO_AUTHORITY: HeaderName = ":authority", hpack_idx: 1;
+    pub(crate) const PSEUDO_METHOD: HeaderName = ":method", hpack_idx: 2;
+    pub(crate) const PSEUDO_PATH: HeaderName = ":path", hpack_idx: 4;
+    pub(crate) const PSEUDO_SCHEME: HeaderName = ":scheme", hpack_idx: 6;
+    pub(crate) const PSEUDO_STATUS: HeaderName = ":status", hpack_idx: 8;
 
     // ===== Authentication =====
 
     /// Defines the authentication method that should be used to access a resource.
-    pub const WWW_AUTHENTICATE: HeaderName = "www-authenticate";
+    pub const WWW_AUTHENTICATE: HeaderName = "www-authenticate", hpack_idx: 61;
 
     /// Contains the credentials to authenticate a user-agent with a server.
-    pub const AUTHORIZATION: HeaderName = "authorization";
+    pub const AUTHORIZATION: HeaderName = "authorization", hpack_idx: 23;
 
     /// Defines the authentication method that should be used to access a resource behind a proxy
     /// server.
-    pub const PROXY_AUTHENTICATE: HeaderName = "proxy-authenticate";
+    pub const PROXY_AUTHENTICATE: HeaderName = "proxy-authenticate", hpack_idx: 48;
 
     /// Contains the credentials to authenticate a user agent with a proxy server.
-    pub const PROXY_AUTHORIZATION: HeaderName = "proxy-authorization";
+    pub const PROXY_AUTHORIZATION: HeaderName = "proxy-authorization", hpack_idx: 49;
 
     // ===== Caching =====
 
     /// The time, in seconds, that the object has been in a proxy cache.
-    pub const AGE: HeaderName = "age";
+    pub const AGE: HeaderName = "age", hpack_idx: 21;
 
     /// Directives for caching mechanisms in both requests and responses.
-    pub const CACHE_CONTROL: HeaderName = "cache-control";
+    pub const CACHE_CONTROL: HeaderName = "cache-control", hpack_idx: 24;
 
     /// Clears browsing data (e.g., cookies, storage, cache) associated with the requesting website.
     pub const CLEAR_SITE_DATA: HeaderName = "clear-site-data";
 
     /// The date/time after which the response is considered stale.
-    pub const EXPIRES: HeaderName = "expires";
+    pub const EXPIRES: HeaderName = "expires", hpack_idx: 36;
 
     // ===== Conditionals =====
 
@@ -253,35 +264,35 @@ standard_header! {
     /// resource. It is less accurate than ETag, but easier to calculate in some environments.
     /// Conditional requests using If-Modified-Since and If-Unmodified-Since use this value to
     /// change the behavior of the request.
-    pub const LAST_MODIFIED: HeaderName = "last-modified";
+    pub const LAST_MODIFIED: HeaderName = "last-modified", hpack_idx: 44;
 
     /// A unique string identifying the version of the resource. Conditional requests using
     /// If-Match and If-None-Match use this value to change the behavior of the request.
-    pub const ETAG: HeaderName = "etag";
+    pub const ETAG: HeaderName = "etag", hpack_idx: 34;
 
     /// Makes the request conditional, and applies the method only if the stored resource matches
     /// one of the given ETags.
-    pub const IF_MATCH: HeaderName = "if-match";
+    pub const IF_MATCH: HeaderName = "if-match", hpack_idx: 39;
 
     /// Makes the request conditional, and applies the method only if the stored resource doesn't
     /// match any of the given ETags. This is used to update caches (for safe requests), or to
     /// prevent uploading a new resource when one already exists.
-    pub const IF_NONE_MATCH: HeaderName = "if-none-match";
+    pub const IF_NONE_MATCH: HeaderName = "if-none-match", hpack_idx: 41;
 
     /// Makes the request conditional, and expects the resource to be transmitted only if it has
     /// been modified after the given date. This is used to transmit data only when the cache is
     /// out of date.
-    pub const IF_MODIFIED_SINCE: HeaderName = "if-modified-since";
+    pub const IF_MODIFIED_SINCE: HeaderName = "if-modified-since", hpack_idx: 40;
 
     /// Makes the request conditional, and expects the resource to be transmitted only if it has
     /// not been modified after the given date. This ensures the coherence of a new fragment of a
     /// specific range with previous ones, or to implement an optimistic concurrency control system
     /// when modifying existing documents.
-    pub const IF_UNMODIFIED_SINCE: HeaderName = "if-unmodified-since";
+    pub const IF_UNMODIFIED_SINCE: HeaderName = "if-unmodified-since", hpack_idx: 43;
 
     /// Determines how to match request headers to decide whether a cached response can be used
     /// rather than requesting a fresh one from the origin server.
-    pub const VARY: HeaderName = "vary";
+    pub const VARY: HeaderName = "vary", hpack_idx: 59;
 
     // ===== Connection management =====
 
@@ -295,21 +306,21 @@ standard_header! {
     // more details on [mdn]<https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Content_negotiation>
 
     /// Informs the server about the types of data that can be sent back.
-    pub const ACCEPT: HeaderName = "accept";
+    pub const ACCEPT: HeaderName = "accept", hpack_idx: 19;
 
     /// The "Accept-Charset" header field can be sent by a user agent to indicate its preferences
     /// for charsets in textual response content.
-    pub const ACCEPT_CHARSET: HeaderName = "accept-charset";
+    pub const ACCEPT_CHARSET: HeaderName = "accept-charset", hpack_idx: 15;
 
     /// The encoding algorithm, usually a compression algorithm, that can be used on the resource
     /// sent back.
-    pub const ACCEPT_ENCODING: HeaderName = "accept-encoding";
+    pub const ACCEPT_ENCODING: HeaderName = "accept-encoding", hpack_idx: 16;
 
     /// Informs the server about the human language the server is expected to send back. This is a
     /// hint and is not necessarily under the full control of the user: the server should always
     /// pay attention not to override an explicit user choice (like selecting a language from a
     /// dropdown).
-    pub const ACCEPT_LANGUAGE: HeaderName = "accept-language";
+    pub const ACCEPT_LANGUAGE: HeaderName = "accept-language", hpack_idx: 17;
 
     /// A request content negotiation response header that advertises which media type the server
     /// is able to understand in a PATCH request.
@@ -323,19 +334,19 @@ standard_header! {
 
     /// Indicates expectations that need to be fulfilled by the server to properly handle the
     /// request.
-    pub const EXPECT: HeaderName = "expect";
+    pub const EXPECT: HeaderName = "expect", hpack_idx: 35;
 
     /// When using TRACE, indicates the maximum number of hops the request can do before being
     /// reflected to the sender.
-    pub const MAX_FORWARDS: HeaderName = "max-forwards";
+    pub const MAX_FORWARDS: HeaderName = "max-forwards", hpack_idx: 47;
 
     // ===== Cookies =====
 
     /// Contains stored HTTP cookies previously sent by the server with the Set-Cookie header.
-    pub const COOKIE: HeaderName = "cookie";
+    pub const COOKIE: HeaderName = "cookie", hpack_idx: 32;
 
     /// Send cookies from the server to the user-agent.
-    pub const SET_COOKIE: HeaderName = "set-cookie";
+    pub const SET_COOKIE: HeaderName = "set-cookie", hpack_idx: 55;
 
     // ===== CORS =====
     // more details on [mdn]<https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS>
@@ -353,7 +364,7 @@ standard_header! {
     pub const ACCESS_CONTROL_ALLOW_METHODS: HeaderName = "access-control-allow-methods";
 
     /// Indicates whether the response can be shared.
-    pub const ACCESS_CONTROL_ALLOW_ORIGIN: HeaderName = "access-control-allow-origin";
+    pub const ACCESS_CONTROL_ALLOW_ORIGIN: HeaderName = "access-control-allow-origin", hpack_idx: 20;
 
     /// Indicates which headers can be exposed as part of the response by listing their names.
     pub const ACCESS_CONTROL_EXPOSE_HEADERS: HeaderName = "access-control-expose-headers";
@@ -382,25 +393,25 @@ standard_header! {
     /// Indicates if the resource transmitted should be displayed inline (default behavior without
     /// the header), or if it should be handled like a download and the browser should present a
     /// "Save As" dialog.
-    pub const CONTENT_DISPOSITION: HeaderName = "content-disposition";
+    pub const CONTENT_DISPOSITION: HeaderName = "content-disposition", hpack_idx: 25;
 
     // ===== Message body information =====
 
     /// The size of the resource, in decimal number of bytes.
-    pub const CONTENT_LENGTH: HeaderName = "content-length";
+    pub const CONTENT_LENGTH: HeaderName = "content-length", hpack_idx: 28;
 
     /// Indicates the media type of the resource.
-    pub const CONTENT_TYPE: HeaderName = "content-type";
+    pub const CONTENT_TYPE: HeaderName = "content-type", hpack_idx: 31;
 
     /// Used to specify the compression algorithm.
-    pub const CONTENT_ENCODING: HeaderName = "content-encoding";
+    pub const CONTENT_ENCODING: HeaderName = "content-encoding", hpack_idx: 26;
 
     /// Describes the human language(s) intended for the audience, so that it allows a user to
     /// differentiate according to the users' own preferred language.
-    pub const CONTENT_LANGUAGE: HeaderName = "content-language";
+    pub const CONTENT_LANGUAGE: HeaderName = "content-language", hpack_idx: 27;
 
     /// Indicates an alternate location for the returned data.
-    pub const CONTENT_LOCATION: HeaderName = "content-location";
+    pub const CONTENT_LOCATION: HeaderName = "content-location", hpack_idx: 29;
 
     // ===== Preferences =====
 
@@ -421,51 +432,51 @@ standard_header! {
 
     /// Added by proxies, both forward and reverse proxies, and can appear in the request headers
     /// and the response headers.
-    pub const VIA: HeaderName = "via";
+    pub const VIA: HeaderName = "via", hpack_idx: 60;
 
     // ===== Range requests =====
 
     /// Indicates if the server supports range requests, and if so in which unit the range can be
     /// expressed.
-    pub const ACCEPT_RANGES: HeaderName = "accept-ranges";
+    pub const ACCEPT_RANGES: HeaderName = "accept-ranges", hpack_idx: 18;
 
     /// Indicates the part of a document that the server should return.
-    pub const RANGE: HeaderName = "range";
+    pub const RANGE: HeaderName = "range", hpack_idx: 50;
 
     /// Creates a conditional range request that is only fulfilled if the given etag or date
     /// matches the remote resource. Used to prevent downloading two ranges from incompatible
     /// version of the resource.
-    pub const IF_RANGE: HeaderName = "if-range";
+    pub const IF_RANGE: HeaderName = "if-range", hpack_idx: 42;
 
     /// Indicates where in a full body message a partial message belongs.
-    pub const CONTENT_RANGE: HeaderName = "content-range";
+    pub const CONTENT_RANGE: HeaderName = "content-range", hpack_idx: 30;
 
     // ===== Redirects =====
 
     /// Indicates the URL to redirect a page to.
-    pub const LOCATION: HeaderName = "location";
+    pub const LOCATION: HeaderName = "location", hpack_idx: 46;
 
     /// Directs the browser to reload the page or redirect to another. Takes the same value as the
     /// meta element with http-equiv="refresh".
-    pub const REFRESH: HeaderName = "refresh";
+    pub const REFRESH: HeaderName = "refresh", hpack_idx: 52;
 
     // ===== Web Linking =====
 
     /// The HTTP Link header provides a means for serializing one or more links in HTTP headers.
-    pub const LINK: HeaderName = "link";
+    pub const LINK: HeaderName = "link", hpack_idx: 45;
 
     // ===== Request context =====
 
     /// Contains an Internet email address for a human user who controls the requesting user agent.
-    pub const FROM: HeaderName = "from";
+    pub const FROM: HeaderName = "from", hpack_idx: 37;
 
     /// Specifies the domain name of the server (for virtual hosting), and (optionally) the TCP
     /// port number on which the server is listening.
-    pub const HOST: HeaderName = "host";
+    pub const HOST: HeaderName = "host", hpack_idx: 38;
 
     /// The address of the previous web page from which a link to the currently requested page was
     /// followed.
-    pub const REFERER: HeaderName = "referer";
+    pub const REFERER: HeaderName = "referer", hpack_idx: 51;
 
     /// Governs which referrer information sent in the Referer header should be included with
     /// requests made.
@@ -474,15 +485,15 @@ standard_header! {
     /// Contains a characteristic string that allows the network protocol peers to identify the
     /// application type, operating system, software vendor or software version of the requesting
     /// software user agent.
-    pub const USER_AGENT: HeaderName = "user-agent";
+    pub const USER_AGENT: HeaderName = "user-agent", hpack_idx: 58;
 
     // ===== Response context =====
 
     /// Lists the set of HTTP request methods supported by a resource.
-    pub const ALLOW: HeaderName = "allow";
+    pub const ALLOW: HeaderName = "allow", hpack_idx: 22;
 
     /// Contains information about the software used by the origin server to handle the request.
-    pub const SERVER: HeaderName = "server";
+    pub const SERVER: HeaderName = "server", hpack_idx: 54;
 
     // ===== Security =====
 
@@ -509,7 +520,7 @@ standard_header! {
     pub const PERMISSIONS_POLICY: HeaderName = "permissions-policy";
 
     /// Force communication using HTTPS instead of HTTP.
-    pub const STRICT_TRANSPORT_SECURITY: HeaderName = "strict-transport-security";
+    pub const STRICT_TRANSPORT_SECURITY: HeaderName = "strict-transport-security", hpack_idx: 56;
 
     /// Sends a signal to the server expressing the client's preference for an encrypted and
     /// authenticated response, and that it can successfully handle the upgrade-insecure-requests
@@ -562,7 +573,7 @@ standard_header! {
     // ===== Transfer coding =====
 
     /// Specifies the form of encoding used to safely transfer the resource to the user.
-    pub const TRANSFER_ENCODING: HeaderName = "transfer-encoding";
+    pub const TRANSFER_ENCODING: HeaderName = "transfer-encoding", hpack_idx: 57;
 
     /// Specifies the transfer encodings the user agent is willing to accept.
     pub const TE: HeaderName = "te";
@@ -598,10 +609,10 @@ standard_header! {
     // ===== Other =====
 
     /// Contains the date and time at which the message was originated.
-    pub const DATE: HeaderName = "date";
+    pub const DATE: HeaderName = "date", hpack_idx: 33;
 
     /// Indicates how long the user agent should wait before making a follow-up request.
-    pub const RETRY_AFTER: HeaderName = "retry-after";
+    pub const RETRY_AFTER: HeaderName = "retry-after", hpack_idx: 53;
 
     /// Communicates one or more metrics and descriptions for the given request-response cycle.
     pub const SERVER_TIMING: HeaderName = "server-timing";
@@ -628,10 +639,15 @@ standard_header! {
 // ===== Macros =====
 
 macro_rules! standard_header {
+    (@HPACK_IDX , hpack_idx: $idx:literal) => {std::num::NonZeroU8::new($idx)};
+    (@HPACK_IDX) => {None};
+
+    // ===== CORE =====
+
     (@CORE
         $(
             $(#[$doc:meta])*
-            $vis:vis const $id:ident: $t:ty = $name:literal;
+            $vis:vis const $id:ident: $t:ty = $name:literal $(, $k:ident:$v:expr)*;
         )*
     ) => {
         $(
@@ -640,6 +656,7 @@ macro_rules! standard_header {
                 static $id: Static = Static {
                     string: $name,
                     hash: matches::hash_32($name.as_bytes()),
+                    hpack_idx: standard_header! { @HPACK_IDX $(, $k:$v)* },
                 };
 
                 HeaderName {

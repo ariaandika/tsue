@@ -406,6 +406,15 @@ static STATIC_HEADER: [(HeaderName, Option<HeaderValue>); 61] = [
 ];
 
 #[test]
+fn test_hpack_static_idx() {
+    for (name, _) in &STATIC_HEADER {
+        let idx = name.hpack_idx().unwrap();
+        let (name2, _) = &STATIC_HEADER[(idx.get() - 1) as usize];
+        assert_eq!(name, name2);
+    }
+}
+
+#[test]
 fn test_hpack_int() -> Result<(), Box<dyn std::error::Error>> {
     let mut bytes = Bytes::copy_from_slice(&[
         0b0001_1111,
