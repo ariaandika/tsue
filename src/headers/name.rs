@@ -297,6 +297,10 @@ standard_header! {
     /// Informs the server about the types of data that can be sent back.
     pub const ACCEPT: HeaderName = "accept";
 
+    /// The "Accept-Charset" header field can be sent by a user agent to indicate its preferences
+    /// for charsets in textual response content.
+    pub const ACCEPT_CHARSET: HeaderName = "accept-charset";
+
     /// The encoding algorithm, usually a compression algorithm, that can be used on the resource
     /// sent back.
     pub const ACCEPT_ENCODING: HeaderName = "accept-encoding";
@@ -444,6 +448,11 @@ standard_header! {
     /// Directs the browser to reload the page or redirect to another. Takes the same value as the
     /// meta element with http-equiv="refresh".
     pub const REFRESH: HeaderName = "refresh";
+
+    // ===== Web Linking =====
+
+    /// The HTTP Link header provides a means for serializing one or more links in HTTP headers.
+    pub const LINK: HeaderName = "link";
 
     // ===== Request context =====
 
