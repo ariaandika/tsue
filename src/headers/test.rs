@@ -15,17 +15,17 @@ const _: () = {
 fn header_map() {
     let mut map = HeaderMap::new();
 
-    map.insert("content-type", HeaderValue::from_string("FOO"));
+    map.insert("content-type", HeaderValue::from_static(b"FOO"));
     assert!(map.contains_key("content-type"));
 
     let cap = map.capacity();
 
-    assert!(map.insert("accept", HeaderValue::from_string("BAR")).is_none());
-    assert!(map.insert("content-length", HeaderValue::from_string("LEN")).is_none());
-    assert!(map.insert("host", HeaderValue::from_string("BAR")).is_none());
-    assert!(map.insert("date", HeaderValue::from_string("BAR")).is_none());
-    assert!(map.insert("referer", HeaderValue::from_string("BAR")).is_none());
-    assert!(map.insert("rim", HeaderValue::from_string("BAR")).is_none());
+    assert!(map.insert("accept", HeaderValue::from_static(b"BAR")).is_none());
+    assert!(map.insert("content-length", HeaderValue::from_static(b"LEN")).is_none());
+    assert!(map.insert("host", HeaderValue::from_static(b"BAR")).is_none());
+    assert!(map.insert("date", HeaderValue::from_static(b"BAR")).is_none());
+    assert!(map.insert("referer", HeaderValue::from_static(b"BAR")).is_none());
+    assert!(map.insert("rim", HeaderValue::from_static(b"BAR")).is_none());
 
     assert!(map.contains_key("content-type"));
     assert!(map.contains_key("accept"));
@@ -37,7 +37,7 @@ fn header_map() {
 
     // Insert Allocate
 
-    assert!(map.insert("lea", HeaderValue::from_string("BAR")).is_none());
+    assert!(map.insert("lea", HeaderValue::from_static(b"BAR")).is_none());
 
     // assert_ne!(ptr, map.fields.as_ptr());
     assert_ne!(cap, map.capacity());
@@ -53,7 +53,7 @@ fn header_map() {
 
     // Insert Multi
 
-    map.append("content-length", HeaderValue::from_string("BAR"));
+    map.append("content-length", HeaderValue::from_static(b"BAR"));
 
     assert!(map.contains_key("content-length"));
     assert!(map.contains_key("host"));

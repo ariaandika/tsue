@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use tcio::bytes::{ByteStr, Bytes};
+use tcio::bytes::Bytes;
 
 use crate::headers::matches;
 use crate::headers::error::HeaderError;
@@ -55,22 +55,6 @@ impl HeaderValue {
                 bytes: Bytes::copy_from_slice(name.as_ref()),
             }),
             Err(err) => Err(err),
-        }
-    }
-
-    /// Parse [`HeaderValue`] from string.
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if header contains invalid character.
-    ///
-    /// [`to_str`]: HeaderValue::to_str
-    /// [`as_str`]: HeaderValue::as_str
-    #[inline]
-    pub fn from_string<S: Into<ByteStr>>(value: S) -> HeaderValue {
-        match Self::from_bytes(ByteStr::into_bytes(value.into())) {
-            Ok(value) => value,
-            Err(err) => err.panic_const(),
         }
     }
 
