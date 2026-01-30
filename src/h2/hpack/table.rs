@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
-use tcio::bytes::{Buf, Bytes, BytesMut};
+use tcio::bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::h2::hpack::huffman::{self, HuffmanError};
 use crate::headers::error::HeaderError;
@@ -251,7 +251,6 @@ use {decode_int};
 fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
     let mut shift = 0;
     let mut value = 0;
-
     loop {
         let prefix = bytes.try_get_u8().ok_or(DecodeError::Incomplete)?;
         let u7 = prefix & U7;
@@ -265,6 +264,32 @@ fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
     }
 
     Ok(value)
+}
+
+macro_rules! encode_int {
+    (
+        $int:ident, $buffer:expr, $value:expr $(, | $mask:expr)?
+    ) => {
+        const MAX: u8 = $int >> 1;
+
+        let value = $value;
+        if value < MAX as usize {
+            $buffer.put_u8((value as u8) $(| $mask:expr)?);
+        } else {
+            $buffer.put_u8($int $(| $mask:expr)?);
+            continue_encode_int(value - $int as usize, $buffer);
+        };
+    };
+}
+
+use {encode_int};
+
+fn continue_encode_int(mut value: usize, bytes: &mut BytesMut) {
+    while value > 127 {
+        bytes.put_u8(value as u8 | MSB);
+        value >>= 7;
+    }
+    bytes.put_u8(value as u8);
 }
 
 fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes, DecodeError> {
@@ -415,7 +440,7 @@ fn test_hpack_static_idx() {
 }
 
 #[test]
-fn test_hpack_int() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hpack_decode_int() -> Result<(), Box<dyn std::error::Error>> {
     let mut bytes = Bytes::copy_from_slice(&[
         0b0001_1111,
         0b1001_1010,
@@ -429,7 +454,18 @@ fn test_hpack_int() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_hpack_int2() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hpack_encode_int() -> Result<(), Box<dyn std::error::Error>> {
+    let mut buffer = BytesMut::new();
+    encode_int!(U5, &mut buffer, 1337usize);
+    assert_eq!(
+        buffer.as_slice(),
+        &[0b0001_1111, 0b1001_1010, 0b0000_1010,][..]
+    );
+    Ok(())
+}
+
+#[test]
+fn test_hpack_decode_int2() -> Result<(), Box<dyn std::error::Error>> {
     let mut bytes = Bytes::copy_from_slice(&[
         0b0001_1111,
         0b0000_0000,
@@ -438,5 +474,16 @@ fn test_hpack_int2() -> Result<(), Box<dyn std::error::Error>> {
     let int = decode_int!(U5, prefix, &mut bytes);
     assert!(bytes.is_empty());
     assert_eq!(int, 31);
+    Ok(())
+}
+
+#[test]
+fn test_hpack_encode_int2() -> Result<(), Box<dyn std::error::Error>> {
+    let mut buffer = BytesMut::new();
+    encode_int!(U5, &mut buffer, 31usize);
+    assert_eq!(
+        buffer.as_slice(),
+        &[0b0001_1111, 0b0000_0000][..]
+    );
     Ok(())
 }
