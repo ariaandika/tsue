@@ -1,13 +1,7 @@
-use std::fmt;
 use tcio::bytes::Bytes;
 
-use super::matches;
-
-// ===== Sections =====
-// Parser
-// Standard Header
-// Error [`HeaderNameError`]
-
+use crate::headers::matches;
+use crate::headers::error::HeaderError;
 
 /// HTTP Header name.
 ///
@@ -75,7 +69,7 @@ impl HeaderName {
     /// Returns error if the input is not a valid header name or contains ASCII uppercase
     /// characters.
     #[inline]
-    pub fn from_bytes_lowercase<B: Into<Bytes>>(name: B) -> Result<Self, HeaderNameError> {
+    pub fn from_bytes_lowercase<B: Into<Bytes>>(name: B) -> Result<Self, HeaderError> {
         let name = name.into();
         match validate_header_name_lowercase(name.as_slice()) {
             Ok(()) => Ok(Self {
@@ -93,7 +87,7 @@ impl HeaderName {
     ///
     /// Returns error if the input is not a valid header name.
     #[inline]
-    pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderNameError> {
+    pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
         copy_as_header_name(name.as_ref())
     }
 
@@ -136,28 +130,28 @@ const MAX_HEADER_NAME_LEN: usize = 1 << 10;  // 1KB
 
 /// token       = 1*tchar
 /// field-name  = token
-const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderNameError> {
-    use HeaderNameError as Error;
+const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderError> {
+    use HeaderError as E;
 
     if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
-        return Err(Error::invalid_len(bytes.len()));
+        return Err(E::invalid_len(bytes.len()));
     }
     while let [byte, rest @ ..] = bytes {
         if matches::is_token_lowercase(*byte) {
             bytes = rest;
         } else {
-            return Err(Error::Invalid)
+            return Err(E::Invalid)
         }
     }
 
     Ok(())
 }
 
-fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderNameError> {
-    use HeaderNameError as Error;
+fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
+    use HeaderError as E;
 
     if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
-        return Err(Error::invalid_len(bytes.len()));
+        return Err(E::invalid_len(bytes.len()));
     }
     let mut result = 0;
     let mut name = vec![0; bytes.len()];
@@ -173,7 +167,7 @@ fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderNameError> {
         0 => Ok(HeaderName {
                 repr: Repr::Arbitrary(name.into()),
             }),
-        _ => Err(Error::Invalid),
+        _ => Err(E::Invalid),
     }
 }
 
@@ -189,9 +183,7 @@ impl std::fmt::Display for HeaderName {
 impl std::fmt::Debug for HeaderName {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HeaderName")
-            .field("name", &self.as_str())
-            .finish()
+        f.debug_tuple("HeaderName").field(&self.as_str()).finish()
     }
 }
 
@@ -664,46 +656,3 @@ macro_rules! standard_header {
 }
 
 use standard_header;
-
-// ===== Error =====
-
-/// An error that can occur when parsing [`HeaderName`].
-#[derive(Debug)]
-pub enum HeaderNameError {
-    /// Header name empty.
-    Empty,
-    /// Header name too long.
-    TooLong,
-    /// Header name contains invalid character.
-    Invalid,
-}
-
-impl HeaderNameError {
-    pub(crate) const fn message(&self) -> &'static str {
-        match self {
-            Self::Empty => "cannot be empty",
-            Self::TooLong => "too long",
-            Self::Invalid => "invalid name",
-        }
-    }
-
-    const fn invalid_len(len: usize) -> Self {
-        match len {
-            0 => Self::Empty,
-            _ => Self::TooLong,
-        }
-    }
-
-    const fn panic_const(self) -> ! {
-        panic!("{}",self.message())
-    }
-}
-
-impl std::error::Error for HeaderNameError { }
-
-impl fmt::Display for HeaderNameError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.message())
-    }
-}
-

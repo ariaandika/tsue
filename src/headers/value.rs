@@ -1,8 +1,8 @@
-use std::fmt;
 use std::str::FromStr;
 use tcio::bytes::{ByteStr, Bytes};
 
 use crate::headers::matches;
+use crate::headers::error::HeaderError;
 
 /// HTTP Header Value.
 ///
@@ -35,7 +35,7 @@ impl HeaderValue {
     ///
     /// Returns error if the input is not a valid header value.
     #[inline]
-    pub fn from_bytes<B: Into<Bytes>>(name: B) -> Result<Self, HeaderValueError> {
+    pub fn from_bytes<B: Into<Bytes>>(name: B) -> Result<Self, HeaderError> {
         let bytes = name.into();
         match validate_header_value(bytes.as_slice()) {
             Ok(()) => Ok(Self { bytes }),
@@ -49,7 +49,7 @@ impl HeaderValue {
     ///
     /// Returns error if the input is not a valid header value.
     #[inline]
-    pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderValueError> {
+    pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
         match validate_header_value(name.as_ref()) {
             Ok(()) => Ok(Self {
                 bytes: Bytes::copy_from_slice(name.as_ref()),
@@ -92,27 +92,27 @@ impl HeaderValue {
 
 const MAX_HEADER_VALUE_LEN: usize = 1 << 13;  // 8KB
 
-const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderValueError> {
-    use HeaderValueError as Error;
+const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderError> {
+    use HeaderError as E;
     match bytes {
         // no leading SP / HTAB
         | [b' ' | b'\t', ..]
         // no trailing SP / HTAB
         | [.., b' ' | b'\t'] => {
-            return Err(Error::Invalid);
+            return Err(E::Invalid);
         },
         _ => {}
     }
     // too long
     if bytes.len() > MAX_HEADER_VALUE_LEN {
-        return Err(Error::TooLong);
+        return Err(E::TooLong);
     }
     let mut error = false;
     while let [byte, rest @ ..] = bytes {
         error |= !matches::is_header_value(*byte);
         bytes = rest;
     }
-    if !error { Ok(()) } else { Err(Error::Invalid) }
+    if !error { Ok(()) } else { Err(E::Invalid) }
 }
 
 // ===== Traits =====
@@ -124,7 +124,7 @@ impl std::fmt::Debug for HeaderValue {
 }
 
 impl FromStr for HeaderValue {
-    type Err = HeaderValueError;
+    type Err = HeaderError;
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -164,37 +164,5 @@ impl From<HeaderValue> for Bytes {
     #[inline]
     fn from(value: HeaderValue) -> Self {
         value.bytes
-    }
-}
-
-// ===== Error =====
-
-/// An error that can occur when parsing [`HeaderValue`].
-#[derive(Debug)]
-pub enum HeaderValueError {
-    /// Header value too long.
-    TooLong,
-    /// Header value contains invalid character.
-    Invalid,
-}
-
-impl HeaderValueError {
-    pub(crate) const fn message(&self) -> &'static str {
-        match self {
-            Self::TooLong => "too long",
-            Self::Invalid => "invalid value",
-        }
-    }
-
-    const fn panic_const(self) -> ! {
-        panic!("{}",self.message())
-    }
-}
-
-impl std::error::Error for HeaderValueError { }
-
-impl fmt::Display for HeaderValueError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.message())
     }
 }

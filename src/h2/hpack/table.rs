@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 use tcio::bytes::{Buf, Bytes, BytesMut};
 
 use crate::h2::hpack::huffman::{self, HuffmanError};
-use crate::headers::error::{HeaderNameError, HeaderValueError};
+use crate::headers::error::HeaderError;
 use crate::headers::{HeaderMap, standard};
 use crate::headers::{HeaderName, HeaderValue};
 
@@ -12,6 +12,39 @@ const U7: u8 = 0b0111_1111;
 const U6: u8 = 0b0011_1111;
 const U5: u8 = 0b0001_1111;
 const U4: u8 = 0b0000_1111;
+
+//   0   1   2   3   4   5   6   7
+// +---+---+---+---+---+---+---+---+
+// | 1 |        Index (7+)         |
+// +---+---------------------------+
+const INDEXED: u8 = 0b1000_0000;
+const INDEXED_INT: u8 = U7;
+// +---+---+---+---+---+---+---+---+
+// | 0 | 1 |      Index (6+)       |
+// +---+---+-----------------------+
+const LITERAL_INDEXED: u8 = 0b0100_0000;
+const LITERAL_INDEXED_INT: u8 = U6;
+// +---+---+---+---+---+---+---+---+
+// | 0 | 0 | 1 |   Max size (5+)   |
+// +---+---------------------------+
+const SIZE_UPDATE: u8 = 0b0010_0000;
+const SIZE_UPDATE_MASK: u8 = 0b1110_0000;
+const SIZE_UPDATE_INT: u8 = U5;
+
+// === Literal without indexing ====
+// +---+---+---+---+---+---+---+---+
+// | 0 | 0 | 0 | 0 |  Index (4+)   |
+// +---+---+-----------------------+
+// ===== Literal never indexed =====
+// +---+---+---+---+---+---+---+---+
+// | 0 | 0 | 0 | 1 |  Index (4+)   |
+// +---+---+-----------------------+
+// const LITERAL_NINDEX: u8 = 0b0001_0000;
+const LITERAL_NINDEX_INT: u8 = U4;
+
+/// 0bx1xx_xxxx = literal with indexed
+/// 0bx0xx_xxxx = literal without/never indexed
+const LITERAL_IS_INDEXED_MASK: u8 = 0b0100_0000;
 
 /// HPACK Table.
 #[derive(Debug)]
@@ -89,13 +122,6 @@ impl Table {
         maps: &mut HeaderMap,
         write_buffer: &mut BytesMut,
     ) -> Result<(), DecodeError> {
-        // +---+---+---+---+---+---+---+---+
-        // | 0 | 0 | 1 |   Max size (5+)   |
-        // +---+---------------------------+
-        const SIZE_UPDATE: u8 = 0b0010_0000;
-        const SIZE_UPDATE_MASK: u8 = 0b1110_0000;
-        const SIZE_UPDATE_INT: u8 = U5;
-
         let Some(prefix) = block.first() else {
             return Ok(());
         };
@@ -103,7 +129,7 @@ impl Table {
         // following the change to the dynamic table size.
         if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
             let prefix = block.get_u8();
-            let max_size = parse_int!(SIZE_UPDATE_INT, prefix, &mut block);
+            let max_size = decode_int!(SIZE_UPDATE_INT, prefix, &mut block);
             self.update_size(max_size);
         }
 
@@ -121,38 +147,6 @@ impl Table {
     ) -> Result<(HeaderName, HeaderValue), DecodeError> {
         use DecodeError as E;
 
-        //   0   1   2   3   4   5   6   7
-        // +---+---+---+---+---+---+---+---+
-        // | 1 |        Index (7+)         |
-        // +---+---------------------------+
-        const INDEXED: u8 = 0b1000_0000;
-        const INDEXED_INT: u8 = U7;
-        // +---+---+---+---+---+---+---+---+
-        // | 0 | 1 |      Index (6+)       |
-        // +---+---+-----------------------+
-        const LITERAL_INDEXED: u8 = 0b0100_0000;
-        const LITERAL_INDEXED_INT: u8 = U6;
-        // +---+---+---+---+---+---+---+---+
-        // | 0 | 0 | 1 |   Max size (5+)   |
-        // +---+---------------------------+
-        const SIZE_UPDATE: u8 = 0b0010_0000;
-        // const SIZE_UPDATE_INT: u8 = U5;
-
-        // # Literal without indexing
-        // +---+---+---+---+---+---+---+---+
-        // | 0 | 0 | 0 | 0 |  Index (4+)   |
-        // +---+---+-----------------------+
-        // # Literal never indexed
-        // +---+---+---+---+---+---+---+---+
-        // | 0 | 0 | 0 | 1 |  Index (4+)   |
-        // +---+---+-----------------------+
-        // const LITERAL_NINDEX: u8 = 0b0001_0000;
-        const LITERAL_NINDEX_INT: u8 = U4;
-
-        /// 0bx1xx_xxxx = literal with indexed
-        /// 0bx0xx_xxxx = literal without/never indexed
-        const LITERAL_IS_INDEXED_MASK: u8 = 0b0100_0000;
-
         debug_assert!(write_buffer.is_empty());
 
         let prefix = bytes.try_get_u8().ok_or(E::Incomplete)?;
@@ -160,7 +154,7 @@ impl Table {
         // decoding
 
         let index = if prefix & INDEXED == INDEXED {
-            let index = parse_int!(INDEXED_INT, prefix, bytes)
+            let index = decode_int!(INDEXED_INT, prefix, bytes)
                 .checked_sub(1)
                 .ok_or(E::ZeroIndex)?;
             return match STATIC_HEADER.get(index) {
@@ -174,14 +168,14 @@ impl Table {
                 },
             }
         } else if prefix & LITERAL_INDEXED == LITERAL_INDEXED {
-            parse_int!(LITERAL_INDEXED_INT, prefix, bytes)
+            decode_int!(LITERAL_INDEXED_INT, prefix, bytes)
 
         } else if prefix & SIZE_UPDATE == SIZE_UPDATE {
             return Err(E::InvalidSizeUpdate);
 
         } else {
             // Literal without/never indexed
-            parse_int!(LITERAL_NINDEX_INT, prefix, bytes)
+            decode_int!(LITERAL_NINDEX_INT, prefix, bytes)
         };
 
         // processing
@@ -201,10 +195,10 @@ impl Table {
                 }
             }
             None => {
-                HeaderName::from_bytes_lowercase(parse_string(bytes, write_buffer)?)?
+                HeaderName::from_bytes_lowercase(decode_string(bytes, write_buffer)?)?
             },
         };
-        let value = HeaderValue::from_bytes(parse_string(bytes, write_buffer)?)?;
+        let value = HeaderValue::from_bytes(decode_string(bytes, write_buffer)?)?;
 
         let is_indexed = prefix & LITERAL_IS_INDEXED_MASK == LITERAL_IS_INDEXED_MASK;
         if is_indexed {
@@ -241,20 +235,20 @@ impl Default for Table {
     }
 }
 
-macro_rules! parse_int {
+macro_rules! decode_int {
     ($int:expr, $prefix:expr, $bytes:expr) => {{
         let int = ($prefix & $int);
         if int != $int {
             int as usize
         } else {
-            (int as usize) + continue_parse_int($bytes)?
+            (int as usize) + continue_decode_int($bytes)?
         }
     }};
 }
 
-use {parse_int};
+use {decode_int};
 
-fn continue_parse_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
+fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
     let mut shift = 0;
     let mut value = 0;
 
@@ -273,7 +267,7 @@ fn continue_parse_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
     Ok(value)
 }
 
-fn parse_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes, DecodeError> {
+fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes, DecodeError> {
     //   0   1   2   3   4   5   6   7
     // +---+---+---+---+---+---+---+---+
     // | H |    String Length (7+)     |
@@ -282,7 +276,7 @@ fn parse_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes,
     // +-------------------------------+
     let prefix = bytes.try_get_u8().ok_or(DecodeError::Incomplete)?;
 
-    let len = parse_int!(U7, prefix, bytes);
+    let len = decode_int!(U7, prefix, bytes);
     let Some(value) = bytes.get(..len) else {
         return Err(DecodeError::Incomplete);
     };
@@ -335,14 +329,8 @@ impl std::fmt::Display for DecodeError {
     }
 }
 
-impl From<HeaderNameError> for DecodeError {
-    fn from(_: HeaderNameError) -> Self {
-        Self::InvalidHeader
-    }
-}
-
-impl From<HeaderValueError> for DecodeError {
-    fn from(_: HeaderValueError) -> Self {
+impl From<HeaderError> for DecodeError {
+    fn from(_: HeaderError) -> Self {
         Self::InvalidHeader
     }
 }
@@ -425,7 +413,7 @@ fn test_hpack_int() -> Result<(), Box<dyn std::error::Error>> {
         0b0000_1010,
     ]);
     let prefix = bytes.get_u8();
-    let int = parse_int!(U5, prefix, &mut bytes);
+    let int = decode_int!(U5, prefix, &mut bytes);
     assert!(bytes.is_empty());
     assert_eq!(int, 1337);
     Ok(())
@@ -438,7 +426,7 @@ fn test_hpack_int2() -> Result<(), Box<dyn std::error::Error>> {
         0b0000_0000,
     ]);
     let prefix = bytes.get_u8();
-    let int = parse_int!(U5, prefix, &mut bytes);
+    let int = decode_int!(U5, prefix, &mut bytes);
     assert!(bytes.is_empty());
     assert_eq!(int, 31);
     Ok(())

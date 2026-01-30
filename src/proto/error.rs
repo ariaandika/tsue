@@ -1,4 +1,4 @@
-use crate::headers::error::{HeaderError, HeaderNameError, HeaderValueError};
+use crate::headers::error::HeaderError;
 use crate::uri::UriError;
 
 // ===== Parsing Error =====W
@@ -114,19 +114,5 @@ impl From<HeaderError> for ProtoError {
     #[inline]
     fn from(value: HeaderError) -> Self {
         Self::HeaderError(value)
-    }
-}
-
-impl From<HeaderNameError> for ProtoError {
-    #[inline]
-    fn from(value: HeaderNameError) -> Self {
-        Self::HeaderError(value.into())
-    }
-}
-
-impl From<HeaderValueError> for ProtoError {
-    #[inline]
-    fn from(value: HeaderValueError) -> Self {
-        Self::HeaderError(value.into())
     }
 }

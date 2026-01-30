@@ -1,44 +1,41 @@
 //! Error types that can occur during header related operation.
-pub use crate::headers::name::HeaderNameError;
-pub use crate::headers::value::HeaderValueError;
 
 /// An error that can occur in header related operations.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HeaderError {
-    /// Header name parsing error.
-    Name(HeaderNameError),
-    /// Header value parsing error.
-    Value(HeaderValueError),
+    /// Bytes is empty.
+    Empty,
+    /// Bytes too long.
+    TooLong,
+    /// Bytes contains invalid character.
+    Invalid,
 }
 
 impl HeaderError {
-    pub(crate) const fn message(&self) -> &'static str {
-        match self {
-            Self::Name(err) => err.message(),
-            Self::Value(err) => err.message(),
+    pub(crate) const fn invalid_len(len: usize) -> Self {
+        match len {
+            0 => Self::Empty,
+            _ => Self::TooLong,
         }
     }
-}
 
-impl From<HeaderNameError> for HeaderError {
-    #[inline]
-    fn from(v: HeaderNameError) -> Self {
-        Self::Name(v)
+    pub(crate) const fn message(&self) -> &'static str {
+        match self {
+            Self::Empty => "header cannot be empty",
+            Self::TooLong => "header too long",
+            Self::Invalid => "header contains invalid byte",
+        }
     }
-}
 
-impl From<HeaderValueError> for HeaderError {
-    #[inline]
-    fn from(v: HeaderValueError) -> Self {
-        Self::Value(v)
+    pub(crate) const fn panic_const(self) -> ! {
+        panic!("{}",self.message())
     }
 }
 
 impl std::error::Error for HeaderError {}
-
 impl std::fmt::Display for HeaderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.message().fmt(f)
+        f.write_str(self.message())
     }
 }
 
