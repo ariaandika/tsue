@@ -33,7 +33,7 @@ pub struct Connection<IO> {
     write_buffer: BytesMut,
     phase: Phase,
     settings: Settings,
-    hpack: hpack::Table,
+    decoder: hpack::Decoder,
 }
 
 type ConnectionProject<'a, IO> = (
@@ -42,7 +42,7 @@ type ConnectionProject<'a, IO> = (
     &'a mut BytesMut,
     Pin<&'a mut Phase>,
     &'a mut Settings,
-    &'a mut hpack::Table,
+    &'a mut hpack::Decoder,
 );
 
 #[derive(Debug)]
@@ -64,7 +64,7 @@ impl<IO> Connection<IO> {
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             phase: Phase::Preface,
             settings: Settings::new(),
-            hpack: hpack::Table::default(),
+            decoder: hpack::Decoder::default(),
         }
     }
 
@@ -199,7 +199,7 @@ impl<IO> Connection<IO> {
                 &mut me.write_buffer,
                 Pin::new_unchecked(&mut me.phase),
                 &mut me.settings,
-                &mut me.hpack,
+                &mut me.decoder,
             )
         }
     }

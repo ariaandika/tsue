@@ -1,6 +1,6 @@
 use tcio::bytes::{Bytes, BytesMut};
 
-use crate::h2::hpack::Table;
+use crate::h2::hpack::Decoder;
 use crate::headers::{HeaderMap, HeaderName, standard};
 
 macro_rules! field_eq {
@@ -18,15 +18,15 @@ macro_rules! field_eq {
 
 /// https://httpwg.org/specs/rfc7541.html#n-literal-header-field-with-indexing
 #[test]
-fn test_literal_header_field_with_indexing() {
-    let mut table = Table::default();
+fn test_decode_literal_header_field_with_indexing() {
+    let mut table = Decoder::default();
     let mut write_buffer = BytesMut::new();
     let mut bytes = Bytes::copy_from_slice(&[
         0x40, 0x0a, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b, 0x65, 0x79, 0x0d, 0x63, 0x75,
         0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72,
     ]);
 
-    let field = table.decode_test(&mut bytes, &mut write_buffer).unwrap();
+    let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
     field_eq!(field, "custom-key", "custom-header");
 
     assert_eq!(table.size(), 55);
@@ -38,14 +38,14 @@ fn test_literal_header_field_with_indexing() {
 
 /// https://httpwg.org/specs/rfc7541.html#n-literal-header-field-without-indexing
 #[test]
-fn test_literal_header_field_without_indexing() {
-    let mut table = Table::default();
+fn test_decode_literal_header_field_without_indexing() {
+    let mut table = Decoder::default();
     let mut write_buffer = BytesMut::new();
     let mut bytes = Bytes::copy_from_slice(&[
         0x04, 0x0c, 0x2f, 0x73, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2f, 0x70, 0x61, 0x74, 0x68,
     ]);
 
-    let field = table.decode_test(&mut bytes, &mut write_buffer).unwrap();
+    let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
     field_eq!(field, PSEUDO_PATH, "/sample/path");
 
     assert!(table.fields().is_empty());
@@ -54,15 +54,15 @@ fn test_literal_header_field_without_indexing() {
 
 /// https://httpwg.org/specs/rfc7541.html#n-literal-header-field-never-indexed
 #[test]
-fn test_literal_header_field_never_indexed() {
-    let mut table = Table::default();
+fn test_decode_literal_header_field_never_indexed() {
+    let mut table = Decoder::default();
     let mut write_buffer = BytesMut::new();
     let mut bytes = Bytes::copy_from_slice(&[
         0x10, 0x08, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x06, 0x73, 0x65, 0x63, 0x72,
         0x65, 0x74,
     ]);
 
-    let field = table.decode_test(&mut bytes, &mut write_buffer).unwrap();
+    let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
     field_eq!(field, "password", "secret");
 
     assert!(table.fields().is_empty());
@@ -71,12 +71,12 @@ fn test_literal_header_field_never_indexed() {
 
 /// https://httpwg.org/specs/rfc7541.html#n-literal-header-field-never-indexed
 #[test]
-fn test_indexed_header_field() {
-    let mut table = Table::default();
+fn test_decode_indexed_header_field() {
+    let mut table = Decoder::default();
     let mut write_buffer = BytesMut::new();
     let mut bytes = Bytes::copy_from_slice(&[0x82]);
 
-    let field = table.decode_test(&mut bytes, &mut write_buffer).unwrap();
+    let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
     field_eq!(field, PSEUDO_METHOD, "GET");
 
     assert!(table.fields().is_empty());
@@ -84,7 +84,7 @@ fn test_indexed_header_field() {
 }
 
 #[test]
-fn test_request_without_huffman() {
+fn test_decode_request_without_huffman() {
     const REQ1: [u8; 20] = [
         0x82, 0x86, 0x84, 0x41, 0x0f, 0x77, 0x77, 0x77, 0x2e, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c,
         0x65, 0x2e, 0x63, 0x6f, 0x6d,
@@ -96,11 +96,11 @@ fn test_request_without_huffman() {
         0x82, 0x87, 0x85, 0xbf, 0x40, 0x0a, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b, 0x65,
         0x79, 0x0c, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65,
     ];
-    test_request(&REQ1, &REQ2, &REQ3);
+    test_decode_request(&REQ1, &REQ2, &REQ3);
 }
 
 #[test]
-fn test_request_with_huffman() {
+fn test_decode_request_with_huffman() {
     const REQ1: [u8; 17] = [
         0x82, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90,
         0xf4, 0xff,
@@ -112,11 +112,11 @@ fn test_request_with_huffman() {
         0x82, 0x87, 0x85, 0xbf, 0x40, 0x88, 0x25, 0xa8, 0x49, 0xe9, 0x5b, 0xa9, 0x7d, 0x7f, 0x89,
         0x25, 0xa8, 0x49, 0xe9, 0x5b, 0xb8, 0xe8, 0xb4, 0xbf,
     ];
-    test_request(&REQ1, &REQ2, &REQ3);
+    test_decode_request(&REQ1, &REQ2, &REQ3);
 }
 
-fn test_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
-    let mut table = Table::default();
+fn test_decode_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
+    let mut table = Decoder::default();
     let mut write_buffer = BytesMut::new();
 
     // first request
@@ -198,7 +198,7 @@ fn test_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
 }
 
 #[test]
-fn test_response_without_huffman() {
+fn test_decode_response_without_huffman() {
     const RES1: [u8; 70] = [
         0x48, 0x03, 0x33, 0x30, 0x32, 0x58, 0x07, 0x70, 0x72, 0x69, 0x76, 0x61, 0x74, 0x65, 0x61,
         0x1d, 0x4d, 0x6f, 0x6e, 0x2c, 0x20, 0x32, 0x31, 0x20, 0x4f, 0x63, 0x74, 0x20, 0x32, 0x30,
@@ -216,11 +216,11 @@ fn test_response_without_huffman() {
         0x6d, 0x61, 0x78, 0x2d, 0x61, 0x67, 0x65, 0x3d, 0x33, 0x36, 0x30, 0x30, 0x3b, 0x20, 0x76,
         0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x3d, 0x31,
     ];
-    test_response(&RES1, &RES2, &RES3);
+    test_decode_response(&RES1, &RES2, &RES3);
 }
 
-fn test_response(res1: &[u8], res2: &[u8], res3: &[u8]) {
-    let mut table = Table::new(256);
+fn test_decode_response(res1: &[u8], res2: &[u8], res3: &[u8]) {
+    let mut table = Decoder::new(256);
     let mut write_buffer = BytesMut::new();
 
     // first response

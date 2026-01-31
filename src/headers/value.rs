@@ -29,6 +29,17 @@ impl HeaderValue {
         }
     }
 
+    /// Create `HeaderValue` without validation.
+    ///
+    /// # Safety
+    ///
+    /// The bytes must be valid ASCII.
+    pub(crate) unsafe fn unvalidated_static(bytes: &'static [u8]) -> HeaderValue {
+        Self {
+            bytes: Bytes::from_static(bytes.trim_ascii_start()),
+        }
+    }
+
     /// Parse header value from [`Bytes`].
     ///
     /// # Errors
