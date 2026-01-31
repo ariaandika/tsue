@@ -30,9 +30,9 @@
 //!
 //! // `HeaderMap` is a multimap
 //! let cookie: String = user.cookie();
-//! let cookie_hdr = HeaderValue::from_string(cookie);
+//! let cookie_hdr = HeaderValue::from_slice(cookie).unwrap();
 //! let cookie2: String = user.cookie2();
-//! let cookie2_hdr = HeaderValue::from_string(cookie2);
+//! let cookie2_hdr = HeaderValue::from_slice(cookie2).unwrap();
 //!
 //! // use `append` to have multiple values in the same key
 //! map.append(COOKIE, cookie_hdr.clone());
