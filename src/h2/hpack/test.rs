@@ -26,7 +26,7 @@ fn test_decode_literal_header_field_with_indexing() {
         0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72,
     ]);
 
-    let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+    let field = table.decode_test(&mut bytes, &mut write_buffer).unwrap();
     field_eq!(field, "custom-key", "custom-header");
 
     assert_eq!(table.size(), 55);
@@ -45,7 +45,7 @@ fn test_decode_literal_header_field_without_indexing() {
         0x04, 0x0c, 0x2f, 0x73, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2f, 0x70, 0x61, 0x74, 0x68,
     ]);
 
-    let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+    let field = table.decode_test(&mut bytes, &mut write_buffer).unwrap();
     field_eq!(field, PSEUDO_PATH, "/sample/path");
 
     assert!(table.fields().is_empty());
@@ -62,7 +62,7 @@ fn test_decode_literal_header_field_never_indexed() {
         0x65, 0x74,
     ]);
 
-    let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+    let field = table.decode_test(&mut bytes, &mut write_buffer).unwrap();
     field_eq!(field, "password", "secret");
 
     assert!(table.fields().is_empty());
@@ -76,7 +76,7 @@ fn test_decode_indexed_header_field() {
     let mut write_buffer = BytesMut::new();
     let mut bytes = Bytes::copy_from_slice(&[0x82]);
 
-    let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+    let field = table.decode_test(&mut bytes, &mut write_buffer).unwrap();
     field_eq!(field, PSEUDO_METHOD, "GET");
 
     assert!(table.fields().is_empty());

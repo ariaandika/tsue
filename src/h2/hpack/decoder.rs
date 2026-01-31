@@ -73,14 +73,14 @@ impl Decoder {
         maps: &mut HeaderMap,
         write_buffer: &mut BytesMut,
     ) -> Result<(), DecodeError> {
-        let Some(prefix) = block.first() else {
+        let Some(&prefix) = block.first() else {
             return Ok(());
         };
         // Dynamic table size update MUST occur at the beginning of the first header block
         // following the change to the dynamic table size.
         if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
-            let prefix = block.get_u8();
-            let max_size = decode_int!(SIZE_UPDATE_INT, prefix, &mut block);
+            block.advance(1);
+            let max_size = decode_int::<SIZE_UPDATE_INT>(prefix, &mut block)?;
             self.table.update_size(max_size);
         }
 
@@ -91,21 +91,19 @@ impl Decoder {
         Ok(())
     }
 
-    pub fn decode(
+    fn decode(
         &mut self,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
     ) -> Result<(HeaderName, HeaderValue), DecodeError> {
         use DecodeError as E;
 
-        debug_assert!(write_buffer.is_empty());
-
         let prefix = bytes.try_get_u8().ok_or(E::Incomplete)?;
 
         // decoding
 
         let index = if prefix & INDEXED == INDEXED {
-            let index = decode_int!(INDEXED_INT, prefix, bytes)
+            let index = decode_int::<INDEXED_INT>(prefix, bytes)?
                 .checked_sub(1)
                 .ok_or(E::ZeroIndex)?;
             return match STATIC_HEADER.get(index) {
@@ -119,14 +117,14 @@ impl Decoder {
                 },
             }
         } else if prefix & LITERAL_INDEXED == LITERAL_INDEXED {
-            decode_int!(LITERAL_INDEXED_INT, prefix, bytes)
+            decode_int::<LITERAL_INDEXED_INT>(prefix, bytes)?
 
         } else if prefix & SIZE_UPDATE == SIZE_UPDATE {
             return Err(E::InvalidSizeUpdate);
 
         } else {
             // Literal without/never indexed
-            decode_int!(LITERAL_NINDEX_INT, prefix, bytes)
+            decode_int::<LITERAL_NINDEX_INT>(prefix, bytes)?
         };
 
         // processing
@@ -170,20 +168,24 @@ impl Decoder {
     pub(crate) fn size(&self) -> usize {
         self.table.size()
     }
+
+    pub(crate) fn decode_test(
+        &mut self,
+        bytes: &mut Bytes,
+        write_buffer: &mut BytesMut,
+    ) -> Result<(HeaderName, HeaderValue), DecodeError> {
+        self.decode(bytes, write_buffer)
+    }
 }
 
-macro_rules! decode_int {
-    ($int:expr, $prefix:expr, $bytes:expr) => {{
-        let int = ($prefix & $int);
-        if int != $int {
-            int as usize
-        } else {
-            (int as usize) + continue_decode_int($bytes)?
-        }
-    }};
+fn decode_int<const INT: u8>(prefix: u8, bytes: &mut Bytes) -> Result<usize, DecodeError> {
+    let int = prefix & INT;
+    if int != INT {
+        Ok(int as usize)
+    } else {
+        Ok((int as usize) + continue_decode_int(bytes)?)
+    }
 }
-
-use {decode_int};
 
 fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
     let mut shift = 0;
@@ -212,7 +214,7 @@ fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes
     // +-------------------------------+
     let prefix = bytes.try_get_u8().ok_or(DecodeError::Incomplete)?;
 
-    let len = decode_int!(U7, prefix, bytes);
+    let len = decode_int::<U7>(prefix, bytes)?;
     let Some(value) = bytes.get(..len) else {
         return Err(DecodeError::Incomplete);
     };
@@ -278,28 +280,26 @@ impl From<huffman::HuffmanError> for DecodeError {
 // ===== Test =====
 
 #[test]
-fn test_hpack_decode_int() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hpack_decode_int() {
     let mut bytes = Bytes::copy_from_slice(&[
         0b0001_1111,
         0b1001_1010,
         0b0000_1010,
     ]);
     let prefix = bytes.get_u8();
-    let int = decode_int!(U5, prefix, &mut bytes);
+    let int = decode_int::<U5>(prefix, &mut bytes).unwrap();
     assert!(bytes.is_empty());
     assert_eq!(int, 1337);
-    Ok(())
 }
 
 #[test]
-fn test_hpack_decode_int2() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hpack_decode_int2() {
     let mut bytes = Bytes::copy_from_slice(&[
         0b0001_1111,
         0b0000_0000,
     ]);
     let prefix = bytes.get_u8();
-    let int = decode_int!(U5, prefix, &mut bytes);
+    let int = decode_int::<U5>(prefix, &mut bytes).unwrap();
     assert!(bytes.is_empty());
     assert_eq!(int, 31);
-    Ok(())
 }
