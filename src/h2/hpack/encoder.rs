@@ -8,7 +8,7 @@ use crate::http::{Method, StatusCode};
 const MSB: u8 = 0b1000_0000;
 const U7: u8 = 0b0111_1111;
 const U6: u8 = 0b0011_1111;
-const U5: u8 = 0b0001_1111;
+// const U5: u8 = 0b0001_1111;
 const U4: u8 = 0b0000_1111;
 const IS_HUFFMAN: u8 = MSB;
 
@@ -26,9 +26,9 @@ const LITERAL_INDEXED_INT: u8 = U6;
 // +---+---+---+---+---+---+---+---+
 // | 0 | 0 | 1 |   Max size (5+)   |
 // +---+---------------------------+
-const SIZE_UPDATE: u8 = 0b0010_0000;
-const SIZE_UPDATE_MASK: u8 = 0b1110_0000;
-const SIZE_UPDATE_INT: u8 = U5;
+// const SIZE_UPDATE: u8 = 0b0010_0000;
+// const SIZE_UPDATE_MASK: u8 = 0b1110_0000;
+// const SIZE_UPDATE_INT: u8 = U5;
 
 // === Literal without indexing ====
 // +---+---+---+---+---+---+---+---+
@@ -38,13 +38,9 @@ const SIZE_UPDATE_INT: u8 = U5;
 // +---+---+---+---+---+---+---+---+
 // | 0 | 0 | 0 | 1 |  Index (4+)   |
 // +---+---+-----------------------+
-const LITERAL_NOINDEX: u8 = 0b0000_0000;
-const LITERAL_NEINDEX: u8 = 0b0001_0000;
+// const LITERAL_NOINDEX: u8 = 0b0000_0000;
+// const LITERAL_NEINDEX: u8 = 0b0001_0000;
 const LITERAL_NINDEX_INT: u8 = U4;
-
-/// 0bx1xx_xxxx = literal with indexed
-/// 0bx0xx_xxxx = literal without/never indexed
-const LITERAL_IS_INDEXED_MASK: u8 = 0b0100_0000;
 
 /// 0bxxx0_xxxx = literal without indexed
 /// 0bxxx1_xxxx = literal never indexed
@@ -82,7 +78,7 @@ impl Encoder {
             _ => {
                 // SAFETY: `Method::as_str` is statically valid ASCII
                 let val = unsafe { HeaderValue::unvalidated_static(method.as_str().as_bytes()) };
-                self.encode_header(standard::PSEUDO_METHOD, val.clone(), write_buffer)
+                self.encode_header(standard::PSEUDO_METHOD, val, write_buffer)
             },
         }
     }
@@ -116,7 +112,7 @@ impl Encoder {
         } else {
             // SAFETY: `Status::status_str` is statically valid ASCII
             let val = unsafe { HeaderValue::unvalidated_static(status.status_str().as_bytes()) };
-            self.encode_header(standard::PSEUDO_STATUS, val.clone(), write_buffer);
+            self.encode_header(standard::PSEUDO_STATUS, val, write_buffer);
         }
     }
 
@@ -146,40 +142,38 @@ impl Encoder {
         let is_sensitive = field.is_sensitive();
         let is_large = field_size(name, value) * 4 > self.table.max_size() * 3;
 
-        if is_sensitive | is_large {
+        let (int, repr) = if is_sensitive | is_large {
             // if header is sensitive, use literal never indexed
             let repr = (is_sensitive as u8) << LITERAL_NINDEX_SHIFT;
-            encode_int!(LITERAL_NINDEX_INT, write_buffer, static_index, | repr);
+            (LITERAL_NINDEX_INT, repr)
 
         } else {
             // TODO: optimize hpack dynamic table lookup
             if let Some(i) = self.table.fields().iter().position(|(n,_)|n == name) {
                 // header is indexed in hpack dynamic table,
                 // `+ 1` because HPACK is 1-indexed
-                write_buffer.put_u8((i + STATIC_HEADER.len() + 1) as u8 | INDEXED);
+                encode_int!(INDEXED_INT, write_buffer, i + STATIC_HEADER.len() + 1, | INDEXED);
                 return;
             }
 
             self.table.insert(name.clone(), value.clone());
-            encode_int!(LITERAL_INDEXED_INT, write_buffer, static_index, | LITERAL_INDEXED);
-        }
+            (LITERAL_INDEXED_INT, LITERAL_INDEXED)
+        };
 
+        encode_int!(int, write_buffer, static_index, | repr);
         if static_index == 0 {
             encode_string(name.as_str().as_bytes(), write_buffer);
         }
+
         // value always literal
         encode_string(value.as_bytes(), write_buffer);
     }
 }
 
 macro_rules! encode_int {
-    (
-        $int:ident, $buffer:expr, $value:expr $(, | $mask:expr)?
-    ) => {{
-        const MAX: u8 = $int >> 1;
-
+    ($int:expr, $buffer:expr, $value:expr $(, | $mask:expr)?) => {{
         let value = $value;
-        if value < MAX as usize {
+        if value < $int as usize {
             $buffer.put_u8((value as u8) $(| $mask)?);
         } else {
             $buffer.put_u8($int $(| $mask)?);
@@ -189,15 +183,6 @@ macro_rules! encode_int {
 }
 
 use {encode_int};
-
-// fn one_encode_int<const INT: u8, const MAX: u8>(value: usize, mask: u8, buffer: &mut BytesMut) {
-//     if value < MAX as usize {
-//         buffer.put_u8((value as u8) | mask);
-//     } else {
-//         buffer.put_u8(INT | mask);
-//         continue_encode_int(value - INT as usize, buffer);
-//     };
-// }
 
 fn continue_encode_int(mut value: usize, bytes: &mut BytesMut) {
     while value > 127 {
@@ -224,6 +209,9 @@ fn field_size(name: &HeaderName, val: &HeaderValue) -> usize {
 
 // ===== Test =====
 
+#[cfg(test)]
+const U5: u8 = 0b0001_1111;
+
 #[test]
 fn test_hpack_encode_int() {
     let mut buffer = BytesMut::new();
@@ -241,5 +229,25 @@ fn test_hpack_encode_int2() {
     assert_eq!(
         buffer.as_slice(),
         &[0b0001_1111, 0b0000_0000][..]
+    );
+}
+
+#[test]
+fn test_hpack_encode_int3() {
+    let mut buffer = BytesMut::new();
+    encode_int!(U5, &mut buffer, U5 as usize);
+    assert_eq!(
+        buffer.as_slice(),
+        &[U5, 0][..]
+    );
+}
+
+#[test]
+fn test_hpack_encode_int4() {
+    let mut buffer = BytesMut::new();
+    encode_int!(U5, &mut buffer, (U5 - 1) as usize);
+    assert_eq!(
+        buffer.as_slice(),
+        &[U5 - 1][..]
     );
 }
