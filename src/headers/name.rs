@@ -127,7 +127,7 @@ impl HeaderName {
     /// Returns hpack static header index if any.
     ///
     /// Note that this value only available in constant headers.
-    pub(crate) const fn hpack_idx(&self) -> Option<std::num::NonZero<u8>> {
+    pub(crate) const fn hpack_static(&self) -> Option<std::num::NonZero<u8>> {
         match &self.repr {
             Repr::Static(s) => s.hpack_idx,
             Repr::Arbitrary(_) => None,

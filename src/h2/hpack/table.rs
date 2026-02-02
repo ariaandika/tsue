@@ -44,6 +44,10 @@ impl Table {
         &self.fields
     }
 
+    pub(crate) fn max_size(&self) -> usize {
+        self.max_size
+    }
+
     pub(crate) fn update_size(&mut self, max_size: usize) {
         self.max_size = max_size;
         while self.max_size < self.size {
@@ -163,7 +167,7 @@ fn test_hpack_static_idx() {
     const LITERAL_INDEXED_INT: u8 = 0b0011_1111;
 
     for (name, _) in &STATIC_HEADER {
-        let idx = name.hpack_idx().unwrap();
+        let idx = name.hpack_static().unwrap();
 
         // this allows for single byte int encoding
         assert!(idx.get() < LITERAL_INDEXED_INT);

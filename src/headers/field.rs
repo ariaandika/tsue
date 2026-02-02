@@ -61,6 +61,13 @@ impl HeaderField {
         self.len.get() as _
     }
 
+    /// Returns `true` if header is marked as sensitive.
+    #[inline]
+    pub fn is_sensitive(&self) -> bool {
+        // TODO: add `sensitive` field in `HeaderField`
+        false
+    }
+
     /// Returns an iterator over [`HeaderValue`].
     #[inline]
     pub fn iter(&self) -> GetAll<'_> {

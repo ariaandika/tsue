@@ -2,7 +2,7 @@ use tcio::bytes::{BufMut, BytesMut};
 
 use crate::h2::hpack::table::{Table, STATIC_HEADER};
 use crate::h2::hpack::huffman;
-use crate::headers::{HeaderMap, HeaderName, HeaderValue, standard};
+use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue, standard};
 use crate::http::{Method, StatusCode};
 
 const MSB: u8 = 0b1000_0000;
@@ -38,12 +38,17 @@ const SIZE_UPDATE_INT: u8 = U5;
 // +---+---+---+---+---+---+---+---+
 // | 0 | 0 | 0 | 1 |  Index (4+)   |
 // +---+---+-----------------------+
-// const LITERAL_NINDEX: u8 = 0b0001_0000;
+const LITERAL_NOINDEX: u8 = 0b0000_0000;
+const LITERAL_NEINDEX: u8 = 0b0001_0000;
 const LITERAL_NINDEX_INT: u8 = U4;
 
 /// 0bx1xx_xxxx = literal with indexed
 /// 0bx0xx_xxxx = literal without/never indexed
 const LITERAL_IS_INDEXED_MASK: u8 = 0b0100_0000;
+
+/// 0bxxx0_xxxx = literal without indexed
+/// 0bxxx1_xxxx = literal never indexed
+const LITERAL_NINDEX_SHIFT: u8 = 4;
 
 #[derive(Debug, Default)]
 pub struct Encoder {
@@ -70,13 +75,14 @@ impl Encoder {
     pub fn encode_method(&mut self, method: Method, write_buffer: &mut BytesMut) {
         match method {
             Method::GET | Method::POST => {
-                // `[0 | 1] + 2` because HPACK is 1-indexed
+                // GET  => 2 (0 + 2),
+                // POST => 3 (1 + 2),
                 write_buffer.put_u8(INDEXED | (matches!(method, Method::POST) as u8 + 2));
             }
             _ => {
                 // SAFETY: `Method::as_str` is statically valid ASCII
                 let val = unsafe { HeaderValue::unvalidated_static(method.as_str().as_bytes()) };
-                self.encode_dynamic(&standard::PSEUDO_METHOD, &val, write_buffer)
+                self.encode_header(standard::PSEUDO_METHOD, val.clone(), write_buffer)
             },
         }
     }
@@ -84,7 +90,6 @@ impl Encoder {
     // pub fn encode_path(&mut self, path: &[u8], write_buffer: &mut BytesMut) {
     //     match path {
     //         b"/" | b"/index.html" => {
-    //             // `[0 | 1] + 4` because HPACK is 1-indexed
     //             write_buffer.put_u8(INDEXED | (matches!(path, b"/index.html") as u8 + 4));
     //         },
     //         _ => {
@@ -111,43 +116,66 @@ impl Encoder {
         } else {
             // SAFETY: `Status::status_str` is statically valid ASCII
             let val = unsafe { HeaderValue::unvalidated_static(status.status_str().as_bytes()) };
-            self.encode_dynamic(&standard::PSEUDO_STATUS, &val, write_buffer);
+            self.encode_header(standard::PSEUDO_STATUS, val.clone(), write_buffer);
         }
     }
 
     /// Encode headers in header map.
     ///
-    /// Note that this does not check for static hpack header name and value, use corresponding method
-    /// instead.
+    /// Note that this method skips check for hpack static header with value, use other
+    /// corresponding method instead.
     pub fn encode_map(&mut self, map: &HeaderMap, write_buffer: &mut BytesMut) {
-        for (name, val) in map {
-            self.encode_dynamic(name, val, write_buffer);
+        for field in map.fields().iter().filter_map(|e|e.as_ref()) {
+            self.encode_dynamic(field, write_buffer);
         }
     }
 
-    pub fn encode_dynamic(&mut self, name: &HeaderName, val: &HeaderValue, write_buffer: &mut BytesMut) {
-        match name.hpack_idx() {
-            Some(idx) => {
-                // the highest index is 61,
-                // this allows for single byte int encoding
-                debug_assert!(idx.get() < LITERAL_INDEXED_INT);
+    /// Encode a single header.
+    ///
+    /// Note that this method skips check for hpack static header with value, use other
+    /// corresponding method instead.
+    pub fn encode_header(&mut self, name: HeaderName, val: HeaderValue, write_buffer: &mut BytesMut) {
+        self.encode_dynamic(&HeaderField::new(name, val), write_buffer);
+    }
 
-                let encoded = (idx.get() - 1) | LITERAL_INDEXED;
-                write_buffer.put_u8(encoded);
+    fn encode_dynamic(&mut self, field: &HeaderField, write_buffer: &mut BytesMut) {
+        let name = field.name();
+        let value = field.value();
+        let static_index = name.hpack_static().map(std::num::NonZero::get).unwrap_or(0) as usize;
+
+        let is_sensitive = field.is_sensitive();
+        let is_large = field_size(name, value) * 4 > self.table.max_size() * 3;
+
+        if is_sensitive | is_large {
+            // if header is sensitive, use literal never indexed
+            let repr = (is_sensitive as u8) << LITERAL_NINDEX_SHIFT;
+            encode_int!(LITERAL_NINDEX_INT, write_buffer, static_index, | repr);
+
+        } else {
+            // TODO: optimize hpack dynamic table lookup
+            if let Some(i) = self.table.fields().iter().position(|(n,_)|n == name) {
+                // header is indexed in hpack dynamic table,
+                // `+ 1` because HPACK is 1-indexed
+                write_buffer.put_u8((i + STATIC_HEADER.len() + 1) as u8 | INDEXED);
+                return;
             }
-            None => {
-                write_buffer.put_u8(LITERAL_INDEXED); // len 0 to denote literal name
-                encode_string(name.as_str().as_bytes(), write_buffer);
-            }
+
+            self.table.insert(name.clone(), value.clone());
+            encode_int!(LITERAL_INDEXED_INT, write_buffer, static_index, | LITERAL_INDEXED);
         }
-        encode_string(val.as_bytes(), write_buffer);
+
+        if static_index == 0 {
+            encode_string(name.as_str().as_bytes(), write_buffer);
+        }
+        // value always literal
+        encode_string(value.as_bytes(), write_buffer);
     }
 }
 
 macro_rules! encode_int {
     (
         $int:ident, $buffer:expr, $value:expr $(, | $mask:expr)?
-    ) => {
+    ) => {{
         const MAX: u8 = $int >> 1;
 
         let value = $value;
@@ -156,11 +184,20 @@ macro_rules! encode_int {
         } else {
             $buffer.put_u8($int $(| $mask)?);
             continue_encode_int(value - $int as usize, $buffer);
-        };
-    };
+        }
+    }};
 }
 
 use {encode_int};
+
+// fn one_encode_int<const INT: u8, const MAX: u8>(value: usize, mask: u8, buffer: &mut BytesMut) {
+//     if value < MAX as usize {
+//         buffer.put_u8((value as u8) | mask);
+//     } else {
+//         buffer.put_u8(INT | mask);
+//         continue_encode_int(value - INT as usize, buffer);
+//     };
+// }
 
 fn continue_encode_int(mut value: usize, bytes: &mut BytesMut) {
     while value > 127 {
@@ -181,26 +218,28 @@ fn encode_string(string: &[u8], write_buffer: &mut BytesMut) {
     huffman::encode(string, write_buffer);
 }
 
+fn field_size(name: &HeaderName, val: &HeaderValue) -> usize {
+    name.as_str().len() + val.as_bytes().len() + 32
+}
+
 // ===== Test =====
 
 #[test]
-fn test_hpack_encode_int() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hpack_encode_int() {
     let mut buffer = BytesMut::new();
     encode_int!(U5, &mut buffer, 1337usize);
     assert_eq!(
         buffer.as_slice(),
         &[0b0001_1111, 0b1001_1010, 0b0000_1010,][..]
     );
-    Ok(())
 }
 
 #[test]
-fn test_hpack_encode_int2() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hpack_encode_int2() {
     let mut buffer = BytesMut::new();
     encode_int!(U5, &mut buffer, 31usize);
     assert_eq!(
         buffer.as_slice(),
         &[0b0001_1111, 0b0000_0000][..]
     );
-    Ok(())
 }
