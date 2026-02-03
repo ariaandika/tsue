@@ -130,7 +130,7 @@ impl<IO> Connection<IO> {
 
                                 let mut headers = HeaderMap::new();
                                 hpack.decode_block(payload.freeze(), &mut headers, &mut *write_buffer)?;
-                                headers.iter().for_each(|e|println!("{e:?}"));
+                                headers.pairs().for_each(|e|println!("{e:?}"));
 
                             }
                             F::Settings => {
