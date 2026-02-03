@@ -1,9 +1,8 @@
-use std::num::NonZeroUsize;
 use tcio::bytes::{Buf, Bytes, BytesMut};
 
 use crate::h2::hpack::huffman;
 use crate::h2::hpack::table::{STATIC_HEADER, Table, get_static_header_value};
-use crate::headers::{self, HeaderMap, HeaderName, HeaderValue};
+use crate::headers::{self, HeaderField, HeaderMap, HeaderName, HeaderValue};
 
 const MSB: u8 = 0b1000_0000;
 const U7: u8 = 0b0111_1111;
@@ -85,8 +84,8 @@ impl Decoder {
         }
 
         while !block.is_empty() {
-            let (name, value) = self.decode(&mut block, write_buffer)?;
-            maps.append(name, value);
+            let field = self.decode(&mut block, write_buffer)?;
+            maps.try_append_field(field)?;
         }
         Ok(())
     }
@@ -95,14 +94,12 @@ impl Decoder {
         &mut self,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
-    ) -> Result<(HeaderName, HeaderValue), DecodeError> {
+    ) -> Result<HeaderField, DecodeError> {
         use DecodeError as E;
 
         let prefix = bytes.try_get_u8().ok_or(E::Incomplete)?;
 
         // decoding
-
-        let index;
 
         if prefix & INDEXED == INDEXED {
             let index = decode_int::<INDEXED_INT>(prefix, bytes)?
@@ -110,58 +107,59 @@ impl Decoder {
                 .ok_or(E::ZeroIndex)?;
             if let Some(name) = STATIC_HEADER.get(index) {
                 let val = get_static_header_value(index).ok_or(E::NotFound)?;
-                return Ok((name.clone(), val));
+                return Ok(HeaderField::new(name.clone(), val));
             }
-            let field = self.table.fields().get(index.strict_sub(STATIC_HEADER.len())).ok_or(E::NotFound)?;
-            return Ok(field.clone());
+            return self
+                .table
+                .fields()
+                .get(index - STATIC_HEADER.len())
+                .cloned()
+                .ok_or(E::NotFound);
         }
 
-        if prefix & LITERAL_INDEXED == LITERAL_INDEXED {
-            index = decode_int::<LITERAL_INDEXED_INT>(prefix, bytes)?;
-
-        } else if prefix & SIZE_UPDATE == SIZE_UPDATE {
-            return Err(E::InvalidSizeUpdate);
-
-        } else {
+        let index = if prefix & LITERAL_INDEXED == LITERAL_INDEXED {
+            decode_int::<LITERAL_INDEXED_INT>(prefix, bytes)?
+        } else if prefix & SIZE_UPDATE_MASK == 0 {
             // Literal without/never indexed
-            index = decode_int::<LITERAL_NINDEX_INT>(prefix, bytes)?;
+            decode_int::<LITERAL_NINDEX_INT>(prefix, bytes)?
+        } else {
+            return Err(E::InvalidSizeUpdate);
         };
 
         // processing
 
-        let name = match NonZeroUsize::new(index) {
+        let (name, hash) = match index.checked_sub(1) {
             Some(index) => {
                 // HPACK is 1 indexed
-                let index = index.get() - 1;
                 match STATIC_HEADER.get(index) {
-                    Some(name) => name.clone(),
-                    None => self
-                        .table
-                        .fields()
-                        .get(index.strict_sub(STATIC_HEADER.len()))
-                        .ok_or(E::NotFound)?
-                        .0
-                        .clone(),
+                    Some(name) => (name.clone(), name.hash()),
+                    None => {
+                        let field = self
+                            .table
+                            .fields()
+                            .get(index - STATIC_HEADER.len())
+                            .ok_or(E::NotFound)?;
+                        (field.name().clone(), field.cached_hash())
+                    }
                 }
             }
-            None => {
-                HeaderName::from_bytes_lowercase(decode_string(bytes, write_buffer)?)?
-            },
+            None => HeaderName::from_internal_lowercase(decode_string(bytes, write_buffer)?)?,
         };
         let value = HeaderValue::from_bytes(decode_string(bytes, write_buffer)?)?;
+        let field = HeaderField::with_hash(name, value, hash);
 
         let is_indexed = prefix & LITERAL_IS_INDEXED_MASK == LITERAL_IS_INDEXED_MASK;
         if is_indexed {
-            self.table.insert(name.clone(), value.clone());
+            self.table.insert(field.clone());
         }
 
-        Ok((name, value))
+        Ok(field)
     }
 }
 
 #[cfg(test)]
 impl Decoder {
-    pub(crate) fn fields(&self) -> &std::collections::VecDeque<(HeaderName, HeaderValue)> {
+    pub(crate) fn fields(&self) -> &std::collections::VecDeque<HeaderField> {
         self.table.fields()
     }
 
@@ -173,7 +171,7 @@ impl Decoder {
         &mut self,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
-    ) -> Result<(HeaderName, HeaderValue), DecodeError> {
+    ) -> Result<HeaderField, DecodeError> {
         self.decode(bytes, write_buffer)
     }
 }
@@ -236,6 +234,8 @@ fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes
 pub enum DecodeError {
     /// Bytes given is insufficient.
     Incomplete,
+    /// Headers is too large.
+    TooLarge,
     /// Unknown header block kind.
     UnknownRepr,
     /// Found `0` index.
@@ -255,6 +255,7 @@ impl std::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Incomplete => f.write_str("data incomplete"),
+            Self::TooLarge => f.write_str("header too large"),
             Self::UnknownRepr => f.write_str("unknown header block representation"),
             Self::ZeroIndex => f.write_str("index cannot be 0"),
             Self::NotFound => f.write_str("field with given index not found"),
@@ -274,6 +275,12 @@ impl From<headers::error::HeaderError> for DecodeError {
 impl From<huffman::HuffmanError> for DecodeError {
     fn from(_: huffman::HuffmanError) -> Self {
         Self::Huffman
+    }
+}
+
+impl From<headers::error::TryReserveError> for DecodeError {
+    fn from(_: headers::error::TryReserveError) -> Self {
+        Self::TooLarge
     }
 }
 

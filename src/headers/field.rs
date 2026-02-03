@@ -46,6 +46,10 @@ impl HeaderField {
         self.hash
     }
 
+    pub(crate) fn hpack_size(&self) -> usize {
+        self.name.as_str().len() + self.entry.value.as_bytes().len() + 32
+    }
+
     /// Returns reference to [`HeaderName`].
     #[inline]
     pub const fn name(&self) -> &HeaderName {

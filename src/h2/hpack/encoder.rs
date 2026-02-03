@@ -121,7 +121,7 @@ impl Encoder {
     /// Note that this method skips check for hpack static header with value, use other
     /// corresponding method instead.
     pub fn encode_map(&mut self, map: &HeaderMap, write_buffer: &mut BytesMut) {
-        for field in map.fields().iter().filter_map(|e|e.as_ref()) {
+        for field in map.fields().iter().filter_map(Option::as_ref) {
             self.encode_dynamic(field, write_buffer);
         }
     }
@@ -140,7 +140,7 @@ impl Encoder {
         let static_index = name.hpack_static().map(std::num::NonZero::get).unwrap_or(0) as usize;
 
         let is_sensitive = field.is_sensitive();
-        let is_large = field_size(name, value) * 4 > self.table.max_size() * 3;
+        let is_large = field.hpack_size() * 4 > self.table.max_size() * 3;
 
         let (int, repr) = if is_sensitive | is_large {
             // if header is sensitive, use literal never indexed
@@ -149,14 +149,14 @@ impl Encoder {
 
         } else {
             // TODO: optimize hpack dynamic table lookup
-            if let Some(i) = self.table.fields().iter().position(|(n,_)|n == name) {
+            if let Some(i) = self.table.fields().iter().position(|f|f.name() == name) {
                 // header is indexed in hpack dynamic table,
                 // `+ 1` because HPACK is 1-indexed
                 encode_int!(INDEXED_INT, write_buffer, i + STATIC_HEADER.len() + 1, | INDEXED);
                 return;
             }
 
-            self.table.insert(name.clone(), value.clone());
+            self.table.insert(field.clone());
             (LITERAL_INDEXED_INT, LITERAL_INDEXED)
         };
 
@@ -201,10 +201,6 @@ fn encode_string(string: &[u8], write_buffer: &mut BytesMut) {
     // +-------------------------------+
     encode_int!(U7, write_buffer, string.len(), | IS_HUFFMAN);
     huffman::encode(string, write_buffer);
-}
-
-fn field_size(name: &HeaderName, val: &HeaderValue) -> usize {
-    name.as_str().len() + val.as_bytes().len() + 32
 }
 
 // ===== Test =====

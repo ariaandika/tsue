@@ -79,6 +79,14 @@ impl HeaderName {
         }
     }
 
+    pub(crate) fn from_internal_lowercase(name: Bytes) -> Result<(Self, u32), HeaderError> {
+        if matches!(name.len(), 1..=MAX_HEADER_NAME_LEN) {
+            internal_header_name_lowercase(name)
+        } else {
+            Err(HeaderError::invalid_len(name.len()))
+        }
+    }
+
     pub(crate) fn from_internal(name: BytesMut) -> Result<(Self, u32), HeaderError> {
         if matches!(name.len(), 1..=MAX_HEADER_NAME_LEN) {
             internal_to_header_name(name)
@@ -190,6 +198,30 @@ fn copy_to_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
     })
 }
 
+fn internal_header_name_lowercase(bytes: Bytes) -> Result<(HeaderName, u32), HeaderError> {
+    use HeaderError as E;
+
+    const BASIS: u32 = 0x811C_9DC5;
+    const PRIME: u32 = 0x0100_0193;
+
+    let mut hash = BASIS;
+
+    for byte in bytes.as_slice() {
+        if matches::is_token_lowercase(*byte) {
+            hash = PRIME.wrapping_mul(hash ^ *byte as u32);
+        } else {
+            return Err(E::Invalid);
+        }
+    }
+
+    Ok((
+        HeaderName {
+            repr: Repr::Arbitrary(bytes),
+        },
+        hash,
+    ))
+}
+
 fn internal_to_header_name(mut bytes: BytesMut) -> Result<(HeaderName, u32), HeaderError> {
     use HeaderError as E;
 
@@ -199,11 +231,11 @@ fn internal_to_header_name(mut bytes: BytesMut) -> Result<(HeaderName, u32), Hea
     let mut hash = BASIS;
 
     for byte in bytes.as_mut_slice() {
-        *byte = matches::HEADER_NAME[*byte as usize];
-        hash = PRIME.wrapping_mul(hash ^ *byte as u32);
-
         // Any invalid character will have it MSB set
-        if *byte & 128 == 128 {
+        if *byte & 128 != 128 {
+            *byte = matches::HEADER_NAME[*byte as usize];
+            hash = PRIME.wrapping_mul(hash ^ *byte as u32);
+        } else {
             return Err(E::Invalid);
         }
     }

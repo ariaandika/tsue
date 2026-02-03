@@ -1,11 +1,11 @@
 use std::collections::VecDeque;
 
-use crate::headers::{HeaderName, HeaderValue, standard};
+use crate::headers::{HeaderField, HeaderName, HeaderValue, standard};
 
 /// HPACK Table.
 #[derive(Debug)]
 pub struct Table {
-    fields: VecDeque<(HeaderName, HeaderValue)>,
+    fields: VecDeque<HeaderField>,
     size: usize,
     max_size: usize,
 }
@@ -40,7 +40,7 @@ impl Table {
         }
     }
 
-    pub(crate) fn fields(&self) -> &VecDeque<(HeaderName, HeaderValue)> {
+    pub(crate) fn fields(&self) -> &VecDeque<HeaderField> {
         &self.fields
     }
 
@@ -55,8 +55,8 @@ impl Table {
         }
     }
 
-    pub(crate) fn insert(&mut self, name: HeaderName, val: HeaderValue) {
-        let size = field_size(&name, &val);
+    pub(crate) fn insert(&mut self, field: HeaderField) {
+        let size = field.hpack_size();
 
         // It is not an error to attempt to add an entry that is larger than the maximum size; an
         // attempt to add an entry larger than the maximum size causes the table to be emptied of
@@ -70,17 +70,16 @@ impl Table {
             self.evict_entry();
         }
 
-        self.fields.push_front((name, val));
+        self.fields.push_front(field);
         self.size += size;
 
         debug_assert!(self.size <= self.max_size);
     }
 
-    fn evict_entry(&mut self) -> Option<(HeaderName, HeaderValue)> {
-        let (name, val) = self.fields.pop_back()?;
-        let size = field_size(&name, &val);
-        self.size -= size;
-        Some((name, val))
+    fn evict_entry(&mut self) -> Option<HeaderField> {
+        let field = self.fields.pop_back()?;
+        self.size -= field.hpack_size();
+        Some(field)
     }
 }
 
@@ -89,10 +88,6 @@ impl Table {
     pub(crate) fn size(&self) -> usize {
         self.size
     }
-}
-
-fn field_size(name: &HeaderName, val: &HeaderValue) -> usize {
-    name.as_str().len() + val.as_bytes().len() + 32
 }
 
 pub(crate) static STATIC_HEADER: [HeaderName; 61] = [
