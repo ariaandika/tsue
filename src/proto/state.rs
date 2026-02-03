@@ -94,10 +94,10 @@ pub fn insert_header(
     }
 
     name.make_ascii_lowercase();
-    map.append(
+    map.try_append(
         HeaderName::from_bytes_lowercase(name)?,
         HeaderValue::from_bytes(value)?,
-    );
+    )?;
 
     Ok(())
 }

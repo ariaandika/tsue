@@ -309,6 +309,16 @@ impl HeaderMap {
         unsafe { self.insert_inner(HeaderField::new(name.into_header_name(), value), true) };
     }
 
+    pub(crate) fn try_append<K: IntoHeaderName>(
+        &mut self,
+        name: K,
+        value: HeaderValue,
+    ) -> Result<(), TryReserveError> {
+        self.reserve_one()?;
+        unsafe { self.insert_inner(HeaderField::new(name.into_header_name(), value), true) };
+        Ok(())
+    }
+
     /// Removes a header from the map, returning the first header value if it founds.
     ///
     /// For header name it is prefered to use [provided constants] as oppose to static `str`, see

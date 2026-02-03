@@ -116,3 +116,10 @@ impl From<HeaderError> for ProtoError {
         Self::HeaderError(value)
     }
 }
+
+impl From<crate::headers::error::TryReserveError> for ProtoError {
+    #[inline]
+    fn from(_: crate::headers::error::TryReserveError) -> Self {
+        Self::TooManyHeaders
+    }
+}
