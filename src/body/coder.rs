@@ -38,8 +38,8 @@ impl BodyCoder {
     }
 
     pub fn new(headers: &HeaderMap) -> Result<Self, BodyError> {
-        let mut content_lengths = headers.get_all(CONTENT_LENGTH);
-        let mut transfer_encodings = headers.get_all(TRANSFER_ENCODING);
+        let mut content_lengths = headers.get_all(&CONTENT_LENGTH);
+        let mut transfer_encodings = headers.get_all(&TRANSFER_ENCODING);
 
         let kind = match (content_lengths.next(), transfer_encodings.has_remaining()) {
             (None, false) => Kind::ContentLength(0),
@@ -54,7 +54,7 @@ impl BodyCoder {
                 Kind::Chunked(ChunkedCoder::new())
             }
             (Some(length), false) => {
-                if content_lengths.has_remaining() {
+                if content_lengths.next().is_some() {
                     return Err(BodyError::InvalidContentLength);
                 }
                 match atou(length.as_bytes()) {

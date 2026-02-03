@@ -61,7 +61,7 @@ fn header_map() {
     assert!(map.contains_key("referer"));
     assert!(map.contains_key("rim"));
 
-    let mut all = map.get_all("content-length");
+    let mut all = map.get_all(&"content-length");
     assert!(matches!(all.next(), Some(v) if matches!(v.as_str(),"LEN")));
     assert!(matches!(all.next(), Some(v) if matches!(v.as_str(),"BAR")));
     assert!(all.next().is_none());

@@ -1,49 +1,29 @@
-use crate::headers::field::FieldEntry;
-use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue};
+use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue, map::Probe};
 
 // ===== Header Values Iterator =====
 
 /// An immutable iterator over the header values with the same header name.
 ///
-/// This iterator is created from [`HeaderMap::get_all`] or [`HeaderField::iter`] method.
+/// This iterator is created from [`HeaderMap::get_all`] method.
 #[derive(Clone)]
 pub struct GetAll<'a> {
-    entry: Option<&'a FieldEntry>,
-}
-
-impl<'a> IntoIterator for &'a HeaderField {
-    type Item = &'a HeaderValue;
-
-    type IntoIter = GetAll<'a>;
-
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        GetAll {
-            entry: Some(self.entry()),
-        }
-    }
+    probe: Probe<'a>,
+    name: &'a str,
+    hash: u32,
 }
 
 impl<'a> GetAll<'a> {
-    pub(crate) const fn empty() -> Self {
-        Self { entry: None }
-    }
-
-    /// Returns `Some` if there is only single value for given name in the map.
-    #[inline]
-    pub fn as_single(self) -> Option<&'a HeaderValue> {
-        let current = self.entry?;
-        if current.next_entry().is_some() {
-            None
-        } else {
-            Some(current.value())
+    pub(crate) fn new(map: &'a HeaderMap, name: &'a str, hash: u32) -> Self {
+        Self {
+            probe: Probe::from_hash(map, hash),
+            name,
+            hash,
         }
     }
 
     /// Returns `true` if there is still remaining value.
-    #[inline]
-    pub const fn has_remaining(&self) -> bool {
-        self.entry.is_some()
+    pub(crate) fn has_remaining(&self) -> bool {
+        self.probe.peek().is_some()
     }
 }
 
@@ -52,9 +32,12 @@ impl<'a> Iterator for GetAll<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let next = self.entry.take()?;
-        self.entry = next.next_entry();
-        Some(next.value())
+        let field = self.probe.next()?;
+        if field.cached_hash() == self.hash && field.name().as_str() == self.name {
+            Some(field.value())
+        } else {
+            self.next()
+        }
     }
 }
 
@@ -66,49 +49,80 @@ impl<'a> std::fmt::Debug for GetAll<'a> {
 
 // ===== Header Fields Iterator =====
 
-/// An immutable iterator over the headers in a [`HeaderMap`].
+/// An immutable iterator over the header fields in a [`HeaderMap`].
 ///
 /// Note that the order of the returned headers is arbitrary.
 #[derive(Clone)]
-pub struct Iter<'a> {
+pub struct Fields<'a> {
     iter: std::slice::Iter<'a, Option<HeaderField>>,
-    current: Option<(&'a HeaderName, GetAll<'a>)>,
+    remaining: u32,
 }
 
 impl<'a> IntoIterator for &'a HeaderMap {
-    type Item = <Iter<'a> as Iterator>::Item;
+    type Item = <Fields<'a> as Iterator>::Item;
 
-    type IntoIter = Iter<'a>;
+    type IntoIter = Fields<'a>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        let mut iter = self.fields().iter();
-        Iter {
-            current: iter.find_map(|e| e.as_ref().map(|e| (e.name(), e.iter()))),
-            iter,
+        Fields {
+            iter: self.fields().iter(),
+            remaining: self.len_size(),
         }
     }
 }
 
-impl<'a> Iterator for Iter<'a> {
-    type Item = (&'a HeaderName, &'a HeaderValue);
+impl<'a> Iterator for Fields<'a> {
+    type Item = &'a HeaderField;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some((name, values)) = &mut self.current
-                && let Some(value) = values.next()
-            {
-                return Some((name, value));
+        if self.remaining == 0 {
+            return None;
+        }
+        match self.iter.next()?.as_ref() {
+            Some(field) => {
+                self.remaining -= 1;
+                Some(field)
             }
-
-            let field = self.iter.find_map(|e| e.as_ref())?;
-            self.current = Some((field.name(), field.iter()));
+            None => self.next(),
         }
     }
 }
 
-impl<'a> std::fmt::Debug for Iter<'a> {
+impl<'a> std::fmt::Debug for Fields<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.clone()).finish()
+    }
+}
+
+// ===== Header Pairs Iterator =====
+
+/// An immutable iterator over the headers as name and value pair in a [`HeaderMap`].
+///
+/// Note that the order of the returned headers is arbitrary.
+#[derive(Clone)]
+pub struct Pairs<'a> {
+    iter: Fields<'a>
+}
+
+impl<'a> Pairs<'a> {
+    pub(crate) fn new(map: &'a HeaderMap) -> Self {
+        Self { iter: map.into_iter() }
+    }
+}
+
+impl<'a> Iterator for Pairs<'a> {
+    type Item = (&'a HeaderName, &'a HeaderValue);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|f|(f.name(), f.value()))
+    }
+}
+
+impl<'a> std::fmt::Debug for Pairs<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map().entries(self.clone()).finish()
     }
 }

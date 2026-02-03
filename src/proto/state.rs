@@ -120,10 +120,10 @@ pub fn write_response_head(res: &response::Parts, buf: &mut BytesMut, coding: Op
         }
     }
 
-    for (key, val) in &res.headers {
-        buf.extend_from_slice(key.as_str().as_bytes());
+    for f in &res.headers {
+        buf.extend_from_slice(f.name().as_str().as_bytes());
         buf.extend_from_slice(b": ");
-        buf.extend_from_slice(val.as_bytes());
+        buf.extend_from_slice(f.value().as_bytes());
         buf.extend_from_slice(b"\r\n");
     }
 

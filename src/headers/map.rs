@@ -2,7 +2,7 @@ use std::{mem, ptr, slice};
 
 use crate::headers::error::TryReserveError;
 use crate::headers::field::HeaderField;
-use crate::headers::iter::{GetAll, Iter};
+use crate::headers::iter;
 use crate::headers::matches;
 use crate::headers::{HeaderName, HeaderValue};
 
@@ -171,6 +171,10 @@ impl HeaderMap {
         Self { fields, len, cap }
     }
 
+    pub(crate) const fn len_size(&self) -> Size {
+        self.len
+    }
+
     /// Returns headers length.
     ///
     /// This length includes duplicate header name.
@@ -192,10 +196,16 @@ impl HeaderMap {
         self.len == 0
     }
 
+    /// Returns an iterator over header fields.
+    #[inline]
+    pub fn iter(&self) -> iter::Fields<'_> {
+        self.into_iter()
+    }
+
     /// Returns an iterator over headers as name and value pair.
     #[inline]
-    pub fn pairs(&self) -> Iter<'_> {
-        self.into_iter()
+    pub fn pairs(&self) -> iter::Pairs<'_> {
+        iter::Pairs::new(self)
     }
 
     /// Returns `true` if the map contains a header value for given header name.
@@ -257,14 +267,8 @@ impl HeaderMap {
     ///
     /// [provided constants]: crate::headers::standard
     #[inline]
-    pub fn get_all<K: AsHeaderName>(&self, name: K) -> GetAll<'_> {
-        if self.is_empty() {
-            return GetAll::empty();
-        }
-        match self.field(name.as_lowercase_str(), name.hash()) {
-            Some(field) => field.iter(),
-            None => GetAll::empty(),
-        }
+    pub fn get_all<'a, K: AsHeaderName>(&'a self, name: &'a K) -> iter::GetAll<'a> {
+        iter::GetAll::new(self, name.as_lowercase_str(), name.hash())
     }
 
     /// Inserts a key-value pair into the map.
@@ -371,21 +375,20 @@ impl HeaderMap {
 
 impl HeaderMap {
     fn field(&self, name: &str, hash: Size) -> Option<&HeaderField> {
-        let mut index = hash;
-
-        loop {
-            index = mask_by_capacity(self.cap, index);
-            // SAFETY: `index` is masked by capacity
-            // `?` is the base case of the loop, there is always `None` because the load
-            // factor is capped to less than capacity
-            let field = unsafe { self.fields.add(index as usize).as_ref().as_ref()? };
-            if field.cached_hash() == hash && field.name().as_str() == name {
-                return Some(field);
-            }
-
-            // linear probing
-            index += 1;
-        }
+        Probe::from_hash(self, hash).find(|f| f.cached_hash() == hash && f.name().as_str() == name)
+        // loop {
+        //     index = mask_by_capacity(self.cap, index);
+        //     // SAFETY: `index` is masked by capacity
+        //     // `?` is the base case of the loop, there is always `None` because the load
+        //     // factor is capped to less than capacity
+        //     let field = unsafe { self.fields.add(index as usize).as_ref().as_ref()? };
+        //     if field.cached_hash() == hash && field.name().as_str() == name {
+        //         return Some(field);
+        //     }
+        //
+        //     // linear probing
+        //     index += 1;
+        // }
     }
 
     /// # Safety
@@ -545,6 +548,40 @@ impl HeaderMap {
 impl std::fmt::Debug for HeaderMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_map().entries(self.pairs()).finish()
+    }
+}
+
+// ===== Probing Iterator =====
+
+/// Iterate over collision fields.
+#[derive(Clone)]
+pub(crate) struct Probe<'a> {
+    map: &'a HeaderMap,
+    index: Size,
+}
+
+impl<'a> Probe<'a> {
+    pub(crate) fn from_hash(map: &'a HeaderMap, hash: Size) -> Self {
+        Self {
+            map,
+            index: mask_by_capacity(map.cap, hash),
+        }
+    }
+
+    pub(crate) fn peek(&self) -> Option<&HeaderField> {
+        unsafe { self.map.fields.add(self.index as usize).as_ref().as_ref() }
+    }
+}
+
+impl<'a> Iterator for Probe<'a> {
+    type Item = &'a HeaderField;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: `self.index` is masked by capacity
+        let field = unsafe { self.map.fields.add(self.index as usize).as_ref().as_ref()? };
+        // linear probing
+        self.index = mask_by_capacity(self.map.cap, self.index + 1);
+        Some(field)
     }
 }
 
