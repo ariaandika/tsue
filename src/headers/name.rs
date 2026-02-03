@@ -34,7 +34,6 @@ enum Repr {
     Arbitrary(Bytes),
 }
 
-#[derive(Clone)]
 struct Static {
     string: &'static str,
     hash: u32,
@@ -89,7 +88,12 @@ impl HeaderName {
     /// Returns error if the input is not a valid header name.
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(name: A) -> Result<Self, HeaderError> {
-        copy_as_header_name(name.as_ref())
+        let bytes = name.as_ref();
+        if matches!(bytes.len(), 1..=MAX_HEADER_NAME_LEN) {
+            copy_to_header_name(bytes)
+        } else {
+            Err(HeaderError::invalid_len(bytes.len()))
+        }
     }
 
     /// Extracts a string slice of the header name.
@@ -137,16 +141,17 @@ impl HeaderName {
 
 // ===== Parser =====
 
-const MAX_HEADER_NAME_LEN: usize = 1 << 10;  // 1KB
+const MAX_HEADER_NAME_LEN: usize = 1024;  // 1KB
 
 /// token       = 1*tchar
 /// field-name  = token
 const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderError> {
     use HeaderError as E;
 
-    if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
+    if !matches!(bytes.len(), 1..=MAX_HEADER_NAME_LEN) {
         return Err(E::invalid_len(bytes.len()));
     }
+
     while let [byte, rest @ ..] = bytes {
         if matches::is_token_lowercase(*byte) {
             bytes = rest;
@@ -158,28 +163,23 @@ const fn validate_header_name_lowercase(mut bytes: &[u8]) -> Result<(), HeaderEr
     Ok(())
 }
 
-fn copy_as_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
+fn copy_to_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
     use HeaderError as E;
 
-    if !matches!(bytes.len(), 1..MAX_HEADER_NAME_LEN) {
-        return Err(E::invalid_len(bytes.len()));
-    }
-    let mut result = 0;
     let mut name = vec![0; bytes.len()];
 
     for (output, input) in name.iter_mut().zip(bytes) {
         *output = matches::HEADER_NAME[*input as usize];
 
         // Any invalid character will have it MSB set
-        result |= *output;
+        if *output & 128 == 128 {
+            return Err(E::Invalid);
+        }
     }
 
-    match result & 128 {
-        0 => Ok(HeaderName {
-                repr: Repr::Arbitrary(name.into()),
-            }),
-        _ => Err(E::Invalid),
-    }
+    Ok(HeaderName {
+        repr: Repr::Arbitrary(name.into()),
+    })
 }
 
 // ===== Traits =====
