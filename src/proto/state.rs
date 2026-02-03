@@ -1,8 +1,7 @@
 use tcio::bytes::{Bytes, BytesMut};
 
 use crate::body::{BodyCoder, Codec, error::BodyError};
-use crate::headers::standard::HOST;
-use crate::headers::{HeaderMap, HeaderName, HeaderValue};
+use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue, standard};
 use crate::http::{Extensions, httpdate_now};
 use crate::http::{request, response};
 use crate::proto::error::{ParseError, ProtoError};
@@ -33,7 +32,7 @@ impl HttpState {
         let HttpState { reqline, headers } = self;
         let Reqline { method, target, version } = reqline;
 
-        let host = match headers.get(HOST) {
+        let host = match headers.get(standard::HOST) {
             Some(value) => Bytes::from(value.clone()),
             None => return Err(ProtoError::MissingHost),
         };
@@ -95,7 +94,7 @@ pub fn insert_header(
 
     let (name, hash) = HeaderName::from_internal(name)?;
     let value = HeaderValue::from_bytes(value)?;
-    map.try_append(name, value, hash)?;
+    map.try_append_field(HeaderField::with_hash(name, value, hash))?;
 
     Ok(())
 }
