@@ -28,7 +28,16 @@ impl HeaderField {
             hash: name.hash(),
             name,
             entry: FieldEntry::new(value),
-            len: unsafe { NonZeroSize::new_unchecked(1) },
+            len: const { NonZeroSize::new(1).unwrap() },
+        }
+    }
+
+    pub(crate) const fn with_hash(name: HeaderName, value: HeaderValue, hash: u32) -> Self {
+        Self {
+            hash,
+            name,
+            entry: FieldEntry::new(value),
+            len: const { NonZeroSize::new(1).unwrap() },
         }
     }
 

@@ -1,4 +1,4 @@
-use tcio::bytes::Bytes;
+use tcio::bytes::{Bytes, BytesMut};
 
 use crate::headers::matches;
 use crate::headers::error::HeaderError;
@@ -76,6 +76,14 @@ impl HeaderName {
                 repr: Repr::Arbitrary(name),
             }),
             Err(err) => Err(err),
+        }
+    }
+
+    pub(crate) fn from_internal(name: BytesMut) -> Result<(Self, u32), HeaderError> {
+        if matches!(name.len(), 1..=MAX_HEADER_NAME_LEN) {
+            internal_to_header_name(name)
+        } else {
+            Err(HeaderError::invalid_len(name.len()))
         }
     }
 
@@ -180,6 +188,32 @@ fn copy_to_header_name(bytes: &[u8]) -> Result<HeaderName, HeaderError> {
     Ok(HeaderName {
         repr: Repr::Arbitrary(name.into()),
     })
+}
+
+fn internal_to_header_name(mut bytes: BytesMut) -> Result<(HeaderName, u32), HeaderError> {
+    use HeaderError as E;
+
+    const BASIS: u32 = 0x811C_9DC5;
+    const PRIME: u32 = 0x0100_0193;
+
+    let mut hash = BASIS;
+
+    for byte in bytes.as_mut_slice() {
+        *byte = matches::HEADER_NAME[*byte as usize];
+        hash = PRIME.wrapping_mul(hash ^ *byte as u32);
+
+        // Any invalid character will have it MSB set
+        if *byte & 128 == 128 {
+            return Err(E::Invalid);
+        }
+    }
+
+    Ok((
+        HeaderName {
+            repr: Repr::Arbitrary(bytes.freeze()),
+        },
+        hash,
+    ))
 }
 
 // ===== Traits =====

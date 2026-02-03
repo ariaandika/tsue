@@ -84,7 +84,7 @@ impl HttpState {
 
 pub fn insert_header(
     map: &mut HeaderMap,
-    mut name: BytesMut,
+    name: BytesMut,
     value: BytesMut,
 ) -> Result<(), ProtoError> {
     const MAX_HEADERS: usize = 64;
@@ -93,11 +93,9 @@ pub fn insert_header(
         return Err(ProtoError::TooManyHeaders);
     }
 
-    name.make_ascii_lowercase();
-    map.try_append(
-        HeaderName::from_bytes_lowercase(name)?,
-        HeaderValue::from_bytes(value)?,
-    )?;
+    let (name, hash) = HeaderName::from_internal(name)?;
+    let value = HeaderValue::from_bytes(value)?;
+    map.try_append(name, value, hash)?;
 
     Ok(())
 }

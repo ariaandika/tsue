@@ -309,13 +309,14 @@ impl HeaderMap {
         unsafe { self.insert_inner(HeaderField::new(name.into_header_name(), value), true) };
     }
 
-    pub(crate) fn try_append<K: IntoHeaderName>(
+    pub(crate) fn try_append(
         &mut self,
-        name: K,
+        name: HeaderName,
         value: HeaderValue,
+        hash: u32,
     ) -> Result<(), TryReserveError> {
         self.reserve_one()?;
-        unsafe { self.insert_inner(HeaderField::new(name.into_header_name(), value), true) };
+        unsafe { self.insert_inner(HeaderField::with_hash(name, value, hash), true) };
         Ok(())
     }
 
