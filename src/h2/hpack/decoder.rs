@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 use tcio::bytes::{Buf, Bytes, BytesMut};
 
 use crate::h2::hpack::huffman;
-use crate::h2::hpack::table::{STATIC_HEADER, Table};
+use crate::h2::hpack::table::{STATIC_HEADER, Table, get_static_header_value};
 use crate::headers::{self, HeaderMap, HeaderName, HeaderValue};
 
 const MSB: u8 = 0b1000_0000;
@@ -102,29 +102,29 @@ impl Decoder {
 
         // decoding
 
-        let index = if prefix & INDEXED == INDEXED {
+        let index;
+
+        if prefix & INDEXED == INDEXED {
             let index = decode_int::<INDEXED_INT>(prefix, bytes)?
                 .checked_sub(1)
                 .ok_or(E::ZeroIndex)?;
-            return match STATIC_HEADER.get(index) {
-                Some((name, val)) => match val {
-                    Some(val) => Ok((name.clone(), val.clone())),
-                    None => Err(E::NotFound)
-                },
-                None => match self.table.fields().get(index.strict_sub(STATIC_HEADER.len())) {
-                    Some(field) => Ok(field.clone()),
-                    None => Err(E::NotFound),
-                },
+            if let Some(name) = STATIC_HEADER.get(index) {
+                let val = get_static_header_value(index).ok_or(E::NotFound)?;
+                return Ok((name.clone(), val));
             }
-        } else if prefix & LITERAL_INDEXED == LITERAL_INDEXED {
-            decode_int::<LITERAL_INDEXED_INT>(prefix, bytes)?
+            let field = self.table.fields().get(index.strict_sub(STATIC_HEADER.len())).ok_or(E::NotFound)?;
+            return Ok(field.clone());
+        }
+
+        if prefix & LITERAL_INDEXED == LITERAL_INDEXED {
+            index = decode_int::<LITERAL_INDEXED_INT>(prefix, bytes)?;
 
         } else if prefix & SIZE_UPDATE == SIZE_UPDATE {
             return Err(E::InvalidSizeUpdate);
 
         } else {
             // Literal without/never indexed
-            decode_int::<LITERAL_NINDEX_INT>(prefix, bytes)?
+            index = decode_int::<LITERAL_NINDEX_INT>(prefix, bytes)?;
         };
 
         // processing
@@ -134,7 +134,7 @@ impl Decoder {
                 // HPACK is 1 indexed
                 let index = index.get() - 1;
                 match STATIC_HEADER.get(index) {
-                    Some((name, _)) => name.clone(),
+                    Some(name) => name.clone(),
                     None => self
                         .table
                         .fields()
