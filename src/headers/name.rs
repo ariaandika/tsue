@@ -279,6 +279,8 @@ impl PartialEq for HeaderName {
     }
 }
 
+impl Eq for HeaderName { }
+
 // ===== Standard Headers =====
 
 // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers
