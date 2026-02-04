@@ -39,14 +39,14 @@
 //! map.append(COOKIE, cookie2_hdr.clone());
 //!
 //! // retrieve all values from single key in insertion order
-//! let mut values = map.get_all(COOKIE);
+//! let mut values = map.get_all(&COOKIE);
 //! assert_eq!(values.next(), Some(&cookie_hdr));
 //! assert_eq!(values.next(), Some(&cookie2_hdr));
 //! assert!(values.next().is_none());
 //!
 //! // use `insert` to replace existing value for given key
-//! let old_type = map.insert(CONTENT_TYPE, HeaderValue::from_static(b"text/plain"));
-//! assert_eq!(old_type, Some(HeaderValue::from_static(b"text/html")));
+//! let old_type = map.insert(CONTENT_TYPE, HeaderValue::from_static(b"text/plain")).unwrap();
+//! assert_eq!(old_type.value(), &HeaderValue::from_static(b"text/html"));
 //! ```
 
 // NOTE: this API DOES NOT handle comma separated values
