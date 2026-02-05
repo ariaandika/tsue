@@ -21,9 +21,9 @@ impl HeaderError {
 
     pub(crate) const fn message(&self) -> &'static str {
         match self {
-            Self::Empty => "header cannot be empty",
-            Self::TooLong => "header too long",
-            Self::Invalid => "header contains invalid byte",
+            Self::Empty => "cannot be empty",
+            Self::TooLong => "too long",
+            Self::Invalid => "contains invalid byte",
         }
     }
 

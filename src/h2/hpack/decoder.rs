@@ -1,9 +1,10 @@
 use tcio::bytes::{Buf, Bytes, BytesMut};
 
 use crate::h2::hpack::huffman;
+use crate::h2::hpack::error::HpackError;
 use crate::h2::hpack::table::{STATIC_HEADER, Table, get_static_header_value};
 use crate::h2::hpack::table::{is_pseudo_header_repr};
-use crate::headers::{self, HeaderField, HeaderMap, HeaderName, HeaderValue};
+use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue};
 
 const MSB: u8 = 0b1000_0000;
 const U7: u8 = 0b0111_1111;
@@ -75,13 +76,13 @@ impl Decoder {
         mut block: Bytes,
         maps: &mut HeaderMap,
         write_buffer: &mut BytesMut,
-    ) -> Result<(), DecodeError> {
+    ) -> Result<(), HpackError> {
         let Some(&prefix) = block.first() else {
             return Ok(());
         };
 
         if is_pseudo_header_repr!(prefix) {
-            return Err(DecodeError::InvalidPseudoHeader);
+            return Err(HpackError::InvalidPseudoHeader);
         }
 
         // Dynamic table size update MUST occur at the beginning of the first header block
@@ -113,8 +114,8 @@ impl Decoder {
         &mut self,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
-    ) -> Result<HeaderField, DecodeError> {
-        use DecodeError as E;
+    ) -> Result<HeaderField, HpackError> {
+        use HpackError as E;
 
         let Some(&prefix) = bytes.first() else {
             return Err(E::Incomplete);
@@ -136,8 +137,8 @@ impl Decoder {
         prefix: u8,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
-    ) -> Result<HeaderField, DecodeError> {
-        use DecodeError as E;
+    ) -> Result<HeaderField, HpackError> {
+        use HpackError as E;
 
         if prefix & INDEXED == INDEXED {
             let index = decode_int::<INDEXED_INT>(prefix, bytes)?
@@ -209,12 +210,12 @@ impl Decoder {
         &mut self,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
-    ) -> Result<HeaderField, DecodeError> {
+    ) -> Result<HeaderField, HpackError> {
         self.decode(bytes, write_buffer)
     }
 }
 
-fn decode_int<const INT: u8>(prefix: u8, bytes: &mut Bytes) -> Result<usize, DecodeError> {
+fn decode_int<const INT: u8>(prefix: u8, bytes: &mut Bytes) -> Result<usize, HpackError> {
     let int = prefix & INT;
     if int != INT {
         Ok(int as usize)
@@ -223,11 +224,11 @@ fn decode_int<const INT: u8>(prefix: u8, bytes: &mut Bytes) -> Result<usize, Dec
     }
 }
 
-fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
+fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, HpackError> {
     let mut shift = 0;
     let mut value = 0;
     loop {
-        let prefix = bytes.try_get_u8().ok_or(DecodeError::Incomplete)?;
+        let prefix = bytes.try_get_u8().ok_or(HpackError::Incomplete)?;
         let u7 = prefix & U7;
 
         value += (u7 as usize) << shift;
@@ -241,18 +242,18 @@ fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, DecodeError> {
     Ok(value)
 }
 
-fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes, DecodeError> {
+fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes, HpackError> {
     //   0   1   2   3   4   5   6   7
     // +---+---+---+---+---+---+---+---+
     // | H |    String Length (7+)     |
     // +---+---------------------------+
     // |  String Data (Length octets)  |
     // +-------------------------------+
-    let prefix = bytes.try_get_u8().ok_or(DecodeError::Incomplete)?;
+    let prefix = bytes.try_get_u8().ok_or(HpackError::Incomplete)?;
 
     let len = decode_int::<U7>(prefix, bytes)?;
     let Some(value) = bytes.get(..len) else {
-        return Err(DecodeError::Incomplete);
+        return Err(HpackError::Incomplete);
     };
 
     if prefix & IS_HUFFMAN == IS_HUFFMAN {
@@ -261,69 +262,11 @@ fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes
         bytes.advance(len);
         Ok(value)
     } else {
-        bytes.try_split_to(len).ok_or(DecodeError::Incomplete)
+        bytes.try_split_to(len).ok_or(HpackError::Incomplete)
     }
 }
 
 // ===== Error =====
-
-/// HPACK Decoding Error.
-#[derive(Debug)]
-pub enum DecodeError {
-    /// Bytes given is insufficient.
-    Incomplete,
-    /// Headers is too large.
-    TooLarge,
-    /// Unknown header block kind.
-    UnknownRepr,
-    /// Found `0` index.
-    ZeroIndex,
-    /// Indexed header not found.
-    NotFound,
-    /// Huffman coding error.
-    Huffman,
-    /// Header name or value validation error.
-    InvalidHeader,
-    /// Pseudo header is not at the beginning of header block.
-    InvalidPseudoHeader,
-    /// Size update is too large or is not at the beginning of header block.
-    InvalidSizeUpdate,
-}
-
-impl std::error::Error for DecodeError { }
-impl std::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Incomplete => f.write_str("data incomplete"),
-            Self::TooLarge => f.write_str("header too large"),
-            Self::UnknownRepr => f.write_str("unknown header block representation"),
-            Self::ZeroIndex => f.write_str("index cannot be 0"),
-            Self::NotFound => f.write_str("field with given index not found"),
-            Self::Huffman => f.write_str("huffman coding error"),
-            Self::InvalidHeader => f.write_str("invalid header"),
-            Self::InvalidPseudoHeader => f.write_str("invalid pseudo header"),
-            Self::InvalidSizeUpdate => f.write_str("invalid size update"),
-        }
-    }
-}
-
-impl From<headers::error::HeaderError> for DecodeError {
-    fn from(_: headers::error::HeaderError) -> Self {
-        Self::InvalidHeader
-    }
-}
-
-impl From<huffman::HuffmanError> for DecodeError {
-    fn from(_: huffman::HuffmanError) -> Self {
-        Self::Huffman
-    }
-}
-
-impl From<headers::error::TryReserveError> for DecodeError {
-    fn from(_: headers::error::TryReserveError) -> Self {
-        Self::TooLarge
-    }
-}
 
 // ===== Test =====
 
