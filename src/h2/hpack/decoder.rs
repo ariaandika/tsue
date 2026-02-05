@@ -2,6 +2,7 @@ use tcio::bytes::{Buf, Bytes, BytesMut};
 
 use crate::h2::hpack::huffman;
 use crate::h2::hpack::table::{STATIC_HEADER, Table, get_static_header_value};
+use crate::h2::hpack::table::{is_pseudo_header_repr};
 use crate::headers::{self, HeaderField, HeaderMap, HeaderName, HeaderValue};
 
 const MSB: u8 = 0b1000_0000;
@@ -66,6 +67,9 @@ impl Decoder {
 
     // ===== Decode =====
 
+    /// Decode header block.
+    ///
+    /// Note that this method does not accept `INDEXED` representation with pseudo headers.
     pub fn decode_block(
         &mut self,
         mut block: Bytes,
@@ -75,31 +79,65 @@ impl Decoder {
         let Some(&prefix) = block.first() else {
             return Ok(());
         };
+
+        if is_pseudo_header_repr!(prefix) {
+            return Err(DecodeError::InvalidPseudoHeader);
+        }
+
         // Dynamic table size update MUST occur at the beginning of the first header block
         // following the change to the dynamic table size.
-        if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
+        let prefix = if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
             block.advance(1);
             let max_size = decode_int::<SIZE_UPDATE_INT>(prefix, &mut block)?;
             self.table.update_size(max_size);
-        }
+            match block.first() {
+                Some(&ok) => ok,
+                _ => return Ok(())
+            }
+        } else {
+            prefix
+        };
 
         while !block.is_empty() {
-            let field = self.decode(&mut block, write_buffer)?;
+            let field = self.decode_inner(prefix, &mut block, write_buffer)?;
             maps.try_append_field(field)?;
         }
         Ok(())
     }
 
-    fn decode(
+    /// Decode single header field.
+    ///
+    /// Note that this method does not accept `SIZE_UPDATE` or `INDEXED` representation with pseudo
+    /// header.
+    pub fn decode(
         &mut self,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
     ) -> Result<HeaderField, DecodeError> {
         use DecodeError as E;
 
-        let prefix = bytes.try_get_u8().ok_or(E::Incomplete)?;
+        let Some(&prefix) = bytes.first() else {
+            return Err(E::Incomplete);
+        };
 
-        // decoding
+        if is_pseudo_header_repr!(prefix) {
+            return Err(E::InvalidPseudoHeader);
+        }
+
+        if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
+            return Err(E::InvalidSizeUpdate);
+        }
+
+        self.decode_inner(prefix, bytes, write_buffer)
+    }
+
+    fn decode_inner(
+        &mut self,
+        prefix: u8,
+        bytes: &mut Bytes,
+        write_buffer: &mut BytesMut,
+    ) -> Result<HeaderField, DecodeError> {
+        use DecodeError as E;
 
         if prefix & INDEXED == INDEXED {
             let index = decode_int::<INDEXED_INT>(prefix, bytes)?
@@ -246,6 +284,8 @@ pub enum DecodeError {
     Huffman,
     /// Header name or value validation error.
     InvalidHeader,
+    /// Pseudo header is not at the beginning of header block.
+    InvalidPseudoHeader,
     /// Size update is too large or is not at the beginning of header block.
     InvalidSizeUpdate,
 }
@@ -261,6 +301,7 @@ impl std::fmt::Display for DecodeError {
             Self::NotFound => f.write_str("field with given index not found"),
             Self::Huffman => f.write_str("huffman coding error"),
             Self::InvalidHeader => f.write_str("invalid header"),
+            Self::InvalidPseudoHeader => f.write_str("invalid pseudo header"),
             Self::InvalidSizeUpdate => f.write_str("invalid size update"),
         }
     }
