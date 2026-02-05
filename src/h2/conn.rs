@@ -3,7 +3,7 @@ use std::task::Poll;
 use tcio::bytes::{Buf, BytesMut};
 use tcio::io::{AsyncRead, AsyncWrite};
 
-use crate::h2::settings::{SettingId, Settings, SettingsError};
+use crate::h2::settings::{SettingId, Settings};
 use crate::h2::{frame, hpack};
 use crate::headers::HeaderMap;
 
@@ -31,8 +31,8 @@ pub struct Connection<IO> {
     io: IO,
     read_buffer: BytesMut,
     write_buffer: BytesMut,
-    phase: Phase,
-    settings: Settings,
+    /// will be `None` pre-preface
+    settings: Option<Settings>,
     decoder: hpack::Decoder,
 }
 
@@ -40,21 +40,9 @@ type ConnectionProject<'a, IO> = (
     Pin<&'a mut IO>,
     &'a mut BytesMut,
     &'a mut BytesMut,
-    Pin<&'a mut Phase>,
-    &'a mut Settings,
+    &'a mut Option<Settings>,
     &'a mut hpack::Decoder,
 );
-
-#[derive(Debug)]
-enum Phase {
-    Preface,
-    Idle,
-}
-
-enum PhaseProject {
-    Preface,
-    Idle,
-}
 
 impl<IO> Connection<IO> {
     pub fn new(io: IO) -> Self {
@@ -62,113 +50,127 @@ impl<IO> Connection<IO> {
             io,
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
-            phase: Phase::Preface,
-            settings: Settings::new(),
+            settings: None,
             decoder: hpack::Decoder::default(),
         }
     }
+}
 
-    fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<(), BoxError>>
-    where
-        IO: AsyncRead + AsyncWrite,
-    {
-        let (mut io, read_buffer, write_buffer, mut phase, settings, hpack) = self.project();
+impl<IO> Connection<IO>
+where
+    IO: AsyncRead + AsyncWrite,
+{
 
-        loop {
-            match phase.as_mut().project() {
-                PhaseProject::Preface => {
-                    let Some(preface) = read_buffer.first_chunk() else {
-                        io_read!(io.as_mut().poll_read(&mut *read_buffer, cx));
-                        continue;
-                    };
+    fn try_poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<(), BoxError>> {
+        let (mut io, read_buffer, write_buffer, settings, hpack) = self.as_mut().project();
 
-                    if preface != PREFACE {
-                        return Poll::Ready(Err("preface error".into()));
-                    }
-
-                    read_buffer.advance(PREFACE.len());
-                    phase.set(Phase::Idle);
-                }
-                PhaseProject::Idle => {
-                    'idle: loop {
-                        let frame;
-                        let payload;
-
-                        'lead: {
-                            if let Some((frame_buf, rest)) = read_buffer.split_first_chunk() {
-                                frame = frame::FrameHeader::decode(*frame_buf);
-                                if frame.len() <= rest.len() {
-                                    read_buffer.advance(frame_buf.len());
-                                    payload = read_buffer.split_to(frame.len());
-                                    break 'lead
-                                }
-                            };
-
-                            if ready!(io.as_mut().poll_read(&mut *read_buffer, cx)?) == 0 {
-                                return Poll::Ready(Ok(()))
-                            }
-                            continue 'idle;
-                        };
-
-                        let Some(ty) = frame::Type::from_u8(frame.ty) else {
-                            println!("[ERROR] unknown frame: {:?}", frame.ty);
-                            break;
-                        };
-
-                        use frame::Type as F;
-                        match ty {
-                            F::Headers => {
-                                const PRIORITY_MASK: u8 = 0x20;
-                                const PADDED_MASK: u8 = 0x08;
-                                const END_HEADERS_MASK: u8 = 0x04;
-                                const END_STREAM_MASK: u8 = 0x01;
-
-                                println!("[{ty:?}] is priority = {}",frame.flags & PRIORITY_MASK != 0);
-                                println!("[{ty:?}] is padded = {}",frame.flags & PADDED_MASK != 0);
-                                println!("[{ty:?}] is end headers = {}",frame.flags & END_HEADERS_MASK != 0);
-                                println!("[{ty:?}] is end stream = {}",frame.flags & END_STREAM_MASK != 0);
-
-                                let mut headers = HeaderMap::new();
-                                hpack.decode_block(payload.freeze(), &mut headers, &mut *write_buffer)?;
-                                headers.pairs().for_each(|e|println!("{e:?}"));
-
-                            }
-                            F::Settings => {
-                                let mut payload = payload;
-
-                                while let Some((ident, rest)) = payload.split_first_chunk() {
-                                    let Ok(value): Result<&[u8; 4], _> = rest.try_into() else {
-                                        break;
-                                    };
-                                    let id = u16::from_be_bytes(*ident);
-                                    let val = u32::from_be_bytes(*value);
-
-                                    settings.set_by_id(SettingId::from_u16(id).ok_or(SettingsError::Malformed)?, val);
-
-                                    println!("[SETTING] {id:?} = {val}");
-                                    payload.advance(6);
-                                }
-                            }
-                            F::WindowUpdate => {
-                                let size = u32::from_be_bytes(*payload.first_chunk().expect("TODO"));
-                                println!("[{ty:?}] window size increment = {size}");
-
-                                const _SIZE: usize = 1_048_576_000;
-                                // let mut window_size = 65535;
-                                // window_size += u32::from_be_bytes(*size);
-                            }
-                            _ => {
-                                println!("[{ty:?}] unhandled frame");
-                            }
-                        };
-                    }
-
-                    // dbg!(tcio::fmt::lossy(&buffer));
-
-                    return Poll::Ready(Ok(()));
+        let _settings = match settings.as_mut() {
+            Some(ok) => ok,
+            None => match Self::preface(read_buffer, settings) {
+                Poll::Ready(result) => result?,
+                Poll::Pending => {
+                    io_read!(io.as_mut().poll_read(read_buffer, cx));
+                    return self.try_poll(cx);
                 }
             }
+        };
+
+        while let Some(header) = read_buffer.first_chunk() {
+            let frame = frame::FrameHeader::decode(*header);
+            read_buffer.advance(header.len());
+
+            let Some(payload) = read_buffer.try_split_to(frame.len()) else {
+                break;
+            };
+
+            let Some(ty) = frame::Type::from_u8(frame.ty) else {
+                println!("[ERROR] unknown frame: {:?}", frame.ty);
+                return Poll::Ready(Err("unknown frame".into()));
+            };
+
+            use frame::Type as F;
+            match ty {
+                F::Headers => {
+                    const PRIORITY_MASK: u8 = 0x20;
+                    const PADDED_MASK: u8 = 0x08;
+                    const END_HEADERS_MASK: u8 = 0x04;
+                    const END_STREAM_MASK: u8 = 0x01;
+
+                    println!(
+                        "[HEADER] priority={}, padded={}, end_headers={}, end_stream={}",
+                        frame.flags & PRIORITY_MASK != 0,
+                        frame.flags & PADDED_MASK != 0,
+                        frame.flags & END_HEADERS_MASK != 0,
+                        frame.flags & END_STREAM_MASK != 0,
+                    );
+
+                    let mut headers = HeaderMap::new();
+                    hpack.decode_block(payload.freeze(), &mut headers, &mut *write_buffer)?;
+                    headers.pairs().for_each(|kv|println!("  {kv:?}"));
+                }
+                F::WindowUpdate => {
+                    let size = u32::from_be_bytes(*payload.first_chunk().expect("TODO"));
+                    println!("[{ty:?}] window size increment = {size}");
+
+                    const _SIZE: usize = 1_048_576_000;
+                    // let mut window_size = 65535;
+                    // window_size += u32::from_be_bytes(*size);
+                }
+                _ => {
+                    println!("[{ty:?}] unhandled frame");
+                }
+            };
         }
+
+        if ready!(io.poll_read(&mut *read_buffer, cx)?) == 0 {
+            return Poll::Ready(Ok(()))
+        }
+
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    }
+
+    fn preface<'a>(
+        read_buffer: &mut BytesMut,
+        settings_mut: &'a mut Option<Settings>,
+    ) -> Poll<Result<&'a mut Settings, BoxError>> {
+        let Some((preface, header, rest)) = split_exact(read_buffer) else {
+            return Poll::Pending;
+        };
+
+        if preface != *PREFACE {
+            return Poll::Ready(Err("preface error".into()));
+        }
+
+        let frame = frame::FrameHeader::decode(header);
+        let mut settings = Settings::new();
+
+        if !matches!(frame.frame_type(), Some(frame::Type::Settings)) {
+            return Poll::Ready(Err("malformed frame".into()));
+        }
+
+        let total_len = PREFACE.len() + frame::FrameHeader::SIZE + frame.len();
+
+        let Some(mut payload) = rest.get(..frame.len()) else {
+            return Poll::Pending;
+        };
+
+        while let Some((id, val, rest)) = split_exact(payload) {
+            let id = u16::from_be_bytes(id);
+            let val = u32::from_be_bytes(val);
+
+            let Some(id) = SettingId::from_u16(id) else {
+                return Poll::Ready(Err("invalid setting id".into()));
+            };
+
+            println!("[SETTINGS] {id:?} = {val}");
+            settings.set_by_id(id, val);
+            payload = rest;
+        }
+
+        read_buffer.advance(total_len);
+
+        Poll::Ready(Ok(settings_mut.get_or_insert(settings)))
     }
 }
 
@@ -186,6 +188,15 @@ where
     }
 }
 
+fn split_exact<const M: usize, const N: usize>(bytes: &[u8]) -> Option<([u8; M], [u8; N], &[u8])> {
+    if bytes.len() < M + N {
+        return None;
+    }
+    let chunk1 = bytes[..M].try_into().expect("known size");
+    let chunk2 = bytes[M..M + N].try_into().expect("known size");
+    Some((chunk1, chunk2, &bytes[M + N..]))
+}
+
 // ===== Projection =====
 
 impl<IO> Connection<IO> {
@@ -197,22 +208,9 @@ impl<IO> Connection<IO> {
                 Pin::new_unchecked(&mut me.io),
                 &mut me.read_buffer,
                 &mut me.write_buffer,
-                Pin::new_unchecked(&mut me.phase),
                 &mut me.settings,
                 &mut me.decoder,
             )
-        }
-    }
-}
-
-impl Phase {
-    fn project(self: Pin<&mut Self>) -> PhaseProject {
-        // SAFETY: self is pinned, no custom Drop and Unpin
-        unsafe {
-            match self.get_unchecked_mut() {
-                Self::Preface => PhaseProject::Preface,
-                Self::Idle => PhaseProject::Idle,
-            }
         }
     }
 }

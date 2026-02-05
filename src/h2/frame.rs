@@ -60,8 +60,11 @@ pub struct FrameHeader {
 }
 
 impl FrameHeader {
+    /// Length of encoded frame header bytes.
+    pub(crate) const SIZE: usize = 9;
+
     #[allow(unused, reason = "TODO")]
-    pub(crate) fn decode(bytes: [u8; 9]) -> Self {
+    pub(crate) fn decode(bytes: [u8; Self::SIZE]) -> Self {
         // Length (24),
         // Type (8),
         // Flags (8),
@@ -91,6 +94,11 @@ impl FrameHeader {
     #[inline]
     pub const fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    #[inline]
+    pub fn frame_type(&self) -> Option<Type> {
+        Type::from_u8(self.ty)
     }
 }
 
