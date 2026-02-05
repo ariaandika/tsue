@@ -14,6 +14,8 @@ pub struct HeaderValue {
 }
 
 impl HeaderValue {
+    pub(crate) const MAX_LENGTH: usize = 8 * 1024;  // 8KB
+
     /// Parse header value from static bytes.
     ///
     /// # Panics
@@ -85,8 +87,6 @@ impl HeaderValue {
 
 // ===== Parsing =====
 
-const MAX_HEADER_VALUE_LEN: usize = 1 << 13;  // 8KB
-
 const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderError> {
     use HeaderError as E;
     match bytes {
@@ -99,7 +99,7 @@ const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderError> {
         _ => {}
     }
     // too long
-    if bytes.len() > MAX_HEADER_VALUE_LEN {
+    if bytes.len() > HeaderValue::MAX_LENGTH {
         return Err(E::TooLong);
     }
     let mut error = false;

@@ -154,24 +154,6 @@ pub(crate) static STATIC_HEADER: [HeaderName; 61] = [
     standard::WWW_AUTHENTICATE,
 ];
 
-/// Returns `true` if prefix is a static table indexed pseudo header.
-///
-/// "prefix" means the first octet of a header field binary representation.
-macro_rules! is_pseudo_header_repr {
-    ($val:expr) => {{
-        //   0   1   2   3   4   5   6   7
-        // +---+---+---+---+---+---+---+---+
-        // | 1 |        Index (7+)         |
-        // +---+---------------------------+
-        const INDEXED: u8 = 0b1000_0000;
-        const PSEUDO_HEADER_INDEX_MIN: u8 = INDEXED | 1;
-        const PSEUDO_HEADER_INDEX_MAX: u8 = INDEXED | 14;
-        matches!($val, PSEUDO_HEADER_INDEX_MIN..=PSEUDO_HEADER_INDEX_MAX)
-    }};
-}
-
-pub(crate) use {is_pseudo_header_repr};
-
 #[inline(always)]
 pub(crate) fn get_static_header_value(index: usize) -> Option<HeaderValue> {
     static STATIC_HEADER_VALUES: [HeaderValue; 16] = [
@@ -213,18 +195,6 @@ fn test_hpack_static_idx() {
 
         let name2 = &STATIC_HEADER[(idx.get() - 1) as usize];
         assert_eq!(name, name2);
-    }
-}
-
-#[test]
-fn test_pseudo_header_repr() {
-    for i in 1u8.. {
-        if is_pseudo_header_repr!(i) {
-            let pseudo = STATIC_HEADER[i as usize].as_str().as_bytes();
-            assert_eq!(pseudo[0], b':');
-        } else {
-            break;
-        }
     }
 }
 

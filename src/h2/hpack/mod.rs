@@ -1,4 +1,5 @@
 mod huffman;
+mod repr;
 mod table;
 mod decoder;
 mod encoder;

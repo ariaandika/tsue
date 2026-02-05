@@ -1,50 +1,9 @@
 use tcio::bytes::{Buf, Bytes, BytesMut};
 
-use crate::h2::hpack::huffman;
 use crate::h2::hpack::error::HpackError;
+use crate::h2::hpack::repr;
 use crate::h2::hpack::table::{STATIC_HEADER, Table, get_static_header_value};
-use crate::h2::hpack::table::{is_pseudo_header_repr};
 use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue};
-
-const MSB: u8 = 0b1000_0000;
-const U7: u8 = 0b0111_1111;
-const U6: u8 = 0b0011_1111;
-const U5: u8 = 0b0001_1111;
-const U4: u8 = 0b0000_1111;
-const IS_HUFFMAN: u8 = MSB;
-
-//   0   1   2   3   4   5   6   7
-// +---+---+---+---+---+---+---+---+
-// | 1 |        Index (7+)         |
-// +---+---------------------------+
-const INDEXED: u8 = 0b1000_0000;
-const INDEXED_INT: u8 = U7;
-// +---+---+---+---+---+---+---+---+
-// | 0 | 1 |      Index (6+)       |
-// +---+---+-----------------------+
-const LITERAL_INDEXED: u8 = 0b0100_0000;
-const LITERAL_INDEXED_INT: u8 = U6;
-// +---+---+---+---+---+---+---+---+
-// | 0 | 0 | 1 |   Max size (5+)   |
-// +---+---------------------------+
-const SIZE_UPDATE: u8 = 0b0010_0000;
-const SIZE_UPDATE_MASK: u8 = 0b1110_0000;
-const SIZE_UPDATE_INT: u8 = U5;
-
-// === Literal without indexing ====
-// +---+---+---+---+---+---+---+---+
-// | 0 | 0 | 0 | 0 |  Index (4+)   |
-// +---+---+-----------------------+
-// ===== Literal never indexed =====
-// +---+---+---+---+---+---+---+---+
-// | 0 | 0 | 0 | 1 |  Index (4+)   |
-// +---+---+-----------------------+
-// const LITERAL_NINDEX: u8 = 0b0001_0000;
-const LITERAL_NINDEX_INT: u8 = U4;
-
-/// 0bx1xx_xxxx = literal with indexed
-/// 0bx0xx_xxxx = literal without/never indexed
-const LITERAL_IS_INDEXED_MASK: u8 = 0b0100_0000;
 
 #[derive(Debug, Default)]
 pub struct Decoder {
@@ -77,23 +36,17 @@ impl Decoder {
         maps: &mut HeaderMap,
         write_buffer: &mut BytesMut,
     ) -> Result<(), HpackError> {
-        let Some(&prefix) = block.first() else {
+        let Some(prefix) = block.try_get_u8() else {
             return Ok(());
         };
 
-        if is_pseudo_header_repr!(prefix) {
-            return Err(HpackError::InvalidPseudoHeader);
-        }
-
         // Dynamic table size update MUST occur at the beginning of the first header block
         // following the change to the dynamic table size.
-        let prefix = if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
-            block.advance(1);
-            let max_size = decode_int::<SIZE_UPDATE_INT>(prefix, &mut block)?;
-            self.table.update_size(max_size);
-            match block.first() {
-                Some(&ok) => ok,
-                _ => return Ok(())
+        let prefix = if let Some(size) = repr::decode_size_update(prefix, &mut block)? {
+            self.table.update_size(size);
+            match block.try_get_u8() {
+                Some(ok) => ok,
+                _ => return Ok(()),
             }
         } else {
             prefix
@@ -121,11 +74,7 @@ impl Decoder {
             return Err(E::Incomplete);
         };
 
-        if is_pseudo_header_repr!(prefix) {
-            return Err(E::InvalidPseudoHeader);
-        }
-
-        if prefix & SIZE_UPDATE_MASK == SIZE_UPDATE {
+        if repr::size_update::is(prefix) {
             return Err(E::InvalidSizeUpdate);
         }
 
@@ -140,30 +89,22 @@ impl Decoder {
     ) -> Result<HeaderField, HpackError> {
         use HpackError as E;
 
-        if prefix & INDEXED == INDEXED {
-            let index = decode_int::<INDEXED_INT>(prefix, bytes)?
-                .checked_sub(1)
-                .ok_or(E::ZeroIndex)?;
-            if let Some(name) = STATIC_HEADER.get(index) {
-                let val = get_static_header_value(index).ok_or(E::NotFound)?;
-                return Ok(HeaderField::new(name.clone(), val));
+        if let Some(index) = repr::decode_indexed(prefix, bytes)? {
+            return match STATIC_HEADER.get(index) {
+                Some(name) => {
+                    let val = get_static_header_value(index).ok_or(E::NotFound)?;
+                    return Ok(HeaderField::new(name.clone(), val));
+                }
+                _ => self
+                    .table
+                    .fields()
+                    .get(index - STATIC_HEADER.len())
+                    .cloned()
+                    .ok_or(E::NotFound)
             }
-            return self
-                .table
-                .fields()
-                .get(index - STATIC_HEADER.len())
-                .cloned()
-                .ok_or(E::NotFound);
         }
 
-        let index = if prefix & LITERAL_INDEXED == LITERAL_INDEXED {
-            decode_int::<LITERAL_INDEXED_INT>(prefix, bytes)?
-        } else if prefix & SIZE_UPDATE_MASK == 0 {
-            // Literal without/never indexed
-            decode_int::<LITERAL_NINDEX_INT>(prefix, bytes)?
-        } else {
-            return Err(E::InvalidSizeUpdate);
-        };
+        let (is_indexed, index) = repr::decode_literal(prefix, bytes)?;
 
         // processing
 
@@ -182,12 +123,14 @@ impl Decoder {
                     }
                 }
             }
-            None => HeaderName::from_internal_lowercase(decode_string(bytes, write_buffer)?)?,
+            None => {
+                let string = repr::decode_string(bytes, write_buffer)?;
+                HeaderName::from_internal_lowercase(string)?
+            },
         };
-        let value = HeaderValue::from_bytes(decode_string(bytes, write_buffer)?)?;
+        let value = HeaderValue::from_bytes(repr::decode_string(bytes, write_buffer)?)?;
         let field = HeaderField::with_hash(name, value, hash);
 
-        let is_indexed = prefix & LITERAL_IS_INDEXED_MASK == LITERAL_IS_INDEXED_MASK;
         if is_indexed {
             self.table.insert(field.clone());
         }
@@ -213,84 +156,4 @@ impl Decoder {
     ) -> Result<HeaderField, HpackError> {
         self.decode(bytes, write_buffer)
     }
-}
-
-fn decode_int<const INT: u8>(prefix: u8, bytes: &mut Bytes) -> Result<usize, HpackError> {
-    let int = prefix & INT;
-    if int != INT {
-        Ok(int as usize)
-    } else {
-        Ok((int as usize) + continue_decode_int(bytes)?)
-    }
-}
-
-fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, HpackError> {
-    let mut shift = 0;
-    let mut value = 0;
-    loop {
-        let prefix = bytes.try_get_u8().ok_or(HpackError::Incomplete)?;
-        let u7 = prefix & U7;
-
-        value += (u7 as usize) << shift;
-        shift += 7;
-
-        if prefix & MSB != MSB {
-            break
-        }
-    }
-
-    Ok(value)
-}
-
-fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<Bytes, HpackError> {
-    //   0   1   2   3   4   5   6   7
-    // +---+---+---+---+---+---+---+---+
-    // | H |    String Length (7+)     |
-    // +---+---------------------------+
-    // |  String Data (Length octets)  |
-    // +-------------------------------+
-    let prefix = bytes.try_get_u8().ok_or(HpackError::Incomplete)?;
-
-    let len = decode_int::<U7>(prefix, bytes)?;
-    let Some(value) = bytes.get(..len) else {
-        return Err(HpackError::Incomplete);
-    };
-
-    if prefix & IS_HUFFMAN == IS_HUFFMAN {
-        huffman::decode(value, write_buffer)?;
-        let value = write_buffer.split().freeze();
-        bytes.advance(len);
-        Ok(value)
-    } else {
-        bytes.try_split_to(len).ok_or(HpackError::Incomplete)
-    }
-}
-
-// ===== Error =====
-
-// ===== Test =====
-
-#[test]
-fn test_hpack_decode_int() {
-    let mut bytes = Bytes::copy_from_slice(&[
-        0b0001_1111,
-        0b1001_1010,
-        0b0000_1010,
-    ]);
-    let prefix = bytes.get_u8();
-    let int = decode_int::<U5>(prefix, &mut bytes).unwrap();
-    assert!(bytes.is_empty());
-    assert_eq!(int, 1337);
-}
-
-#[test]
-fn test_hpack_decode_int2() {
-    let mut bytes = Bytes::copy_from_slice(&[
-        0b0001_1111,
-        0b0000_0000,
-    ]);
-    let prefix = bytes.get_u8();
-    let int = decode_int::<U5>(prefix, &mut bytes).unwrap();
-    assert!(bytes.is_empty());
-    assert_eq!(int, 31);
 }
