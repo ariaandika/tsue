@@ -153,6 +153,16 @@ impl HeaderName {
             Repr::Arbitrary(_) => None,
         }
     }
+
+    /// Returns `true` if this is a pseudo header.
+    ///
+    /// Note that this only available in constant headers.
+    pub(crate) fn is_pseudo_header(&self) -> bool {
+        match self.repr {
+            Repr::Static(Static { hpack_idx: Some(idx), .. }) => idx.get() <= 14,
+            _ => false,
+        }
+    }
 }
 
 // ===== Parser =====

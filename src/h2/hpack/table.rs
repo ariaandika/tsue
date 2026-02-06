@@ -244,3 +244,13 @@ fn test_hpack_static_idx() {
     assert_eq!(STATIC_HEADER[LAST_PSEUDO_HEADER_INDEX + 1], standard::ACCEPT_CHARSET);
 }
 
+#[test]
+fn test_is_pseudo_header() {
+    for name in &STATIC_HEADER[..=LAST_PSEUDO_HEADER_INDEX] {
+        assert!(name.is_pseudo_header());
+    }
+    for name in &STATIC_HEADER[LAST_PSEUDO_HEADER_INDEX + 1..] {
+        assert!(!name.is_pseudo_header());
+    }
+}
+
