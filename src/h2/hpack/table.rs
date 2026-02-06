@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use crate::h2::hpack::error::HpackError;
 use crate::headers::{HeaderField, HeaderName, HeaderValue, standard};
 
 /// HPACK Table.
@@ -52,6 +53,54 @@ impl Table {
         self.max_size = max_size;
         while self.max_size < self.size {
             self.evict_entry();
+        }
+    }
+
+    /// Get header field by index.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if index not found.
+    ///
+    /// Returns `Err` if index is referencing pseudo header.
+    pub(crate) fn get(&mut self, index: usize) -> Result<HeaderField, HpackError> {
+        use HpackError as E;
+
+        if index < 15 {
+            return Err(E::InvalidPseudoHeader);
+        }
+        if index == 15 {
+            return Ok(HeaderField::new(
+                STATIC_HEADER[index].clone(),
+                STATIC_HEADER_VALUES[index].clone(),
+            ));
+        }
+        let Some(index) = index.checked_sub(STATIC_HEADER.len()) else {
+            // static header without value
+            return Err(E::NotFound);
+        };
+        Ok(self.fields.get(index).ok_or(HpackError::NotFound)?.clone())
+    }
+
+    /// Get header name by index.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if index not found.
+    ///
+    /// Returns `Err` if index is referencing pseudo header.
+    pub(crate) fn get_name(&mut self, index: usize) -> Result<HeaderName, HpackError> {
+        if index <= LAST_PSEUDO_HEADER_INDEX {
+            return Err(HpackError::InvalidPseudoHeader);
+        }
+        match STATIC_HEADER.get(index) {
+            Some(name) => Ok(name.clone()),
+            None => Ok(self
+                .fields
+                .get(index - STATIC_HEADER.len())
+                .ok_or(HpackError::NotFound)?
+                .name()
+                .clone()),
         }
     }
 
@@ -154,31 +203,26 @@ pub(crate) static STATIC_HEADER: [HeaderName; 61] = [
     standard::WWW_AUTHENTICATE,
 ];
 
-#[inline(always)]
-pub(crate) fn get_static_header_value(index: usize) -> Option<HeaderValue> {
-    static STATIC_HEADER_VALUES: [HeaderValue; 16] = [
-        HeaderValue::from_static(b"_"), // PLACEHOLDER
-        HeaderValue::from_static(b"GET"),
-        HeaderValue::from_static(b"POST"),
-        HeaderValue::from_static(b"/"),
-        HeaderValue::from_static(b"/index.html"),
-        HeaderValue::from_static(b"http"),
-        HeaderValue::from_static(b"https"),
-        HeaderValue::from_static(b"200"),
-        HeaderValue::from_static(b"204"),
-        HeaderValue::from_static(b"206"),
-        HeaderValue::from_static(b"304"),
-        HeaderValue::from_static(b"400"),
-        HeaderValue::from_static(b"404"),
-        HeaderValue::from_static(b"500"),
-        HeaderValue::from_static(b"_"), // PLACEHOLDER
-        HeaderValue::from_static(b"gzip, deflate"),
-    ];
-    match index {
-        0 | 14 => None,
-        _ => STATIC_HEADER_VALUES.get(index).cloned(),
-    }
-}
+const LAST_PSEUDO_HEADER_INDEX: usize = 13;
+
+static STATIC_HEADER_VALUES: [HeaderValue; 16] = [
+    HeaderValue::from_static(b"_"), // PLACEHOLDER
+    HeaderValue::from_static(b"GET"),
+    HeaderValue::from_static(b"POST"),
+    HeaderValue::from_static(b"/"),
+    HeaderValue::from_static(b"/index.html"),
+    HeaderValue::from_static(b"http"),
+    HeaderValue::from_static(b"https"),
+    HeaderValue::from_static(b"200"),
+    HeaderValue::from_static(b"204"),
+    HeaderValue::from_static(b"206"),
+    HeaderValue::from_static(b"304"),
+    HeaderValue::from_static(b"400"),
+    HeaderValue::from_static(b"404"),
+    HeaderValue::from_static(b"500"),
+    HeaderValue::from_static(b"_"), // PLACEHOLDER
+    HeaderValue::from_static(b"gzip, deflate"),
+];
 
 #[test]
 fn test_hpack_static_idx() {
@@ -190,11 +234,13 @@ fn test_hpack_static_idx() {
     for name in &STATIC_HEADER {
         let idx = name.hpack_static().unwrap();
 
-        // this allows for single byte int encoding
         assert!(idx.get() < LITERAL_INDEXED_INT);
 
         let name2 = &STATIC_HEADER[(idx.get() - 1) as usize];
         assert_eq!(name, name2);
     }
+
+    assert_eq!(STATIC_HEADER[LAST_PSEUDO_HEADER_INDEX], standard::PSEUDO_STATUS);
+    assert_eq!(STATIC_HEADER[LAST_PSEUDO_HEADER_INDEX + 1], standard::ACCEPT_CHARSET);
 }
 

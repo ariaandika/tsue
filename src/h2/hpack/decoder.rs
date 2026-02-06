@@ -2,7 +2,7 @@ use tcio::bytes::{Bytes, BytesMut};
 
 use crate::h2::hpack::error::HpackError;
 use crate::h2::hpack::repr;
-use crate::h2::hpack::table::{STATIC_HEADER, Table, get_static_header_value};
+use crate::h2::hpack::table::Table;
 use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Debug, Default)]
@@ -76,41 +76,17 @@ impl Decoder {
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
     ) -> Result<HeaderField, HpackError> {
-        use HpackError as E;
-
         if let Some(index) = repr::decode_indexed(bytes)? {
-            return match STATIC_HEADER.get(index) {
-                Some(name) => {
-                    let val = get_static_header_value(index).ok_or(E::NotFound)?;
-                    return Ok(HeaderField::new(name.clone(), val));
-                }
-                _ => self
-                    .table
-                    .fields()
-                    .get(index - STATIC_HEADER.len())
-                    .cloned()
-                    .ok_or(E::NotFound)
-            }
+            return self.table.get(index);
         }
 
         let (is_indexed, index) = repr::decode_literal(bytes)?;
 
-        // processing
-
         let (name, hash) = match index.checked_sub(1) {
             Some(index) => {
-                // HPACK is 1 indexed
-                match STATIC_HEADER.get(index) {
-                    Some(name) => (name.clone(), name.hash()),
-                    None => {
-                        let field = self
-                            .table
-                            .fields()
-                            .get(index - STATIC_HEADER.len())
-                            .ok_or(E::NotFound)?;
-                        (field.name().clone(), field.cached_hash())
-                    }
-                }
+                let name = self.table.get_name(index)?;
+                let hash = name.hash();
+                (name, hash)
             }
             None => {
                 let string = repr::decode_string(bytes, write_buffer)?;
