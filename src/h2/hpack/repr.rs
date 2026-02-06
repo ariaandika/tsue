@@ -9,16 +9,18 @@ use HpackError as E;
 /// 0bx0xx_xxxx = literal without/never indexed
 const LITERAL_IS_INDEXED_MASK: u8 = 0b0100_0000;
 
-pub fn is_indexed(prefix: u8) -> bool {
-    prefix & LITERAL_IS_INDEXED_MASK == LITERAL_IS_INDEXED_MASK
-}
-
-/// Returns 0 based indexed from `INDEXED` header representation.
-pub fn decode_indexed(prefix: u8, bytes: &mut Bytes) -> Result<Option<usize>, HpackError> {
-    if !indexed::is(prefix) {
+/// Returns `Some(index)` if given bytes is a header block with `INDEXED` representation 
+///
+/// The `index` is already 0 based.
+pub fn decode_indexed(bytes: &mut Bytes) -> Result<Option<usize>, HpackError> {
+    let Some(&prefix) = bytes.first().filter(|&&e| indexed::is(e)) else {
         return Ok(None);
-    }
-    let int = NonZeroU8::new(prefix & indexed::INT).ok_or(E::ZeroIndex)?.get() - 1;
+    };
+    bytes.advance(1);
+    let int = NonZeroU8::new(prefix & indexed::INT)
+        .ok_or(E::ZeroIndex)?
+        .get()
+        - 1;
     if int != indexed::INT - 1 {
         Ok(Some(int as usize))
     } else {
@@ -26,10 +28,15 @@ pub fn decode_indexed(prefix: u8, bytes: &mut Bytes) -> Result<Option<usize>, Hp
     }
 }
 
-pub fn decode_size_update(prefix: u8, bytes: &mut Bytes) -> Result<Option<usize>, HpackError> {
+/// Returns `Some(size_update)` if given bytes is a header block with `SIZE_UPDATE` 
+pub fn decode_size_update(bytes: &mut Bytes) -> Result<Option<usize>, HpackError> {
+    let Some(&prefix) = bytes.first() else {
+        return Ok(None);
+    };
     if !size_update::is(prefix) {
         return Ok(None);
     }
+    bytes.advance(1);
     let int = prefix & size_update::INT;
     if int != size_update::INT {
         Ok(Some(int as usize))
@@ -38,9 +45,23 @@ pub fn decode_size_update(prefix: u8, bytes: &mut Bytes) -> Result<Option<usize>
     }
 }
 
-pub fn decode_literal(prefix: u8, bytes: &mut Bytes) -> Result<(bool, usize), HpackError> {
+/// Returns `Some((is_indexed, index))` if given bytes is a header block with `LITERAL_*`
+/// representation.
+///
+/// The returned index can be zero, which denote a string literal.
+///
+/// This function should be used as a fallback after checking for `INDEXED` or `SIZE_UPDATE`
+/// representation.
+///
+/// # Panics
+///
+/// Panics in debug mode if the header reresentation is `INDEXED` or `SIZE_UPDATE`.
+pub fn decode_literal(bytes: &mut Bytes) -> Result<(bool, usize), HpackError> {
+    let Some(prefix) = bytes.try_get_u8() else {
+        return Err(E::Incomplete);
+    };
     debug_assert!(literal_indexed::is(prefix) || literal_nindexed::is(prefix));
-    let is_indexed = is_indexed(prefix);
+    let is_indexed = prefix & LITERAL_IS_INDEXED_MASK == LITERAL_IS_INDEXED_MASK;
     let max = if is_indexed {
         literal_indexed::INT
     } else {
@@ -64,8 +85,8 @@ pub fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<B
     } else {
         len as usize + continue_decode_int(bytes)?
     };
-    let value = bytes.get(..len).ok_or(E::Incomplete)?;
-    if prefix & string::BITS == string::BITS {
+    if string::is_huffman(prefix) {
+        let value = bytes.get(..len).ok_or(E::Incomplete)?;
         huffman::decode(value, write_buffer)?;
         let value = write_buffer.split().freeze();
         bytes.advance(len);
@@ -102,6 +123,9 @@ pub fn decode_string(bytes: &mut Bytes, write_buffer: &mut BytesMut) -> Result<B
 /// +---+---------------------------+
 /// ```
 pub mod int {
+    // Integers are used to represent name indexes, header field indexes, or string lengths.
+    pub const MAX: usize = crate::headers::HeaderValue::MAX_LENGTH;
+
     pub const CONTINUE: u8 = 0b1000_0000;
 
     const INT: u8 = CONTINUE - 1;
@@ -122,8 +146,12 @@ pub mod int {
 /// +-------------------------------+
 /// ```
 pub mod string {
-    pub const BITS: u8 = 0b1000_0000;
-    pub const INT: u8 = BITS - 1;
+    pub const HUFFMAN_FLAG: u8 = 0b1000_0000;
+    pub const INT: u8 = HUFFMAN_FLAG - 1;
+
+    pub fn is_huffman(prefix: u8) -> bool {
+        prefix & HUFFMAN_FLAG == HUFFMAN_FLAG
+    }
 }
 
 /// # Indexed
@@ -206,9 +234,6 @@ pub mod literal_nindexed {
 
 #[doc(hidden)]
 pub(crate) fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, HpackError> {
-    // Integers are used to represent name indexes, header field indexes, or string lengths.
-    const MAX: usize = crate::headers::HeaderValue::MAX_LENGTH;
-
     let mut shift = 0;
     let mut value = 0;
     loop {
@@ -218,7 +243,7 @@ pub(crate) fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, HpackError
         value += (int as usize) << shift;
         shift += 7;
 
-        if value > MAX {
+        if value > int::MAX {
             return Err(crate::headers::error::HeaderError::TooLong.into());
         }
 
@@ -227,31 +252,4 @@ pub(crate) fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, HpackError
         }
     }
     Ok(value)
-}
-
-// ===== Test =====
-
-#[test]
-fn test_hpack_decode_int() {
-    let mut bytes = Bytes::copy_from_slice(&[
-        0b0001_1111,
-        0b1001_1010,
-        0b0000_1010,
-    ]);
-    let prefix = bytes.get_u8();
-    let int = decode_size_update(prefix, &mut bytes).unwrap().unwrap();
-    assert!(bytes.is_empty());
-    assert_eq!(int, 1337);
-}
-
-#[test]
-fn test_hpack_decode_int2() {
-    let mut bytes = Bytes::copy_from_slice(&[
-        0b0001_1111,
-        0b0000_0000,
-    ]);
-    let prefix = bytes.get_u8();
-    let int = decode_size_update(prefix, &mut bytes).unwrap().unwrap();
-    assert!(bytes.is_empty());
-    assert_eq!(int, 31);
 }

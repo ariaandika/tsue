@@ -1,4 +1,4 @@
-use tcio::bytes::{Buf, Bytes, BytesMut};
+use tcio::bytes::{Bytes, BytesMut};
 
 use crate::h2::hpack::error::HpackError;
 use crate::h2::hpack::repr;
@@ -36,24 +36,14 @@ impl Decoder {
         maps: &mut HeaderMap,
         write_buffer: &mut BytesMut,
     ) -> Result<(), HpackError> {
-        let Some(prefix) = block.try_get_u8() else {
-            return Ok(());
-        };
-
         // Dynamic table size update MUST occur at the beginning of the first header block
         // following the change to the dynamic table size.
-        let prefix = if let Some(size) = repr::decode_size_update(prefix, &mut block)? {
+        if let Some(size) = repr::decode_size_update(&mut block)? {
             self.table.update_size(size);
-            match block.try_get_u8() {
-                Some(ok) => ok,
-                _ => return Ok(()),
-            }
-        } else {
-            prefix
-        };
+        }
 
         while !block.is_empty() {
-            let field = self.decode_inner(prefix, &mut block, write_buffer)?;
+            let field = self.decode_inner(&mut block, write_buffer)?;
             maps.try_append_field(field)?;
         }
         Ok(())
@@ -78,18 +68,17 @@ impl Decoder {
             return Err(E::InvalidSizeUpdate);
         }
 
-        self.decode_inner(prefix, bytes, write_buffer)
+        self.decode_inner(bytes, write_buffer)
     }
 
     fn decode_inner(
         &mut self,
-        prefix: u8,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
     ) -> Result<HeaderField, HpackError> {
         use HpackError as E;
 
-        if let Some(index) = repr::decode_indexed(prefix, bytes)? {
+        if let Some(index) = repr::decode_indexed(bytes)? {
             return match STATIC_HEADER.get(index) {
                 Some(name) => {
                     let val = get_static_header_value(index).ok_or(E::NotFound)?;
@@ -104,7 +93,7 @@ impl Decoder {
             }
         }
 
-        let (is_indexed, index) = repr::decode_literal(prefix, bytes)?;
+        let (is_indexed, index) = repr::decode_literal(bytes)?;
 
         // processing
 
