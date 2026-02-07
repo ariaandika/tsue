@@ -9,24 +9,76 @@ use HpackError as E;
 /// 0bx0xx_xxxx = literal without/never indexed
 const LITERAL_IS_INDEXED_MASK: u8 = 0b0100_0000;
 
-/// Returns `Some(index)` if given bytes is a header block with `INDEXED` representation 
-///
-/// The `index` is already 0 based.
-pub fn decode_indexed(bytes: &mut Bytes) -> Result<Option<usize>, HpackError> {
-    let Some(&prefix) = bytes.first().filter(|&&e| indexed::is(e)) else {
-        return Ok(None);
-    };
-    bytes.advance(1);
-    let int = NonZeroU8::new(prefix & indexed::INT)
-        .ok_or(E::ZeroIndex)?
-        .get()
-        - 1;
-    if int != indexed::INT - 1 {
-        Ok(Some(int as usize))
-    } else {
-        Ok(Some(int as usize + continue_decode_int(bytes)?))
-    }
-}
+// /// Header field name representation.
+// #[derive(Debug, Clone, Copy)]
+// pub struct Index {
+//     index: usize,
+//     /// is current representation is `INDEXED`
+//     is_indexed: bool,
+//     /// is current representation is `LITERAL_INDEXED`
+//     is_with_indexing: bool,
+// }
+//
+// impl Index {
+//     pub fn decode_chunk(bytes: &mut Bytes) -> Result<Self, HpackError> {
+//         use HpackError as E;
+//
+//         let Some(&prefix) = bytes.first() else {
+//             return Err(E::Incomplete);
+//         };
+//         if prefix & 32 == 32 {
+//             return Err(E::InvalidSizeUpdate);
+//         }
+//         let is_indexed = prefix & 128 == 128;
+//         let is_with_indexing = prefix & 64 == 64;
+//         let max = if is_indexed {
+//             127
+//         } else if is_with_indexing {
+//             63
+//         } else {
+//             15
+//         };
+//         let index = prefix & max;
+//         if is_indexed && index == 0 {
+//             return Err(E::ZeroIndex);
+//         }
+//         let index = if index != max {
+//             index as usize
+//         } else {
+//             index as usize + continue_decode_int(bytes)?
+//         };
+//         Ok(Self {
+//             index,
+//             is_indexed,
+//             is_with_indexing,
+//         })
+//     }
+//
+//     /// Returns `Some(index)` if current index use `INDEXED` representation.
+//     ///
+//     /// The returned index is 0 based.
+//     pub fn as_indexed(&self) -> Option<usize> {
+//         if self.is_indexed {
+//             // This cannot overflow because it is checked that if `self.is_indexed` index cannot be
+//             // zero.
+//             Some(self.index - 1)
+//         } else {
+//             None
+//         }
+//     }
+//
+//     /// Returns `Some(index)` if current index is non-zero.
+//     ///
+//     /// If returns `Some`, the index is 0 based.
+//     pub fn index(&self) -> Option<usize> {
+//         self.index.checked_sub(1)
+//     }
+//
+//     /// Return `true` if current index use `LITERAL_INDEXED` representation.
+//     pub fn is_with_indexing(&self) -> bool {
+//         self.is_with_indexing
+//     }
+// }
 
 /// Returns `Some(size_update)` if given bytes is a header block with `SIZE_UPDATE` 
 pub fn decode_size_update(bytes: &mut Bytes) -> Result<Option<usize>, HpackError> {
@@ -45,7 +97,22 @@ pub fn decode_size_update(bytes: &mut Bytes) -> Result<Option<usize>, HpackError
     }
 }
 
-/// Returns `Some((is_indexed, index))` if given bytes is a header block with `LITERAL_*`
+/// Returns `Some(index)` if given bytes is a header block with `INDEXED` representation.
+///
+/// The `index` is already 0 based.
+pub fn decode_indexed(prefix: u8, bytes: &mut Bytes) -> Result<Option<usize>, HpackError> {
+    if prefix & 128 == 0 {
+        return Ok(None);
+    }
+    let index = (prefix & 127).checked_sub(1).ok_or(E::ZeroIndex)?;
+    if index != 127 {
+        Ok(Some(index as usize))
+    } else {
+        Ok(Some(index as usize + continue_decode_int(bytes)?))
+    }
+}
+
+/// Returns `Some((is_with_indexing, index))` if given bytes is a header block with `LITERAL_*`
 /// representation.
 ///
 /// The returned index can be zero, which denote a string literal.
@@ -56,22 +123,19 @@ pub fn decode_size_update(bytes: &mut Bytes) -> Result<Option<usize>, HpackError
 /// # Panics
 ///
 /// Panics in debug mode if the header reresentation is `INDEXED` or `SIZE_UPDATE`.
-pub fn decode_literal(bytes: &mut Bytes) -> Result<(bool, usize), HpackError> {
-    let Some(prefix) = bytes.try_get_u8() else {
-        return Err(E::Incomplete);
-    };
-    debug_assert!(literal_indexed::is(prefix) || literal_nindexed::is(prefix));
-    let is_indexed = prefix & LITERAL_IS_INDEXED_MASK == LITERAL_IS_INDEXED_MASK;
-    let max = if is_indexed {
-        literal_indexed::INT
-    } else {
-        literal_nindexed::INT
-    };
+pub fn decode_literal(prefix: u8, bytes: &mut Bytes) -> Result<(bool, usize), HpackError> {
+    debug_assert!(
+        prefix & 128 == 0 || prefix & 32 == 0,
+        "cannot be INDEXED or SIZE_UPDATE"
+    );
+    // is "literal" should use incremental indexing
+    let is_with_indexing = prefix & 64 == 64;
+    let max = if is_with_indexing { 63 } else { 15 };
     let int = prefix & max;
     if int != max {
-        Ok((is_indexed, int as usize))
+        Ok((is_with_indexing, int as usize))
     } else {
-        Ok((is_indexed, int as usize + continue_decode_int(bytes)?))
+        Ok((is_with_indexing, int as usize + continue_decode_int(bytes)?))
     }
 }
 

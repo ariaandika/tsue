@@ -11,7 +11,7 @@ pub enum HpackError {
     TooMany,
     /// Unknown header block kind.
     UnknownRepr,
-    /// Found `0` index.
+    /// invalid use of index 0.
     ZeroIndex,
     /// Indexed header not found.
     NotFound,
@@ -32,7 +32,7 @@ impl std::fmt::Display for HpackError {
             Self::Incomplete => f.write_str("bytes incomplete"),
             Self::TooMany => f.write_str("header too many"),
             Self::UnknownRepr => f.write_str("unknown header field representation"),
-            Self::ZeroIndex => f.write_str("invalid 0 index"),
+            Self::ZeroIndex => f.write_str("invalid use of index 0"),
             Self::NotFound => f.write_str("indexed header not found"),
             Self::Huffman => f.write_str("huffman coding error"),
             Self::InvalidHeader(err) => write!(f, "invalid header: {err}"),

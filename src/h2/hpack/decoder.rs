@@ -1,4 +1,4 @@
-use tcio::bytes::{Bytes, BytesMut};
+use tcio::bytes::{Buf, Bytes, BytesMut};
 
 use crate::h2::hpack::error::HpackError;
 use crate::h2::hpack::repr;
@@ -42,8 +42,8 @@ impl Decoder {
             self.table.update_size(size);
         }
 
-        while !block.is_empty() {
-            let field = self.decode_inner(&mut block, write_buffer)?;
+        while let Some(prefix) = block.try_get_u8() {
+            let field = self.decode_inner(prefix, &mut block, write_buffer)?;
             maps.try_append_field(field)?;
         }
         Ok(())
@@ -67,20 +67,22 @@ impl Decoder {
         if repr::size_update::is(prefix) {
             return Err(E::InvalidSizeUpdate);
         }
+        bytes.advance(1);
 
-        self.decode_inner(bytes, write_buffer)
+        self.decode_inner(prefix, bytes, write_buffer)
     }
 
     fn decode_inner(
         &mut self,
+        prefix: u8,
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
     ) -> Result<HeaderField, HpackError> {
-        if let Some(index) = repr::decode_indexed(bytes)? {
+        if let Some(index) = repr::decode_indexed(prefix, bytes)? {
             return self.table.get(index);
         }
 
-        let (is_indexed, index) = repr::decode_literal(bytes)?;
+        let (is_indexed, index) = repr::decode_literal(prefix, bytes)?;
 
         let (name, hash) = match index.checked_sub(1) {
             Some(index) => {
