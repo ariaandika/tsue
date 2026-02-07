@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use crate::h2::hpack::error::HpackError;
 use crate::headers::{HeaderField, HeaderName, HeaderValue, standard};
 
 /// HPACK Table.
@@ -60,26 +59,20 @@ impl Table {
     ///
     /// # Errors
     ///
-    /// Returns `Err` if index not found.
-    ///
-    /// Returns `Err` if index is referencing pseudo header.
-    pub(crate) fn get(&mut self, index: usize) -> Result<HeaderField, HpackError> {
-        use HpackError as E;
-
-        if index < 15 {
-            return Err(E::InvalidPseudoHeader);
-        }
-        if index == 15 {
-            return Ok(HeaderField::new(
-                STATIC_HEADER[index].clone(),
-                STATIC_HEADER_VALUES[index].clone(),
-            ));
-        }
-        let Some(index) = index.checked_sub(STATIC_HEADER.len()) else {
+    /// Returns `Err` if index out of bounds or have no value.
+    pub(crate) fn get(&mut self, index: usize) -> Option<&HeaderField> {
+        if matches!(index, 0 | 14) {
             // static header without value
-            return Err(E::NotFound);
-        };
-        Ok(self.fields.get(index).ok_or(HpackError::NotFound)?.clone())
+            return None;
+        }
+        if index < STATIC_HEADER_FIELDS.len() {
+            return Some(&STATIC_HEADER_FIELDS[index]);
+        }
+        if index < STATIC_HEADER.len() {
+            // static header without value
+            return None;
+        }
+        self.fields.get(index - STATIC_HEADER.len())
     }
 
     /// Get header name by index.
@@ -89,18 +82,10 @@ impl Table {
     /// Returns `Err` if index not found.
     ///
     /// Returns `Err` if index is referencing pseudo header.
-    pub(crate) fn get_name(&mut self, index: usize) -> Result<HeaderName, HpackError> {
-        if index <= LAST_PSEUDO_HEADER_INDEX {
-            return Err(HpackError::InvalidPseudoHeader);
-        }
+    pub(crate) fn get_name(&mut self, index: usize) -> Option<&HeaderName> {
         match STATIC_HEADER.get(index) {
-            Some(name) => Ok(name.clone()),
-            None => Ok(self
-                .fields
-                .get(index - STATIC_HEADER.len())
-                .ok_or(HpackError::NotFound)?
-                .name()
-                .clone()),
+            Some(name) => Some(name),
+            None => self.fields.get(index - STATIC_HEADER.len()).map(HeaderField::name),
         }
     }
 
@@ -134,7 +119,7 @@ impl Table {
 
 #[cfg(test)]
 impl Table {
-    pub(crate) fn size(&self) -> usize {
+    pub(super) fn size(&self) -> usize {
         self.size
     }
 }
@@ -203,25 +188,29 @@ pub(crate) static STATIC_HEADER: [HeaderName; 61] = [
     standard::WWW_AUTHENTICATE,
 ];
 
-const LAST_PSEUDO_HEADER_INDEX: usize = 13;
+macro_rules! header_fields {
+    ($($name:ident, $val:expr),* $(,)?) => {
+        [$(HeaderField::new(standard::$name, HeaderValue::from_static($val))),*]
+    };
+}
 
-static STATIC_HEADER_VALUES: [HeaderValue; 16] = [
-    HeaderValue::from_static(b"_"), // PLACEHOLDER
-    HeaderValue::from_static(b"GET"),
-    HeaderValue::from_static(b"POST"),
-    HeaderValue::from_static(b"/"),
-    HeaderValue::from_static(b"/index.html"),
-    HeaderValue::from_static(b"http"),
-    HeaderValue::from_static(b"https"),
-    HeaderValue::from_static(b"200"),
-    HeaderValue::from_static(b"204"),
-    HeaderValue::from_static(b"206"),
-    HeaderValue::from_static(b"304"),
-    HeaderValue::from_static(b"400"),
-    HeaderValue::from_static(b"404"),
-    HeaderValue::from_static(b"500"),
-    HeaderValue::from_static(b"_"), // PLACEHOLDER
-    HeaderValue::from_static(b"gzip, deflate"),
+static STATIC_HEADER_FIELDS: [HeaderField; 16] = header_fields![
+    /* 0*/PSEUDO_AUTHORITY, b"_", // PLACEHOLDER
+    /* 1*/PSEUDO_METHOD, b"GET",
+    /* 2*/PSEUDO_METHOD, b"POST",
+    /* 3*/PSEUDO_PATH, b"/",
+    /* 4*/PSEUDO_PATH, b"/index.html",
+    /* 5*/PSEUDO_SCHEME, b"http",
+    /* 6*/PSEUDO_SCHEME, b"https",
+    /* 7*/PSEUDO_STATUS, b"200",
+    /* 8*/PSEUDO_STATUS, b"204",
+    /* 9*/PSEUDO_STATUS, b"206",
+    /*10*/PSEUDO_STATUS, b"304",
+    /*11*/PSEUDO_STATUS, b"400",
+    /*12*/PSEUDO_STATUS, b"404",
+    /*13*/PSEUDO_STATUS, b"500",
+    /*14*/ACCEPT_CHARSET, b"_", // PLACEHOLDER
+    /*15*/ACCEPT_ENCODING, b"gzip, deflate",
 ];
 
 #[test]
@@ -239,17 +228,14 @@ fn test_hpack_static_idx() {
         let name2 = &STATIC_HEADER[(idx.get() - 1) as usize];
         assert_eq!(name, name2);
     }
-
-    assert_eq!(STATIC_HEADER[LAST_PSEUDO_HEADER_INDEX], standard::PSEUDO_STATUS);
-    assert_eq!(STATIC_HEADER[LAST_PSEUDO_HEADER_INDEX + 1], standard::ACCEPT_CHARSET);
 }
 
 #[test]
 fn test_is_pseudo_header() {
-    for name in &STATIC_HEADER[..=LAST_PSEUDO_HEADER_INDEX] {
+    for name in &STATIC_HEADER[..14] {
         assert!(name.is_pseudo_header());
     }
-    for name in &STATIC_HEADER[LAST_PSEUDO_HEADER_INDEX + 1..] {
+    for name in &STATIC_HEADER[14..] {
         assert!(!name.is_pseudo_header());
     }
 }

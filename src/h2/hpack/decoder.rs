@@ -5,6 +5,8 @@ use crate::h2::hpack::repr;
 use crate::h2::hpack::table::Table;
 use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue};
 
+use HpackError as E;
+
 #[derive(Debug, Default)]
 pub struct Decoder {
     table: Table
@@ -29,7 +31,7 @@ impl Decoder {
 
     /// Decode header block.
     ///
-    /// Note that this method does not accept `INDEXED` representation with pseudo headers.
+    /// Note that this method returns `Err` if it found pseudo header.
     pub fn decode_block(
         &mut self,
         mut block: Bytes,
@@ -58,8 +60,6 @@ impl Decoder {
         bytes: &mut Bytes,
         write_buffer: &mut BytesMut,
     ) -> Result<HeaderField, HpackError> {
-        use HpackError as E;
-
         let Some(&prefix) = bytes.first() else {
             return Err(E::Incomplete);
         };
@@ -79,16 +79,21 @@ impl Decoder {
         write_buffer: &mut BytesMut,
     ) -> Result<HeaderField, HpackError> {
         if let Some(index) = repr::decode_indexed(prefix, bytes)? {
-            return self.table.get(index);
+            let field = self.table.get(index).ok_or(E::NotFound)?;
+            if field.name().is_pseudo_header() {
+                return Err(E::InvalidPseudoHeader);
+            }
+            return Ok(field.clone());
         }
 
         let (is_indexed, index) = repr::decode_literal(prefix, bytes)?;
-
         let (name, hash) = match index.checked_sub(1) {
             Some(index) => {
-                let name = self.table.get_name(index)?;
-                let hash = name.hash();
-                (name, hash)
+                let name = self.table.get_name(index).ok_or(E::NotFound)?;
+                if name.is_pseudo_header() {
+                    return Err(E::InvalidPseudoHeader);
+                }
+                (name.clone(), name.hash())
             }
             None => {
                 let string = repr::decode_string(bytes, write_buffer)?;
