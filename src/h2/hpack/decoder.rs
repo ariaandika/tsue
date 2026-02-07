@@ -63,8 +63,7 @@ impl Decoder {
         let Some(&prefix) = bytes.first() else {
             return Err(E::Incomplete);
         };
-
-        if repr::size_update::is(prefix) {
+        if repr::is_size_update(prefix) {
             return Err(E::InvalidSizeUpdate);
         }
         bytes.advance(1);
