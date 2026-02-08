@@ -124,9 +124,10 @@ fn test_decode_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
         let mut map = HeaderMap::new();
         let bytes = Bytes::copy_from_slice(req1);
 
-        table
-            .decode_block(bytes, &mut map, &mut write_buffer)
-            .unwrap();
+        let mut decoder = table.decode_block(bytes, &mut write_buffer);
+        while let Some(field) = decoder.next_field().unwrap() {
+            map.try_append_field(field).unwrap();
+        }
 
         let mut fields = table.fields().iter();
         field_eq!(fields.next().unwrap(), PSEUDO_AUTHORITY, "www.example.com");
@@ -147,9 +148,10 @@ fn test_decode_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
         let mut map = HeaderMap::new();
         let bytes = Bytes::copy_from_slice(req2);
 
-        table
-            .decode_block(bytes, &mut map, &mut write_buffer)
-            .unwrap();
+        let mut decoder = table.decode_block(bytes, &mut write_buffer);
+        while let Some(field) = decoder.next_field().unwrap() {
+            map.try_append_field(field).unwrap();
+        }
 
         let mut fields = table.fields().iter();
         field_eq!(fields.next().unwrap(), CACHE_CONTROL, "no-cache");
@@ -172,9 +174,10 @@ fn test_decode_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
         let mut map = HeaderMap::new();
         let bytes = Bytes::copy_from_slice(req3);
 
-        table
-            .decode_block(bytes, &mut map, &mut write_buffer)
-            .unwrap();
+        let mut decoder = table.decode_block(bytes, &mut write_buffer);
+        while let Some(field) = decoder.next_field().unwrap() {
+            map.try_append_field(field).unwrap();
+        }
 
         let mut fields = table.fields().iter();
         field_eq!(fields.next().unwrap(), "custom-key", "custom-value");
@@ -228,9 +231,10 @@ fn test_decode_response(res1: &[u8], res2: &[u8], res3: &[u8]) {
         let mut map = HeaderMap::new();
         let bytes = Bytes::copy_from_slice(res1);
 
-        table
-            .decode_block(bytes, &mut map, &mut write_buffer)
-            .unwrap();
+        let mut decoder = table.decode_block(bytes, &mut write_buffer);
+        while let Some(field) = decoder.next_field().unwrap() {
+            map.try_append_field(field).unwrap();
+        }
 
         let mut table_iter = table.fields().iter();
         field_eq!(
@@ -265,9 +269,10 @@ fn test_decode_response(res1: &[u8], res2: &[u8], res3: &[u8]) {
         let mut map = HeaderMap::new();
         let bytes = Bytes::copy_from_slice(res2);
 
-        table
-            .decode_block(bytes, &mut map, &mut write_buffer)
-            .unwrap();
+        let mut decoder = table.decode_block(bytes, &mut write_buffer);
+        while let Some(field) = decoder.next_field().unwrap() {
+            map.try_append_field(field).unwrap();
+        }
 
         let mut table_iter = table.fields().iter();
         field_eq!(table_iter.next().unwrap(), PSEUDO_STATUS, "307");
@@ -302,9 +307,10 @@ fn test_decode_response(res1: &[u8], res2: &[u8], res3: &[u8]) {
         let mut map = HeaderMap::new();
         let bytes = Bytes::copy_from_slice(res3);
 
-        table
-            .decode_block(bytes, &mut map, &mut write_buffer)
-            .unwrap();
+        let mut decoder = table.decode_block(bytes, &mut write_buffer);
+        while let Some(field) = decoder.next_field().unwrap() {
+            map.try_append_field(field).unwrap();
+        }
 
         let mut table_iter = table.fields().iter();
         field_eq!(

@@ -3,7 +3,7 @@ use tcio::bytes::{Buf, Bytes, BytesMut};
 use crate::h2::hpack::error::HpackError;
 use crate::h2::hpack::repr;
 use crate::h2::hpack::table::Table;
-use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue};
+use crate::headers::{HeaderField, HeaderName, HeaderValue};
 
 use HpackError as E;
 
@@ -29,26 +29,18 @@ impl Decoder {
 
     // ===== Decode =====
 
-    /// Decode header block.
-    ///
-    /// Note that this method returns `Err` if it found pseudo header.
-    pub fn decode_block(
-        &mut self,
-        mut block: Bytes,
-        maps: &mut HeaderMap,
-        write_buffer: &mut BytesMut,
-    ) -> Result<(), HpackError> {
-        // Dynamic table size update MUST occur at the beginning of the first header block
-        // following the change to the dynamic table size.
-        if let Some(size) = repr::decode_size_update(&mut block)? {
-            self.table.update_size(size);
+    /// Returns a fallible iterator to decode header block.
+    pub fn decode_block<'a>(
+        &'a mut self,
+        block: Bytes,
+        write_buffer: &'a mut BytesMut,
+    ) -> DecodeBlock<'a> {
+        DecodeBlock {
+            decoder: self,
+            block,
+            write_buffer,
+            can_size_update: true,
         }
-
-        while let Some(prefix) = block.try_get_u8() {
-            let field = self.decode_inner(prefix, &mut block, write_buffer)?;
-            maps.try_append_field(field)?;
-        }
-        Ok(())
     }
 
     /// Decode single header field.
@@ -107,6 +99,49 @@ impl Decoder {
         }
 
         Ok(field)
+    }
+}
+
+#[derive(Debug)]
+pub struct DecodeBlock<'a> {
+    decoder: &'a mut Decoder,
+    block: Bytes,
+    write_buffer: &'a mut BytesMut,
+    can_size_update: bool,
+}
+
+impl<'a> DecodeBlock<'a> {
+    /// Decode the next header field.
+    ///
+    /// Returns `None` when the header block is exhausted.
+    pub fn next_field(&mut self) -> Result<Option<HeaderField>, HpackError> {
+        let Self {
+            decoder,
+            block,
+            write_buffer,
+            can_size_update,
+        } = self;
+
+        // Dynamic table size update MUST occur at the beginning of the first header block
+        // following the change to the dynamic table size.
+        if *can_size_update && let Some(size) = repr::decode_size_update(block)? {
+            decoder.table.update_size(size);
+        }
+        *can_size_update = false;
+
+        let Some(prefix) = block.try_get_u8() else {
+            return Ok(None);
+        };
+        decoder.decode_inner(prefix, block, write_buffer).map(Some)
+    }
+}
+
+impl<'a> Iterator for DecodeBlock<'a> {
+    type Item = Result<HeaderField, HpackError>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_field().transpose()
     }
 }
 

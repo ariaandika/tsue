@@ -105,8 +105,11 @@ where
                     );
 
                     let mut headers = HeaderMap::new();
-                    hpack.decode_block(payload.freeze(), &mut headers, &mut *write_buffer)?;
-                    headers.pairs().for_each(|kv|println!("  {kv:?}"));
+                    let mut decoder = hpack.decode_block(payload.freeze(), write_buffer);
+                    while let Some(field) = decoder.next_field()? {
+                        println!("  {field:?}");
+                        headers.try_append_field(field)?;
+                    }
                 }
                 F::WindowUpdate => {
                     let size = u32::from_be_bytes(*payload.first_chunk().expect("TODO"));
