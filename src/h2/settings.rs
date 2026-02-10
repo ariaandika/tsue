@@ -24,7 +24,8 @@ pub struct Settings {
 
 /// HTTP/2 defined settings.
 #[derive(Clone, Copy, Debug)]
-pub enum SettingId {
+#[repr(u8)]
+pub enum Id {
     /// SETTINGS_HEADER_TABLE_SIZE
     HeaderTableSize = 1,
     /// SETTINGS_ENABLE_PUSH
@@ -39,7 +40,7 @@ pub enum SettingId {
     MaxHeaderListSize = 6,
 }
 
-impl SettingId {
+impl Id {
     /// `SETTINGS_HEADER_TABLE_SIZE`
     pub const HEADER_TABLE_SIZE: u16 = 1;
     /// `SETTINGS_HEADER_ENABLE_PUSH`
@@ -54,7 +55,7 @@ impl SettingId {
     pub const MAX_HEADER_LIST_SIZE: u16 = 6;
 }
 
-impl SettingId {
+impl Id {
     /// Creates [`SettingId`] from its integer identifier.
     ///
     /// An endpoint that receives a SETTINGS frame with any unknown or unsupported identifier MUST
@@ -82,14 +83,14 @@ impl Settings {
     }
 
     /// Set setting value by its identifier.
-    pub fn set_by_id(&mut self, ident: SettingId, value: u32) {
+    pub fn set_by_id(&mut self, ident: Id, value: u32) {
         match ident {
-            SettingId::HeaderTableSize => self.header_table_size = value,
-            SettingId::EnablePush => self.enable_push = value != 0,
-            SettingId::MaxConcurrentStreams => self.max_concurrent_streams = value,
-            SettingId::InitialWindowSize => self.initial_window_size = value,
-            SettingId::MaxFrameSize => self.max_frame_size = value,
-            SettingId::MaxHeaderListSize => self.max_header_list_size = NonZeroU32::new(value),
+            Id::HeaderTableSize => self.header_table_size = value,
+            Id::EnablePush => self.enable_push = value != 0,
+            Id::MaxConcurrentStreams => self.max_concurrent_streams = value,
+            Id::InitialWindowSize => self.initial_window_size = value,
+            Id::MaxFrameSize => self.max_frame_size = value,
+            Id::MaxHeaderListSize => self.max_header_list_size = NonZeroU32::new(value),
         }
     }
 }

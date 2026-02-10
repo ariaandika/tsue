@@ -3,9 +3,8 @@ use tcio::bytes::Buf;
 use tcio::bytes::BytesMut;
 
 use crate::h2::frame;
-use crate::h2::hpack;
 use crate::h2::hpack::Decoder;
-use crate::h2::settings::{SettingId, Settings};
+use crate::h2::settings::{self, Settings};
 use crate::headers::HeaderMap;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -15,7 +14,7 @@ const PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 #[derive(Debug)]
 pub struct H2State {
     settings: Settings,
-    decoder: hpack::Decoder,
+    decoder: Decoder,
 }
 
 impl H2State {
@@ -25,27 +24,26 @@ impl H2State {
         };
 
         if preface != *PREFACE {
-            return Poll::Ready(Err("preface error".into()));
+            return Poll::Ready(Err("invalid preface".into()));
         }
 
-        let frame = frame::FrameHeader::decode(header);
-        let mut settings = Settings::new();
+        let frame = frame::Header::decode(header);
 
         if !matches!(frame.frame_type(), Some(frame::Type::Settings)) {
-            return Poll::Ready(Err("malformed frame".into()));
+            return Poll::Ready(Err("expected settings frame".into()));
         }
-
-        let total_len = PREFACE.len() + frame::FrameHeader::SIZE + frame.len();
 
         let Some(mut payload) = rest.get(..frame.len()) else {
             return Poll::Pending;
         };
 
+        let mut settings = Settings::new();
+
         while let Some((id, val, rest)) = split_exact(payload) {
             let id = u16::from_be_bytes(id);
             let val = u32::from_be_bytes(val);
 
-            let Some(id) = SettingId::from_u16(id) else {
+            let Some(id) = settings::Id::from_u16(id) else {
                 return Poll::Ready(Err("invalid setting id".into()));
             };
 
@@ -54,7 +52,9 @@ impl H2State {
             payload = rest;
         }
 
+        let total_len = PREFACE.len() + frame::Header::SIZE + frame.len();
         read_buffer.advance(total_len);
+
         let decoder = Decoder::with_capacity(settings.header_table_size as usize, 16);
 
         Poll::Ready(Ok(Self { settings, decoder }))
@@ -70,7 +70,7 @@ impl H2State {
         let Some(frame) = read_buffer
             .first_chunk()
             .copied()
-            .map(frame::FrameHeader::decode)
+            .map(frame::Header::decode)
         else {
             return Ok(None);
         };

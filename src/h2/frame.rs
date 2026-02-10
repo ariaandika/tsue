@@ -1,5 +1,5 @@
 
-/// Frame Type.
+/// HTTP/2 Frame Type.
 #[derive(Debug)]
 #[repr(u8)]
 pub enum Type {
@@ -26,9 +26,9 @@ impl Type {
     }
 }
 
-/// Frame Header.
+/// HTTP/2 Frame Header.
 #[derive(Debug)]
-pub struct FrameHeader {
+pub struct Header {
     /// The length of the frame payload expressed as an unsigned 24-bit integer in units of octets.
     ///
     /// Values greater than 2^14 (16,384) MUST NOT be sent unless the receiver has set a larger
@@ -59,11 +59,10 @@ pub struct FrameHeader {
     pub stream_id: u32,
 }
 
-impl FrameHeader {
+impl Header {
     /// Length of encoded frame header bytes.
     pub(crate) const SIZE: usize = 9;
 
-    #[allow(unused, reason = "TODO")]
     pub(crate) fn decode(bytes: [u8; Self::SIZE]) -> Self {
         // Length (24),
         // Type (8),
@@ -77,7 +76,7 @@ impl FrameHeader {
         // let reserved = bytes[5] & 0b10000000 != 0;
         let stream_id = u32::from_be_bytes([bytes[5] & 0b01111111, bytes[6], bytes[7], bytes[8]]);
 
-        FrameHeader {
+        Header {
             len,
             ty,
             flags,
