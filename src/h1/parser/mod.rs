@@ -68,7 +68,8 @@ pub fn parse_reqline_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseEr
             _ => return Result::Err(ParseError::InvalidSeparator),
         };
 
-        let mut reqline = bytes.split_to_ptr(state.as_ptr());
+        let len = state.as_ptr().addr() - bytes.as_ptr().addr();
+        let mut reqline = bytes.split_to(len);
         reqline.truncate_off(crlf);
         reqline
     };
@@ -117,12 +118,10 @@ pub fn parse_reqline_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseEr
         }
     };
 
-    // SAFETY: `target` is only sliced within `target` bounds itself
-    unsafe {
-        let len = target.len();
-        reqline.advance_to_ptr(target.as_ptr());
-        reqline.truncate(len);
-    }
+    let len = target.len();
+    let adv = target.as_ptr().addr() - reqline.as_ptr().addr();
+    reqline.advance(adv);
+    reqline.truncate(len);
 
     ParseResult::Ok(Reqline {
         method,
@@ -170,7 +169,8 @@ pub fn parse_header_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, P
             b'\n' => 1,
             _ => return Result::Err(ParseError::InvalidSeparator),
         };
-        let mut line = bytes.split_to_ptr(state.as_ptr());
+        let len = state.as_ptr().addr() - bytes.as_ptr().addr();
+        let mut line = bytes.split_to(len);
         line.truncate_off(crlf);
         line
     };
@@ -189,7 +189,8 @@ pub fn parse_header_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, P
         state = rest;
     }
 
-    let mut name = line.split_to_ptr(state.as_ptr());
+    let len = state.as_ptr().addr() - line.as_ptr().addr();
+    let mut name = line.split_to(len);
     name.truncate_off(delim_len);
 
     ParseResult::Ok(Some(Header {
