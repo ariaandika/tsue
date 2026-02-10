@@ -61,7 +61,7 @@ impl Table {
     ///
     /// Returns `Err` if index out of bounds or have no value.
     pub(crate) fn get(&mut self, index: usize) -> Option<&HeaderField> {
-        if matches!(index, 0 | 14) {
+        if let 0 | 14 = index {
             // static header without value
             return None;
         }
@@ -80,8 +80,6 @@ impl Table {
     /// # Errors
     ///
     /// Returns `Err` if index not found.
-    ///
-    /// Returns `Err` if index is referencing pseudo header.
     pub(crate) fn get_name(&mut self, index: usize) -> Option<&HeaderName> {
         match STATIC_HEADER.get(index) {
             Some(name) => Some(name),

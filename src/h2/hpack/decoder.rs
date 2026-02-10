@@ -50,15 +50,7 @@ impl Decoder {
         let Some(prefix) = bytes.try_get_u8() else {
             return Err(E::Incomplete);
         };
-        self.decode_inner(prefix, bytes, write_buffer)
-    }
 
-    fn decode_inner<'a>(
-        &'a mut self,
-        prefix: u8,
-        bytes: &mut Bytes,
-        write_buffer: &mut BytesMut,
-    ) -> Result<std::borrow::Cow<'a, HeaderField>, HpackError> {
         if let Some(index) = repr::decode_indexed(prefix, bytes)? {
             let field = self.table.get(index).ok_or(E::NotFound)?;
             return Ok(std::borrow::Cow::Borrowed(field));

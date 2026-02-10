@@ -80,7 +80,7 @@
 /// | 0 | 0 | 0 | 1 |  Index (4+)   |
 /// +---+---+-----------------------+
 /// ```
-use tcio::bytes::{Buf, Bytes, BytesMut};
+use tcio::bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::h2::hpack::error::HpackError;
 use crate::h2::hpack::huffman;
@@ -90,6 +90,8 @@ use HpackError as E;
 pub fn is_size_update(prefix: u8) -> bool {
     prefix & 0b1110_0000 == 32
 }
+
+// ===== Decode =====
 
 /// Returns `Some(size_update)` if given bytes contains a header field with `SIZE_UPDATE`
 /// representation.
@@ -194,3 +196,27 @@ fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, HpackError> {
     }
     Ok(value)
 }
+
+// ===== Encode =====
+
+/// 0bxxx0_xxxx = literal without indexed
+/// 0bxxx1_xxxx = literal never indexed
+pub const LITERAL_NINDEX_SHIFT: u8 = 4;
+
+pub fn encode_int(max: u8, repr: u8, value: usize, write_buffer: &mut BytesMut) {
+    write_buffer.put_u8((value as u8 & max) | repr);
+    let Some(mut value) = value.checked_sub(max as usize) else {
+        return
+    };
+    while value > 127 {
+        write_buffer.put_u8(value as u8 | 128);
+        value >>= 7;
+    }
+    write_buffer.put_u8(value as u8);
+}
+
+pub fn encode_string(string: &[u8], write_buffer: &mut BytesMut) {
+    encode_int(127, 128, string.len(), write_buffer);
+    huffman::encode(string, write_buffer);
+}
+
