@@ -89,7 +89,7 @@ impl Table {
         }
     }
 
-    pub(crate) fn insert(&mut self, field: HeaderField) {
+    pub(crate) fn insert(&mut self, field: HeaderField) -> std::borrow::Cow<'_, HeaderField> {
         let size = field.hpack_size();
 
         // It is not an error to attempt to add an entry that is larger than the maximum size; an
@@ -97,7 +97,7 @@ impl Table {
         // all existing entries and results in an empty table.
         if self.max_size < size {
             self.fields.clear();
-            return;
+            return std::borrow::Cow::Owned(field);
         }
 
         while self.max_size - self.size < size {
@@ -106,8 +106,14 @@ impl Table {
 
         self.fields.push_front(field);
         self.size += size;
+        let Some(field) = self.fields.front() else {
+            // SAFETY: we just `push_front`
+            // `push_mut` is unstable
+            unsafe { std::hint::unreachable_unchecked() }
+        };
 
         debug_assert!(self.size <= self.max_size);
+        std::borrow::Cow::Borrowed(field)
     }
 
     fn evict_entry(&mut self) -> Option<HeaderField> {

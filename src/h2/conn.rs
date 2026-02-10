@@ -105,10 +105,14 @@ where
                     );
 
                     let mut headers = HeaderMap::new();
-                    let mut decoder = hpack.decode_block(payload.freeze(), write_buffer);
-                    while let Some(field) = decoder.next_field()? {
+                    let mut block = payload.freeze();
+
+                    hpack.decode_size_update(&mut block)?;
+
+                    while !block.is_empty() {
+                        let field = hpack.decode(&mut block, write_buffer).unwrap();
                         println!("  {field:?}");
-                        headers.try_append_field(field)?;
+                        headers.try_append_field(field.into_owned()).unwrap();
                     }
                 }
                 F::WindowUpdate => {

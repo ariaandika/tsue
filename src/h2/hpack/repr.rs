@@ -88,7 +88,7 @@ use crate::h2::hpack::huffman;
 use HpackError as E;
 
 pub fn is_size_update(prefix: u8) -> bool {
-    prefix & 32 == 0
+    prefix & 0b1110_0000 == 32
 }
 
 /// Returns `Some(size_update)` if given bytes contains a header field with `SIZE_UPDATE`
@@ -97,7 +97,7 @@ pub fn decode_size_update(bytes: &mut Bytes) -> Result<Option<usize>, HpackError
     let Some(&prefix) = bytes.first() else {
         return Ok(None);
     };
-    if is_size_update(prefix) {
+    if !is_size_update(prefix) {
         return Ok(None);
     }
     bytes.advance(1);
@@ -136,7 +136,10 @@ pub fn decode_indexed(prefix: u8, bytes: &mut Bytes) -> Result<Option<usize>, Hp
 ///
 /// Panics in debug mode if the header reresentation is `INDEXED` or `SIZE_UPDATE`.
 pub fn decode_literal(prefix: u8, bytes: &mut Bytes) -> Result<(bool, usize), HpackError> {
-    debug_assert!(prefix & (128 | 32) == 0, "cannot be INDEXED or SIZE_UPDATE");
+    debug_assert!(
+        prefix & 128 == 0 || is_size_update(prefix),
+        "cannot be INDEXED or SIZE_UPDATE"
+    );
     // is "literal" use incremental indexing
     let is_with_indexing = prefix & 64 == 64;
     let max = if is_with_indexing { 63 } else { 15 };

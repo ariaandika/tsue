@@ -122,11 +122,11 @@ fn test_decode_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
     // first request
     {
         let mut map = HeaderMap::new();
-        let bytes = Bytes::copy_from_slice(req1);
+        let mut bytes = Bytes::copy_from_slice(req1);
 
-        let mut decoder = table.decode_block(bytes, &mut write_buffer);
-        while let Some(field) = decoder.next_field().unwrap() {
-            map.try_append_field(field).unwrap();
+        while !bytes.is_empty() {
+            let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+            map.try_append_field(field.into_owned()).unwrap();
         }
 
         let mut fields = table.fields().iter();
@@ -146,11 +146,11 @@ fn test_decode_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
     // second request
     {
         let mut map = HeaderMap::new();
-        let bytes = Bytes::copy_from_slice(req2);
+        let mut bytes = Bytes::copy_from_slice(req2);
 
-        let mut decoder = table.decode_block(bytes, &mut write_buffer);
-        while let Some(field) = decoder.next_field().unwrap() {
-            map.try_append_field(field).unwrap();
+        while !bytes.is_empty() {
+            let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+            map.try_append_field(field.into_owned()).unwrap();
         }
 
         let mut fields = table.fields().iter();
@@ -172,11 +172,11 @@ fn test_decode_request(req1: &[u8], req2: &[u8], req3: &[u8]) {
     // third request
     {
         let mut map = HeaderMap::new();
-        let bytes = Bytes::copy_from_slice(req3);
+        let mut bytes = Bytes::copy_from_slice(req3);
 
-        let mut decoder = table.decode_block(bytes, &mut write_buffer);
-        while let Some(field) = decoder.next_field().unwrap() {
-            map.try_append_field(field).unwrap();
+        while !bytes.is_empty() {
+            let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+            map.try_append_field(field.into_owned()).unwrap();
         }
 
         let mut fields = table.fields().iter();
@@ -229,11 +229,11 @@ fn test_decode_response(res1: &[u8], res2: &[u8], res3: &[u8]) {
     // first response
     {
         let mut map = HeaderMap::new();
-        let bytes = Bytes::copy_from_slice(res1);
+        let mut bytes = Bytes::copy_from_slice(res1);
 
-        let mut decoder = table.decode_block(bytes, &mut write_buffer);
-        while let Some(field) = decoder.next_field().unwrap() {
-            map.try_append_field(field).unwrap();
+        while !bytes.is_empty() {
+            let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+            map.try_append_field(field.into_owned()).unwrap();
         }
 
         let mut table_iter = table.fields().iter();
@@ -267,11 +267,11 @@ fn test_decode_response(res1: &[u8], res2: &[u8], res3: &[u8]) {
     // second response
     {
         let mut map = HeaderMap::new();
-        let bytes = Bytes::copy_from_slice(res2);
+        let mut bytes = Bytes::copy_from_slice(res2);
 
-        let mut decoder = table.decode_block(bytes, &mut write_buffer);
-        while let Some(field) = decoder.next_field().unwrap() {
-            map.try_append_field(field).unwrap();
+        while !bytes.is_empty() {
+            let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+            map.try_append_field(field.into_owned()).unwrap();
         }
 
         let mut table_iter = table.fields().iter();
@@ -305,11 +305,11 @@ fn test_decode_response(res1: &[u8], res2: &[u8], res3: &[u8]) {
     // third response
     {
         let mut map = HeaderMap::new();
-        let bytes = Bytes::copy_from_slice(res3);
+        let mut bytes = Bytes::copy_from_slice(res3);
 
-        let mut decoder = table.decode_block(bytes, &mut write_buffer);
-        while let Some(field) = decoder.next_field().unwrap() {
-            map.try_append_field(field).unwrap();
+        while !bytes.is_empty() {
+            let field = table.decode(&mut bytes, &mut write_buffer).unwrap();
+            map.try_append_field(field.into_owned()).unwrap();
         }
 
         let mut table_iter = table.fields().iter();
