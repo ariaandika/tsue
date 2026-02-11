@@ -1,28 +1,55 @@
+#![allow(unused, reason = "TODO")]
 
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct StreamId(u32);
+// ===== Stream =====
 
 #[derive(Debug, Clone, Copy)]
 pub enum State {
+    // Idle,
     Open,
-    HalfClosed,
+    ReservedLocal,
+    ReservedRemote,
+    HalfClosedLocal,
+    HalfClosedRemote,
     Closed,
 }
 
 #[derive(Debug)]
 pub struct Stream {
-    id: StreamId,
+    id: u32,
     state: State,
 }
 
 impl Stream {
-    pub fn new(id: StreamId) -> Self {
+    pub fn new(id: u32) -> Self {
         Self {
             id,
             state: State::Open,
         }
     }
+
+    pub fn state(&self) -> State {
+        self.state
+    }
 }
 
+// ===== Stream List =====
+
+#[derive(Debug)]
+pub struct StreamList {
+    max_stream: usize,
+}
+
+impl StreamList {
+    pub fn new(max_stream: usize) -> Self {
+        Self { max_stream }
+    }
+
+    pub fn stream_mut(&mut self, id: u32) -> Option<&mut Stream> {
+        todo!()
+    }
+
+    pub fn create(&mut self, id: u32) -> &mut Stream {
+        todo!()
+    }
+}
 
