@@ -9,15 +9,6 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 const DEFAULT_BUFFER_CAP: usize = 512;
 
-macro_rules! io_read {
-    ($read:expr) => {
-        let read = ready!($read)?;
-        if read == 0 {
-            return Poll::Ready(Ok(()));
-        }
-    };
-}
-
 /// HTTP/2 Connection.
 #[derive(Debug)]
 pub struct Connection<IO> {
@@ -25,14 +16,20 @@ pub struct Connection<IO> {
     read_buffer: BytesMut,
     write_buffer: BytesMut,
     /// will be `None` pre-preface
-    state: Option<H2State>,
+    phase: Phase,
+}
+
+#[derive(Debug)]
+enum Phase {
+    Connection(H2State),
+    Handshake,
 }
 
 type ConnectionProject<'a, IO> = (
     Pin<&'a mut IO>,
     &'a mut BytesMut,
     &'a mut BytesMut,
-    &'a mut Option<H2State>,
+    &'a mut Phase,
 );
 
 impl<IO> Connection<IO> {
@@ -41,7 +38,7 @@ impl<IO> Connection<IO> {
             io,
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
-            state: None,
+            phase: Phase::Handshake,
         }
     }
 }
@@ -53,28 +50,27 @@ where
     fn try_poll(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context,
-    ) -> Poll<Result<(), BoxError>> {
+    ) -> Poll<Result<bool, BoxError>> {
         let (mut io, read_buffer, write_buffer, state) = self.as_mut().project();
 
-        let state = loop {
-            match state {
-                Some(ok) => break ok,
-                None => match H2State::preface_chunk(&mut *read_buffer) {
-                    Poll::Ready(result) => break state.insert(result?),
-                    Poll::Pending => {
-                        io_read!(io.as_mut().poll_read(&mut *read_buffer, cx));
-                        continue;
-                    }
-                },
+        match state {
+            Phase::Handshake => {
+                if let Poll::Ready(result) =
+                    H2State::handshake(&mut *read_buffer, &mut *write_buffer)
+                {
+                    *state = Phase::Connection(result?);
+                }
             }
-        };
+            Phase::Connection(state) => {
+                while state.poll_frame(read_buffer, write_buffer)?.is_some() {}
+            }
+        }
 
-        loop {
-            if state.poll_frame(read_buffer, write_buffer)?.is_none()
-                && ready!(io.as_mut().poll_read(&mut *read_buffer, cx)?) == 0
-            {
-                return Poll::Ready(Ok(()));
-            }
+        let _ = io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?;
+        if let Poll::Ready(0) = io.as_mut().poll_read(&mut *read_buffer, cx)? {
+            Poll::Ready(Ok(false))
+        } else {
+            Poll::Ready(Ok(true))
         }
     }
 }
@@ -85,9 +81,19 @@ where
 {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Self::Output> {
-        if let Err(err) = ready!(self.try_poll(cx)) {
-            eprintln!("[ERROR] {err}")
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Self::Output> {
+        loop {
+            match ready!(self.as_mut().try_poll(cx)) {
+                Ok(true) => { }
+                Ok(false) => {
+                    println!("[CONNECTION] Closed");
+                    break;
+                },
+                Err(err) => {
+                    eprintln!("[ERROR] {err}");
+                    break;
+                }
+            }
         }
         Poll::Ready(())
     }
@@ -104,7 +110,7 @@ impl<IO> Connection<IO> {
                 Pin::new_unchecked(&mut me.io),
                 &mut me.read_buffer,
                 &mut me.write_buffer,
-                &mut me.state,
+                &mut me.phase,
             )
         }
     }

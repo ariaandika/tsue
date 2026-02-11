@@ -18,7 +18,10 @@ pub struct H2State {
 }
 
 impl H2State {
-    pub(crate) fn preface_chunk(read_buffer: &mut BytesMut) -> Poll<Result<Self, BoxError>> {
+    pub(crate) fn handshake(
+        read_buffer: &mut BytesMut,
+        write_buffer: &mut BytesMut,
+    ) -> Poll<Result<Self, BoxError>> {
         let Some((preface, header, rest)) = split_exact(read_buffer) else {
             return Poll::Pending;
         };
@@ -26,16 +29,15 @@ impl H2State {
         if preface != *PREFACE {
             return Poll::Ready(Err("invalid preface".into()));
         }
-
         let frame = frame::Header::decode(header);
-
-        if !matches!(frame.frame_type(), Some(frame::Type::Settings)) {
-            return Poll::Ready(Err("expected settings frame".into()));
-        }
 
         let Some(mut payload) = rest.get(..frame.len()) else {
             return Poll::Pending;
         };
+
+        if !matches!(frame.frame_type(), Some(frame::Type::Settings)) {
+            return Poll::Ready(Err("expected settings frame".into()));
+        }
 
         let mut settings = Settings::new();
 
@@ -52,8 +54,12 @@ impl H2State {
             payload = rest;
         }
 
-        let total_len = PREFACE.len() + frame::Header::SIZE + frame.len();
+        let total_len = PREFACE.len() + frame.frame_size();
         read_buffer.advance(total_len);
+
+        // write_buffer.extend_from_slice(PREFACE);
+        write_buffer.extend_from_slice(&frame::Header::EMPTY_SETTINGS);
+        write_buffer.extend_from_slice(&frame::Header::ACK_SETTINGS);
 
         let decoder = Decoder::with_capacity(settings.header_table_size as usize, 16);
 
@@ -67,22 +73,19 @@ impl H2State {
         read_buffer: &mut BytesMut,
         write_buffer: &mut BytesMut,
     ) -> Result<Option<()>, BoxError> {
-        let Some(frame) = read_buffer
-            .first_chunk()
-            .copied()
-            .map(frame::Header::decode)
-        else {
+        let Some(frame) = read_buffer.first_chunk() else {
             return Ok(None);
         };
+        let frame = frame::Header::decode(*frame);
+        read_buffer.advance(frame::Header::SIZE);
 
         let Some(payload) = read_buffer.try_split_to(frame.len()) else {
             return Ok(None);
         };
 
-        let Some(ty) = frame::Type::from_u8(frame.ty) else {
+        let Some(ty) = frame.frame_type() else {
             return Err(format!("unknown frame: {:?}", frame.ty).into());
         };
-
         use frame::Type as Ty;
         match ty {
             Ty::Headers => {

@@ -1,4 +1,3 @@
-
 /// HTTP/2 Frame Type.
 #[derive(Debug)]
 #[repr(u8)]
@@ -63,6 +62,10 @@ impl Header {
     /// Length of encoded frame header bytes.
     pub(crate) const SIZE: usize = 9;
 
+    pub(crate) const EMPTY_SETTINGS: [u8; 9] = [0, 0, 0, 4, 0, 0, 0, 0, 0];
+
+    pub(crate) const ACK_SETTINGS: [u8; 9] = [0, 0, 0, 4, 1, 0, 0, 0, 0];
+
     pub(crate) fn decode(bytes: [u8; Self::SIZE]) -> Self {
         // Length (24),
         // Type (8),
@@ -85,9 +88,24 @@ impl Header {
         }
     }
 
+    #[inline(never)]
+    pub fn encode(self) -> [u8; 9] {
+        let mut buffer = [0u8; 10];
+        buffer[..4].copy_from_slice(&self.len.to_be_bytes());
+        buffer[4] = self.ty;
+        buffer[5] = self.flags;
+        buffer[6..].copy_from_slice(&(self.stream_id & u32::MAX >> 1).to_be_bytes());
+        buffer[1..].try_into().unwrap()
+    }
+
     #[inline]
     pub const fn len(&self) -> usize {
         self.len as usize
+    }
+
+    #[inline]
+    pub const fn frame_size(&self) -> usize {
+        Self::SIZE + self.len as usize
     }
 
     #[inline]
