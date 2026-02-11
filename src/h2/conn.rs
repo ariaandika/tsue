@@ -3,7 +3,7 @@ use std::{pin::Pin, task::ready};
 use tcio::bytes::BytesMut;
 use tcio::io::{AsyncRead, AsyncWrite};
 
-use crate::h2::state::H2State;
+use crate::h2::state::{FrameResult, H2State};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -62,16 +62,20 @@ where
                 }
             }
             Phase::Connection(state) => {
-                while state.poll_frame(read_buffer, write_buffer)?.is_some() {}
+                while let Some(result) = state.poll_frame(read_buffer, write_buffer)? {
+                    match result {
+                        FrameResult::None => {}
+                        FrameResult::Request(_stream_id, _map) => todo!(),
+                        FrameResult::Data(_stream_id, _data) => todo!(),
+                        FrameResult::Shutdown => todo!(),
+                    }
+                }
             }
         }
 
         let _ = io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?;
-        if let Poll::Ready(0) = io.as_mut().poll_read(&mut *read_buffer, cx)? {
-            Poll::Ready(Ok(false))
-        } else {
-            Poll::Ready(Ok(true))
-        }
+        let result = io.as_mut().poll_read(&mut *read_buffer, cx)?;
+        Poll::Ready(Ok(matches!(result, Poll::Ready(0))))
     }
 }
 

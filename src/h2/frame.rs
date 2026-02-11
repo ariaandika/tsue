@@ -66,6 +66,8 @@ impl Header {
 
     pub(crate) const ACK_SETTINGS: [u8; 9] = [0, 0, 0, 4, 1, 0, 0, 0, 0];
 
+    pub(crate) const ACK_PING: [u8; 9] = [0, 0, 8, 6, 1, 0, 0, 0, 0];
+
     pub(crate) fn decode(bytes: [u8; Self::SIZE]) -> Self {
         // Length (24),
         // Type (8),

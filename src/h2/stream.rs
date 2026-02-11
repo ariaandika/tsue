@@ -30,6 +30,14 @@ impl Stream {
     pub fn state(&self) -> State {
         self.state
     }
+
+    pub fn set_state(&mut self, state: State) {
+        self.state = state;
+    }
+
+    pub fn is_reserved(&self) -> bool {
+        matches!(self.state, State::ReservedLocal | State::ReservedRemote)
+    }
 }
 
 // ===== Stream List =====
