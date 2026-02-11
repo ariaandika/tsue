@@ -26,7 +26,7 @@ impl Type {
 }
 
 /// HTTP/2 Frame Header.
-#[derive(Debug)]
+#[derive(Clone ,Debug)]
 pub struct Header {
     /// The length of the frame payload expressed as an unsigned 24-bit integer in units of octets.
     ///
