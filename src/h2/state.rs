@@ -26,54 +26,42 @@ pub(crate) enum FrameResult {
     Shutdown,
 }
 
+impl Default for H2State {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl H2State {
+    pub fn new() -> Self {
+        let settings = Settings::new();
+        Self {
+            decoder: Decoder::with_capacity(settings.header_table_size as usize, 16),
+            streams: StreamList::new(settings.max_concurrent_streams as usize),
+            settings,
+        }
+    }
+
     pub(crate) fn handshake(
         read_buffer: &mut BytesMut,
         write_buffer: &mut BytesMut,
-    ) -> Poll<Result<Self, HandshakeError>> {
-        let Some((preface, header, rest)) = split_exact(read_buffer) else {
+    ) -> Poll<Result<(), HandshakeError>> {
+        let Some(chunk) = read_buffer.first_chunk::<{ PREFACE.len() - frame::Header::SIZE }>() else {
             return Poll::Pending;
         };
+        let (preface, header) = split_exact(chunk);
 
-        if preface != *PREFACE {
+        if preface != PREFACE {
             return Poll::Ready(Err(HandshakeError::InvalidPreface));
         }
-        let frame = frame::Header::decode(header);
-
-        let Some(mut payload) = rest.get(..frame.len()) else {
-            return Poll::Pending;
-        };
-
+        let frame = frame::Header::decode(*header);
         if !matches!(frame.frame_type(), Some(frame::Type::Settings)) {
             return Poll::Ready(Err(HandshakeError::ExpectedSettings));
         }
 
-        let mut settings = Settings::new();
-
-        while let Some((id, val, rest)) = split_exact(payload) {
-            let id = u16::from_be_bytes(id);
-            let val = u32::from_be_bytes(val);
-
-            let Some(id) = settings::Id::from_u16(id) else {
-                return Poll::Ready(Err(HandshakeError::ExpectedSettings));
-            };
-
-            println!("[SETTINGS] {id:?} = {val}");
-            settings.set_by_id(id, val);
-            payload = rest;
-        }
-
-        let total_len = PREFACE.len() + frame.frame_size();
-        read_buffer.advance(total_len);
-
         // write_buffer.extend_from_slice(PREFACE);
         write_buffer.extend_from_slice(&frame::Header::EMPTY_SETTINGS);
-        write_buffer.extend_from_slice(&frame::Header::ACK_SETTINGS);
-
-        let decoder = Decoder::with_capacity(settings.header_table_size as usize, 16);
-        let streams = StreamList::new(settings.max_concurrent_streams as usize);
-
-        Poll::Ready(Ok(Self { settings, decoder, streams, }))
+        Poll::Ready(Ok(()))
     }
 
     pub fn streams_mut(&mut self) -> &mut StreamList {
@@ -253,6 +241,26 @@ impl H2State {
 
                 Ok(Some(FrameResult::None))
             }
+            Ty::Settings => {
+                let mut payload = &read_buffer[..frame.len()];
+
+                while let Some((chunk, rest)) = payload.split_first_chunk() {
+                    let (id, val) = split_exact::<{ size_of::<u16>() + size_of::<u32>() }, _, _>(chunk);
+                    let id = u16::from_be_bytes(*id);
+                    let val = u32::from_be_bytes(*val);
+
+                    let Some(id) = settings::Id::from_u16(id) else {
+                        return Err(E::UnknownSetting);
+                    };
+
+                    println!("[SETTINGS] {id:?} = {val}");
+                    self.settings.set_by_id(id, val);
+                    payload = rest;
+                }
+                write_buffer.extend_from_slice(&frame::Header::ACK_SETTINGS);
+                read_buffer.advance(frame.frame_size());
+                Ok(Some(FrameResult::None))
+            },
             Ty::Ping => {
                 const ACK: u8 = 0x01;
 
@@ -268,7 +276,6 @@ impl H2State {
 
                 Ok(Some(FrameResult::None))
             }
-            Ty::Settings => todo!(),
             Ty::WindowUpdate => todo!(),
             Ty::GoAway => {
                 read_buffer.advance(frame.frame_size());
@@ -288,12 +295,9 @@ impl H2State {
     }
 }
 
-fn split_exact<const M: usize, const N: usize>(bytes: &[u8]) -> Option<([u8; M], [u8; N], &[u8])> {
-    if bytes.len() < M + N {
-        return None;
-    }
+fn split_exact<const S: usize, const M: usize, const N: usize>(bytes: &[u8; S]) -> (&[u8; M], &[u8; N]) {
+    assert_eq!(M + N, S);
     let chunk1 = bytes[..M].try_into().expect("known size");
     let chunk2 = bytes[M..M + N].try_into().expect("known size");
-    Some((chunk1, chunk2, &bytes[M + N..]))
+    (chunk1, chunk2)
 }
-

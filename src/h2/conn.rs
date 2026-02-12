@@ -15,20 +15,22 @@ pub struct Connection<IO> {
     io: IO,
     read_buffer: BytesMut,
     write_buffer: BytesMut,
-    /// will be `None` pre-preface
+    state: H2State,
     phase: Phase,
 }
 
 #[derive(Debug)]
 enum Phase {
-    Connection(H2State),
     Handshake,
+    Active,
+    Shutdown,
 }
 
 type ConnectionProject<'a, IO> = (
     Pin<&'a mut IO>,
     &'a mut BytesMut,
     &'a mut BytesMut,
+    &'a mut H2State,
     &'a mut Phase,
 );
 
@@ -38,6 +40,7 @@ impl<IO> Connection<IO> {
             io,
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
+            state: H2State::new(),
             phase: Phase::Handshake,
         }
     }
@@ -51,26 +54,25 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context,
     ) -> Poll<Result<bool, BoxError>> {
-        let (mut io, read_buffer, write_buffer, state) = self.as_mut().project();
+        let (mut io, read_buffer, write_buffer, state, phase) = self.as_mut().project();
 
-        match state {
+        match phase {
             Phase::Handshake => {
-                if let Poll::Ready(result) =
-                    H2State::handshake(&mut *read_buffer, &mut *write_buffer)
-                {
-                    *state = Phase::Connection(result?);
+                if H2State::handshake(&mut *read_buffer, &mut *write_buffer)?.is_ready() {
+                    *phase = Phase::Active;
                 }
             }
-            Phase::Connection(state) => {
+            Phase::Active => {
                 while let Some(result) = state.poll_frame(read_buffer, write_buffer)? {
                     match result {
                         FrameResult::None => {}
                         FrameResult::Request(_stream_id, _map) => todo!(),
                         FrameResult::Data(_stream_id, _data) => todo!(),
-                        FrameResult::Shutdown => todo!(),
+                        FrameResult::Shutdown => *phase = Phase::Shutdown,
                     }
                 }
             }
+            Phase::Shutdown => { }
         }
 
         let _ = io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?;
@@ -114,6 +116,7 @@ impl<IO> Connection<IO> {
                 Pin::new_unchecked(&mut me.io),
                 &mut me.read_buffer,
                 &mut me.write_buffer,
+                &mut me.state,
                 &mut me.phase,
             )
         }
