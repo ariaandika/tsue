@@ -8,6 +8,8 @@ mod conn;
 
 pub use conn::Connection;
 
+pub mod error;
+
 #[derive(Clone, Copy, Debug)]
 pub enum Role {
     Client,

@@ -2,14 +2,12 @@ use std::task::Poll;
 use tcio::bytes::Buf;
 use tcio::bytes::BytesMut;
 
+use crate::h2::error::{ConnectionError, HandshakeError};
 use crate::h2::frame;
 use crate::h2::hpack::Decoder;
 use crate::h2::settings::{self, Settings};
-use crate::h2::stream;
-use crate::h2::stream::StreamList;
+use crate::h2::stream::{self, StreamList};
 use crate::headers::HeaderMap;
-
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 const PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
@@ -32,13 +30,13 @@ impl H2State {
     pub(crate) fn handshake(
         read_buffer: &mut BytesMut,
         write_buffer: &mut BytesMut,
-    ) -> Poll<Result<Self, BoxError>> {
+    ) -> Poll<Result<Self, HandshakeError>> {
         let Some((preface, header, rest)) = split_exact(read_buffer) else {
             return Poll::Pending;
         };
 
         if preface != *PREFACE {
-            return Poll::Ready(Err("invalid preface".into()));
+            return Poll::Ready(Err(HandshakeError::InvalidPreface));
         }
         let frame = frame::Header::decode(header);
 
@@ -47,7 +45,7 @@ impl H2State {
         };
 
         if !matches!(frame.frame_type(), Some(frame::Type::Settings)) {
-            return Poll::Ready(Err("expected settings frame".into()));
+            return Poll::Ready(Err(HandshakeError::ExpectedSettings));
         }
 
         let mut settings = Settings::new();
@@ -57,7 +55,7 @@ impl H2State {
             let val = u32::from_be_bytes(val);
 
             let Some(id) = settings::Id::from_u16(id) else {
-                return Poll::Ready(Err("invalid setting id".into()));
+                return Poll::Ready(Err(HandshakeError::ExpectedSettings));
             };
 
             println!("[SETTINGS] {id:?} = {val}");
@@ -83,12 +81,16 @@ impl H2State {
     }
 }
 
+const MAX_FRAME: usize = 16_384;
+
 impl H2State {
     pub(crate) fn poll_frame(
         &mut self,
         read_buffer: &mut BytesMut,
         write_buffer: &mut BytesMut,
-    ) -> Result<Option<FrameResult>, BoxError> {
+    ) -> Result<Option<FrameResult>, ConnectionError> {
+        use ConnectionError as E;
+
         let Some(frame) = read_buffer.first_chunk() else {
             return Ok(None);
         };
@@ -96,8 +98,11 @@ impl H2State {
         if read_buffer.len() < frame.frame_size() {
             return Ok(None);
         }
+        if frame.len() > MAX_FRAME {
+            return Err(E::ExcessiveFrame);
+        }
         let Some(ty) = frame.frame_type() else {
-            return Err(format!("unknown frame: {:?}", frame.ty).into());
+            return Err(E::UnexpectedFrame);
         };
 
         use frame::Type as Ty;
@@ -119,7 +124,7 @@ impl H2State {
                         };
                         let frame = frame::Header::decode(*frame);
                         let Some(frame::Type::Continuation) = frame.frame_type() else {
-                            return Err("expected CONTINUATION frame".into());
+                            return Err(E::UnexpectedFrame);
                         };
                         if frame.flags & END_HEADERS == END_HEADERS {
                             break
@@ -133,20 +138,20 @@ impl H2State {
 
                 // get the stream
                 if frame.stream_id == 0 {
-                    return Err("stream id 0 in HEADERS frame".into());
+                    return Err(E::InvalidStreamId);
                 }
                 let stream = match self.streams.stream_mut(frame.stream_id) {
                     Some(stream) => {
                         // stream that idle will be `None`, and other state which can receive
                         // headers is reserved
                         if !stream.is_reserved() {
-                            return Err(format!("unexpected headers frame for stream({})",frame.stream_id).into());
+                            return Err(E::UnexpectedFrame);
                         }
                         stream
                     },
                     None => {
                         if frame.stream_id & 1 == 0 {
-                            return Err("even stream id from client".into());
+                            return Err(E::InvalidStreamId);
                         }
                         self.streams.create(frame.stream_id)
                     },
@@ -168,12 +173,14 @@ impl H2State {
 
                 // HEADERS frame
                 {
-                    let mut block = read_buffer.try_split_to(frame.len()).expect("validated").freeze();
+                    let mut block = read_buffer.split_to(frame.len()).freeze();
                     self.decoder.decode_size_update(&mut block)?;
                     while !block.is_empty() {
-                        let field = self.decoder.decode(&mut block, write_buffer).unwrap();
+                        let field = self.decoder.decode(&mut block, write_buffer)?;
                         println!("  {field:?}");
-                        headers.try_append_field(field.into_owned()).unwrap();
+                        if headers.try_append_field(field.into_owned()).is_err() {
+                            return Err(E::ExcessiveHeaders);
+                        }
                     }
                 }
 
@@ -199,9 +206,11 @@ impl H2State {
 
                     self.decoder.decode_size_update(&mut block)?;
                     while !block.is_empty() {
-                        let field = self.decoder.decode(&mut block, write_buffer).unwrap();
+                        let field = self.decoder.decode(&mut block, write_buffer)?;
                         println!("  {field:?}");
-                        headers.try_append_field(field.into_owned()).unwrap();
+                        if headers.try_append_field(field.into_owned()).is_err() {
+                            return Err(E::ExcessiveHeaders);
+                        }
                     }
                 }
 
@@ -213,18 +222,18 @@ impl H2State {
 
                 // get the stream
                 if frame.stream_id == 0 {
-                    return Err("stream id 0 in DATA frame".into());
+                    return Err(E::InvalidStreamId);
                 }
                 match self.streams.stream_mut(frame.stream_id) {
                     Some(stream) => {
                         if let stream::State::Open | stream::State::HalfClosedRemote = stream.state() {
-                            return Err(format!("unexpected headers frame for stream({})",frame.stream_id).into());
+                            return Err(E::UnexpectedFrame);
                         }
                         if frame.flags & END_STREAM == END_STREAM {
                             stream.set_state(stream::State::HalfClosedRemote);
                         }
                     },
-                    None => return Err("stream is idle".into()),
+                    None => return Err(E::UnexpectedFrame),
                 }
 
                 read_buffer.advance(frame::Header::SIZE);
@@ -235,11 +244,11 @@ impl H2State {
             Ty::RstStream => {
                 // get the stream
                 if frame.stream_id == 0 {
-                    return Err("stream id 0 in RST_STREAM frame".into());
+                    return Err(E::InvalidStreamId);
                 }
                 match self.streams.stream_mut(frame.stream_id) {
                     Some(stream) => stream.set_state(stream::State::Closed),
-                    None => return Err("stream is idle".into()),
+                    None => return Err(E::UnexpectedFrame),
                 }
 
                 Ok(Some(FrameResult::None))
@@ -248,7 +257,7 @@ impl H2State {
                 const ACK: u8 = 0x01;
 
                 if frame.stream_id != 0 {
-                    return Err("non zero stream id in PING frame".into());
+                    return Err(E::InvalidStreamId);
                 }
                 if frame.flags & ACK != ACK {
                     const EMPTY_OPAQUE_DATA: [u8; 8] = [0; 8];
@@ -273,7 +282,7 @@ impl H2State {
             }
             Ty::Continuation | Ty::PushPromise => {
                 // CONTINUATION is handled at once in HEADERS branch
-                Err("unexpected frame from client".into())
+                Err(E::UnexpectedFrame)
             }
         }
     }

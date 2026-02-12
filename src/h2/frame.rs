@@ -1,5 +1,5 @@
 /// HTTP/2 Frame Type.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum Type {
     Data = 0,
@@ -21,6 +21,21 @@ impl Type {
             Some(unsafe { core::mem::transmute::<u8, Self>(ty) })
         } else {
             None
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Data => "DATA",
+            Self::Headers => "HEADERS",
+            Self::Priority => "PRIORITY",
+            Self::RstStream => "RST_STREAM",
+            Self::Settings => "SETTINGS",
+            Self::PushPromise => "PUSH_PROMISE",
+            Self::Ping => "PING",
+            Self::GoAway => "GOAWAY",
+            Self::WindowUpdate => "WINDOW_UPDATE",
+            Self::Continuation => "CONTINUATION",
         }
     }
 }
