@@ -1,6 +1,5 @@
 use std::io::IoSlice;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Poll, ready};
 use std::{io, mem};
 use tcio::bytes::{Buf, BytesMut};
@@ -56,7 +55,7 @@ pub struct Connection<IO, S, B, D, F> {
     write_buffer: BytesMut,
     header_map: HeaderMap,
     phase: Phase<B, D, F>,
-    service: Arc<S>,
+    service: S,
     // === per request ===
     context: HttpContext,
     decoder: BodyCoder,
@@ -69,7 +68,7 @@ type ConnectionProject<'a, IO, S, B, D, F> = (
     &'a mut BytesMut,
     &'a mut HeaderMap,
     Pin<&'a mut Phase<B, D, F>>,
-    &'a mut Arc<S>,
+    &'a mut S,
     &'a mut HttpContext,
     &'a mut BodyCoder,
 );
@@ -107,7 +106,7 @@ where
     S: HttpService<ResBody = B, Error: Into<BoxError>>,
     B: Body,
 {
-    pub fn new(io: IO, service: Arc<S>) -> Self {
+    pub fn new(io: IO, service: S) -> Self {
         Self {
             io,
             shared: SendHandle::new(),

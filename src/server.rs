@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Poll, ready};
 use tcio::io::{AsyncRead, AsyncWrite};
 
@@ -12,15 +11,16 @@ pub type Http1Server<L, S> = Server<L, S, driver::Http1>;
 #[derive(Debug)]
 pub struct Server<L, S, D> {
     listener: L,
-    service: Arc<S>,
+    service: S,
     _p: PhantomData<D>,
 }
 
 impl<L, S, D> Server<L, S, D> {
+    #[inline]
     pub fn new(listener: L, service: S) -> Self {
         Self {
             listener,
-            service: Arc::new(service),
+            service,
             _p: PhantomData,
         }
     }
@@ -29,10 +29,12 @@ impl<L, S, D> Server<L, S, D> {
 impl<L, S, D> Future for Server<L, S, D>
 where
     L: Listener<Stream: AsyncRead + AsyncWrite>,
+    S: Send + Sync + Clone + 'static,
     D: Driver<L::Stream, S, Future: Future<Output: Send> + Send + 'static>,
 {
     type Output = ();
 
+    #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Self::Output> {
         loop {
             let (io, _) = match ready!(self.listener.poll_accept(cx)) {
@@ -43,20 +45,18 @@ where
                 }
             };
 
-            tokio::spawn(D::call(io, Arc::clone(&self.service)));
+            tokio::spawn(D::call(io, self.service.clone()));
         }
     }
 }
 
 pub mod driver {
-    use std::sync::Arc;
-
     use crate::{h1::connection::Connection, service::HttpService};
 
     pub trait Driver<IO, S> {
         type Future;
 
-        fn call(io: IO, service: Arc<S>) -> Self::Future;
+        fn call(io: IO, service: S) -> Self::Future;
     }
 
     #[derive(Debug)]
@@ -70,7 +70,8 @@ pub mod driver {
     {
         type Future = Connection<IO, S, B, B::Data, S::Future>;
 
-        fn call(io: IO, service: Arc<S>) -> Self::Future {
+        #[inline]
+        fn call(io: IO, service: S) -> Self::Future {
             Connection::new(io, service)
         }
     }
