@@ -77,7 +77,7 @@ where
 
         let _ = io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?;
         let result = io.as_mut().poll_read(&mut *read_buffer, cx)?;
-        Poll::Ready(Ok(matches!(result, Poll::Ready(0))))
+        Poll::Ready(Ok(!matches!(result, Poll::Ready(0))))
     }
 }
 

@@ -76,14 +76,15 @@ pub struct Header {
 impl Header {
     /// Length of encoded frame header bytes.
     pub(crate) const SIZE: usize = 9;
-
     pub(crate) const EMPTY_SETTINGS: [u8; 9] = [0, 0, 0, 4, 0, 0, 0, 0, 0];
-
     pub(crate) const ACK_SETTINGS: [u8; 9] = [0, 0, 0, 4, 1, 0, 0, 0, 0];
-
     pub(crate) const ACK_PING: [u8; 9] = [0, 0, 8, 6, 1, 0, 0, 0, 0];
 
-    pub(crate) fn decode(bytes: [u8; Self::SIZE]) -> Self {
+    pub(crate) fn frame_type_of(chunk: &[u8; Self::SIZE]) -> Option<Type> {
+        Type::from_u8(chunk[3])
+    }
+
+    pub(crate) fn decode(bytes: &[u8; Self::SIZE]) -> Self {
         // Length (24),
         // Type (8),
         // Flags (8),
@@ -105,7 +106,6 @@ impl Header {
         }
     }
 
-    #[inline(never)]
     pub fn encode(self) -> [u8; 9] {
         let mut buffer = [0u8; 10];
         buffer[..4].copy_from_slice(&self.len.to_be_bytes());

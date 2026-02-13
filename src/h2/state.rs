@@ -46,21 +46,22 @@ impl H2State {
         read_buffer: &mut BytesMut,
         write_buffer: &mut BytesMut,
     ) -> Poll<Result<(), HandshakeError>> {
-        let Some(chunk) = read_buffer.first_chunk::<{ PREFACE.len() - frame::Header::SIZE }>() else {
+        let Some(chunk) = read_buffer.first_chunk::<{ PREFACE.len() + frame::Header::SIZE }>()
+        else {
             return Poll::Pending;
         };
-        let (preface, header) = split_exact(chunk);
+        let (preface, frame) = split_exact(chunk);
 
         if preface != PREFACE {
             return Poll::Ready(Err(HandshakeError::InvalidPreface));
         }
-        let frame = frame::Header::decode(*header);
-        if !matches!(frame.frame_type(), Some(frame::Type::Settings)) {
+        let Some(frame::Type::Settings) = frame::Header::frame_type_of(frame) else {
             return Poll::Ready(Err(HandshakeError::ExpectedSettings));
-        }
-
+        };
         // write_buffer.extend_from_slice(PREFACE);
         write_buffer.extend_from_slice(&frame::Header::EMPTY_SETTINGS);
+        read_buffer.advance(PREFACE.len());
+        println!("[HANDSHAKE] ok");
         Poll::Ready(Ok(()))
     }
 
@@ -69,7 +70,7 @@ impl H2State {
     }
 }
 
-const MAX_FRAME: usize = 16_384;
+const MAX_FRAME_SIZE: usize = 16_384;
 
 impl H2State {
     pub(crate) fn poll_frame(
@@ -82,11 +83,11 @@ impl H2State {
         let Some(frame) = read_buffer.first_chunk() else {
             return Ok(None);
         };
-        let frame = frame::Header::decode(*frame);
+        let frame = frame::Header::decode(frame);
         if read_buffer.len() < frame.frame_size() {
             return Ok(None);
         }
-        if frame.len() > MAX_FRAME {
+        if frame.len() > MAX_FRAME_SIZE {
             return Err(E::ExcessiveFrame);
         }
         let Some(ty) = frame.frame_type() else {
@@ -103,26 +104,28 @@ impl H2State {
 
                 // CONINUATION validation
                 // guarantee that all wanted frames is in buffer
-                if frame.flags & END_HEADERS != END_HEADERS {
+                // let mut len = frame.frame_size();
+                let payload = {
+                    let mut continu = frame.flags & END_HEADERS == 0;
                     let mut bytes = &read_buffer[frame.frame_size()..];
-                    loop {
+                    while continu {
                         let Some(frame) = bytes.first_chunk() else {
                             // CONTINUATION frame have not been read yet
                             return Ok(None);
                         };
-                        let frame = frame::Header::decode(*frame);
+                        let frame = frame::Header::decode(frame);
                         let Some(frame::Type::Continuation) = frame.frame_type() else {
                             return Err(E::UnexpectedFrame);
                         };
-                        if frame.flags & END_HEADERS == END_HEADERS {
-                            break
-                        }
                         let Some(rest) = bytes.get(frame.frame_size()..) else {
                             return Ok(None);
                         };
+                        continu = frame.flags & END_HEADERS == 0;
                         bytes = rest;
                     }
-                }
+                    let len = bytes.as_ptr().addr() - read_buffer.as_ptr().addr();
+                    read_buffer.split_to(len).freeze()
+                };
 
                 // get the stream
                 if frame.stream_id == 0 {
@@ -148,44 +151,15 @@ impl H2State {
                     stream.set_state(stream::State::HalfClosedRemote);
                 }
 
-                println!(
-                    "[HEADER] priority={}, padded={}, end_headers={}, end_stream={}",
-                    frame.flags & PRIORITY != 0,
-                    frame.flags & PADDED != 0,
-                    frame.flags & END_HEADERS != 0,
-                    frame.flags & END_STREAM != 0,
-                );
-
-                read_buffer.advance(frame::Header::SIZE);
+                let mut payload = payload;
                 let mut headers = HeaderMap::new();
 
-                // HEADERS frame
-                {
-                    let mut block = read_buffer.split_to(frame.len()).freeze();
-                    self.decoder.decode_size_update(&mut block)?;
-                    while !block.is_empty() {
-                        let field = self.decoder.decode(&mut block, write_buffer)?;
-                        println!("  {field:?}");
-                        if headers.try_append_field(field.into_owned()).is_err() {
-                            return Err(E::ExcessiveHeaders);
-                        }
-                    }
-                }
-
-                // CONTINUATION frame
-                if frame.flags & END_HEADERS != END_HEADERS {
-                    let frame = frame::Header::decode(
-                        read_buffer
-                            .try_get_chunk()
-                            .expect("validated, TODO: use unsafe to skip bounds check"),
-                    );
-                    let mut block = read_buffer
-                        .try_split_to(frame.len())
-                        .expect("validated")
-                        .freeze();
+                while let Some(frame) = payload.try_get_chunk() {
+                    let frame = frame::Header::decode(&frame);
+                    let mut block = payload.split_to(frame.len());
 
                     println!(
-                        "[CONTINUATION] priority={}, padded={}, end_headers={}, end_stream={}",
+                        "[HEADER] priority={}, padded={}, end_headers={}, end_stream={}",
                         frame.flags & PRIORITY != 0,
                         frame.flags & PADDED != 0,
                         frame.flags & END_HEADERS != 0,
@@ -193,6 +167,7 @@ impl H2State {
                     );
 
                     self.decoder.decode_size_update(&mut block)?;
+
                     while !block.is_empty() {
                         let field = self.decoder.decode(&mut block, write_buffer)?;
                         println!("  {field:?}");
@@ -201,6 +176,8 @@ impl H2State {
                         }
                     }
                 }
+
+                debug_assert!(payload.is_empty());
 
                 Ok(Some(FrameResult::Request(frame.stream_id, headers)))
             }
@@ -242,7 +219,7 @@ impl H2State {
                 Ok(Some(FrameResult::None))
             }
             Ty::Settings => {
-                let mut payload = &read_buffer[..frame.len()];
+                let mut payload = &read_buffer[frame::Header::SIZE..frame::Header::SIZE + frame.len()];
 
                 while let Some((chunk, rest)) = payload.split_first_chunk() {
                     let (id, val) = split_exact::<{ size_of::<u16>() + size_of::<u32>() }, _, _>(chunk);
@@ -276,7 +253,10 @@ impl H2State {
 
                 Ok(Some(FrameResult::None))
             }
-            Ty::WindowUpdate => todo!(),
+            Ty::WindowUpdate => {
+                read_buffer.advance(frame.frame_size());
+                Ok(Some(FrameResult::None))
+            }
             Ty::GoAway => {
                 read_buffer.advance(frame.frame_size());
                 Ok(Some(FrameResult::Shutdown))
