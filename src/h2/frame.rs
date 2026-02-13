@@ -136,3 +136,36 @@ impl Header {
     }
 }
 
+// ===== Flags =====
+
+// DATA/HEADERS
+const PADDED: u8 = 0x08;
+const END_STREAM: u8 = 0x01;
+
+// HEADERS/CONTINUATION
+const END_HEADERS: u8 = 0x04;
+
+// SETTINGS/PING
+const ACK: u8 = 0x01;
+
+impl Header {
+    /// Get the END_HEADERS flag in HEADERS or CONTINUATION frame.
+    pub fn is_end_headers(&self) -> bool {
+        self.flags & END_HEADERS == END_HEADERS
+    }
+
+    /// Get the PADDED flag in DATA or HEADERS frame.
+    pub fn is_padded(&self) -> bool {
+        self.flags & PADDED == PADDED
+    }
+
+    /// Get the END_STREAM flag in DATA or HEADERS frame.
+    pub fn is_end_stream(&self) -> bool {
+        self.flags & END_STREAM == END_STREAM
+    }
+
+    /// Get the ACK flag in SETTINGS or PING frame.
+    pub fn is_ack(&self) -> bool {
+        self.flags & ACK == ACK
+    }
+}

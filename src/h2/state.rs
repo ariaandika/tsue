@@ -97,16 +97,9 @@ impl H2State {
         use frame::Type as Ty;
         match ty {
             Ty::Headers => {
-                const PRIORITY: u8 = 0x20;
-                const PADDED: u8 = 0x08;
-                const END_HEADERS: u8 = 0x04;
-                const END_STREAM: u8 = 0x01;
-
-                // CONINUATION validation
-                // guarantee that all wanted frames is in buffer
-                // let mut len = frame.frame_size();
+                // also get the CONINUATION frames if any
                 let payload = {
-                    let mut continu = frame.flags & END_HEADERS == 0;
+                    let mut continu = !frame.is_end_headers();
                     let mut bytes = &read_buffer[frame.frame_size()..];
                     while continu {
                         let Some(frame) = bytes.first_chunk() else {
@@ -120,7 +113,7 @@ impl H2State {
                         let Some(rest) = bytes.get(frame.frame_size()..) else {
                             return Ok(None);
                         };
-                        continu = frame.flags & END_HEADERS == 0;
+                        continu = !frame.is_end_headers();
                         bytes = rest;
                     }
                     let len = bytes.as_ptr().addr() - read_buffer.as_ptr().addr();
@@ -147,7 +140,7 @@ impl H2State {
                         self.streams.create(frame.stream_id)
                     },
                 };
-                if frame.flags & END_STREAM == END_STREAM {
+                if frame.is_end_stream() {
                     stream.set_state(stream::State::HalfClosedRemote);
                 }
 
@@ -159,11 +152,10 @@ impl H2State {
                     let mut block = payload.split_to(frame.len());
 
                     println!(
-                        "[HEADER] priority={}, padded={}, end_headers={}, end_stream={}",
-                        frame.flags & PRIORITY != 0,
-                        frame.flags & PADDED != 0,
-                        frame.flags & END_HEADERS != 0,
-                        frame.flags & END_STREAM != 0,
+                        "[HEADER] padded={}, end_headers={}, end_stream={}",
+                        frame.is_padded(),
+                        frame.is_end_headers(),
+                        frame.is_end_stream(),
                     );
 
                     self.decoder.decode_size_update(&mut block)?;
@@ -182,9 +174,6 @@ impl H2State {
                 Ok(Some(FrameResult::Request(frame.stream_id, headers)))
             }
             Ty::Data => {
-                // const PADDED: u8 = 0x08;
-                const END_STREAM: u8 = 0x01;
-
                 // get the stream
                 if frame.stream_id == 0 {
                     return Err(E::InvalidStreamId);
@@ -194,7 +183,7 @@ impl H2State {
                         if let stream::State::Open | stream::State::HalfClosedRemote = stream.state() {
                             return Err(E::UnexpectedFrame);
                         }
-                        if frame.flags & END_STREAM == END_STREAM {
+                        if frame.is_end_stream() {
                             stream.set_state(stream::State::HalfClosedRemote);
                         }
                     },
@@ -219,38 +208,41 @@ impl H2State {
                 Ok(Some(FrameResult::None))
             }
             Ty::Settings => {
-                let mut payload = &read_buffer[frame::Header::SIZE..frame::Header::SIZE + frame.len()];
 
-                while let Some((chunk, rest)) = payload.split_first_chunk() {
-                    let (id, val) = split_exact::<{ size_of::<u16>() + size_of::<u32>() }, _, _>(chunk);
-                    let id = u16::from_be_bytes(*id);
-                    let val = u32::from_be_bytes(*val);
+                if !frame.is_ack() {
+                    let mut payload = &read_buffer[
+                        frame::Header::SIZE..frame::Header::SIZE + frame.len()
+                    ];
 
-                    let Some(id) = settings::Id::from_u16(id) else {
-                        return Err(E::UnknownSetting);
-                    };
+                    while let Some((chunk, rest)) = payload.split_first_chunk() {
+                        let (id, val) = split_exact::<{ size_of::<u16>() + size_of::<u32>() }, _, _>(chunk);
+                        let id = u16::from_be_bytes(*id);
+                        let val = u32::from_be_bytes(*val);
 
-                    println!("[SETTINGS] {id:?} = {val}");
-                    self.settings.set_by_id(id, val);
-                    payload = rest;
+                        let Some(id) = settings::Id::from_u16(id) else {
+                            return Err(E::UnknownSetting);
+                        };
+
+                        println!("[SETTINGS] {id:?} = {val}");
+                        self.settings.set_by_id(id, val);
+                        payload = rest;
+                    }
                 }
+
                 write_buffer.extend_from_slice(&frame::Header::ACK_SETTINGS);
                 read_buffer.advance(frame.frame_size());
                 Ok(Some(FrameResult::None))
             },
             Ty::Ping => {
-                const ACK: u8 = 0x01;
-
                 if frame.stream_id != 0 {
                     return Err(E::InvalidStreamId);
                 }
-                if frame.flags & ACK != ACK {
+                if !frame.is_ack() {
                     const EMPTY_OPAQUE_DATA: [u8; 8] = [0; 8];
                     write_buffer.extend_from_slice(&frame::Header::ACK_PING);
                     write_buffer.extend_from_slice(&EMPTY_OPAQUE_DATA);
                 }
                 read_buffer.advance(frame.frame_size());
-
                 Ok(Some(FrameResult::None))
             }
             Ty::WindowUpdate => {
@@ -264,7 +256,6 @@ impl H2State {
             Ty::Priority => {
                 println!("[PRIORITY] priority frame are not supported");
                 read_buffer.advance(frame.frame_size());
-
                 Ok(Some(FrameResult::None))
             }
             Ty::Continuation | Ty::PushPromise => {
