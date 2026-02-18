@@ -70,7 +70,7 @@ pub fn parse_reqline_chunk(bytes: &mut BytesMut) -> ParseResult<Reqline, ParseEr
 
         let len = state.as_ptr().addr() - bytes.as_ptr().addr();
         let mut reqline = bytes.split_to(len);
-        reqline.truncate_off(crlf);
+        reqline.truncate(reqline.len() - crlf);
         reqline
     };
 
@@ -171,7 +171,7 @@ pub fn parse_header_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, P
         };
         let len = state.as_ptr().addr() - bytes.as_ptr().addr();
         let mut line = bytes.split_to(len);
-        line.truncate_off(crlf);
+        line.truncate(line.len() - crlf);
         line
     };
 
@@ -191,7 +191,7 @@ pub fn parse_header_chunk(bytes: &mut BytesMut) -> ParseResult<Option<Header>, P
 
     let len = state.as_ptr().addr() - line.as_ptr().addr();
     let mut name = line.split_to(len);
-    name.truncate_off(delim_len);
+    name.truncate(name.len() - delim_len);
 
     ParseResult::Ok(Some(Header {
         name,
