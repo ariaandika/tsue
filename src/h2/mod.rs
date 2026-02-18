@@ -11,8 +11,10 @@ pub use conn::Connection;
 pub mod error;
 
 #[derive(Clone, Copy, Debug)]
-pub enum Role {
-    Client,
-    Servier,
+enum ReqPseudoHdrKind {
+    Method,
+    Scheme,
+    Path,
+    Authority,
 }
 

@@ -80,6 +80,8 @@ pub enum ConnectionError {
     ExcessiveFrame,
     /// Excessive headers list length.
     ExcessiveHeaders,
+    /// General errors defined in RFC9113 Section 8.1.1.
+    Malformed,
     /// Header error.
     Header(HeaderError),
     /// Hpack error.
@@ -95,6 +97,7 @@ impl std::fmt::Display for ConnectionError {
             Self::InvalidStreamId => f.write_str("invalid stream id"),
             Self::ExcessiveFrame => f.write_str("excessive frame length"),
             Self::ExcessiveHeaders => f.write_str("excessive headers list"),
+            Self::Malformed => f.write_str("malformed request"),
             Self::Header(err) => err.fmt(f),
             Self::Hpack(err) => err.fmt(f),
         }

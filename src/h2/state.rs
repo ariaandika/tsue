@@ -1,13 +1,15 @@
 use std::task::Poll;
-use tcio::bytes::Buf;
-use tcio::bytes::BytesMut;
+use tcio::bytes::{Buf, BytesMut};
 
 use crate::h2::error::{ConnectionError, HandshakeError};
 use crate::h2::frame;
 use crate::h2::hpack::Decoder;
 use crate::h2::settings::{self, Settings};
 use crate::h2::stream::{self, StreamList};
-use crate::headers::HeaderMap;
+use crate::headers::{HeaderField, HeaderMap};
+use crate::http::Method;
+use crate::proto::Reqline;
+use crate::uri::{Authority, Host, HttpScheme, HttpUri, Path};
 
 const PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
@@ -99,9 +101,8 @@ impl H2State {
             Ty::Headers => {
                 // also get the CONINUATION frames if any
                 let payload = {
-                    let mut continu = !frame.is_end_headers();
                     let mut bytes = &read_buffer[frame.frame_size()..];
-                    while continu {
+                    loop {
                         let Some(frame) = bytes.first_chunk() else {
                             // CONTINUATION frame have not been read yet
                             return Ok(None);
@@ -113,7 +114,9 @@ impl H2State {
                         let Some(rest) = bytes.get(frame.frame_size()..) else {
                             return Ok(None);
                         };
-                        continu = !frame.is_end_headers();
+                        if frame.is_end_headers() {
+                            break;
+                        }
                         bytes = rest;
                     }
                     let len = bytes.as_ptr().addr() - read_buffer.as_ptr().addr();
@@ -147,22 +150,51 @@ impl H2State {
                 let mut payload = payload;
                 let mut headers = HeaderMap::new();
 
+                // ===== Pseudo Headers =====
+                let _reqline = {
+                    let frame = frame::Header::decode(&payload.try_get_chunk().expect("checked"));
+                    let mut block = payload.split_to(frame.len());
+
+                    let mut reqline_builder = ReqlineBuilder::default();
+
+                    loop {
+                        let field = self.decoder.decode(&mut block, write_buffer)?;
+                        if field.name().is_pseudo_header() {
+                            reqline_builder.on_field(field.as_ref())?;
+                        } else {
+                            headers.try_append_field(field.into_owned()).map_err(|_|E::ExcessiveHeaders)?;
+                            break;
+                        }
+                    }
+
+                    // rest of the headers
+                    while !block.is_empty() {
+                        let field = self.decoder.decode(&mut block, write_buffer)?;
+                        if headers.try_append_field(field.into_owned()).is_err() {
+                            return Err(E::ExcessiveHeaders);
+                        }
+                    }
+
+                    reqline_builder.build()?
+                };
+
+                // ===== Regular Headers =====
+
                 while let Some(frame) = payload.try_get_chunk() {
                     let frame = frame::Header::decode(&frame);
                     let mut block = payload.split_to(frame.len());
 
-                    println!(
-                        "[HEADER] padded={}, end_headers={}, end_stream={}",
-                        frame.is_padded(),
-                        frame.is_end_headers(),
-                        frame.is_end_stream(),
-                    );
+                    // println!(
+                    //     "[HEADER] padded={}, end_headers={}, end_stream={}",
+                    //     frame.is_padded(),
+                    //     frame.is_end_headers(),
+                    //     frame.is_end_stream(),
+                    // );
 
                     self.decoder.decode_size_update(&mut block)?;
 
                     while !block.is_empty() {
                         let field = self.decoder.decode(&mut block, write_buffer)?;
-                        println!("  {field:?}");
                         if headers.try_append_field(field.into_owned()).is_err() {
                             return Err(E::ExcessiveHeaders);
                         }
@@ -272,3 +304,80 @@ fn split_exact<const S: usize, const M: usize, const N: usize>(bytes: &[u8; S]) 
     let chunk2 = bytes[M..M + N].try_into().expect("known size");
     (chunk1, chunk2)
 }
+
+// ===== Reqline Builder =====
+
+#[derive(Default)]
+struct ReqlineBuilder {
+    method: Option<Method>,
+    path: Option<Path>,
+    scheme: Option<HttpScheme>,
+    authority: Option<Authority>,
+}
+
+impl ReqlineBuilder {
+    fn on_field(&mut self, field: &HeaderField) -> Result<(), ConnectionError> {
+        use crate::h2::ReqPseudoHdrKind as P;
+        use ConnectionError as E;
+
+        match P::from_name(field.name()).ok_or(E::Malformed)? {
+            P::Method => match self.method.as_mut() {
+                None => {
+                    self.method =
+                        Some(Method::from_bytes(field.value().as_bytes()).ok_or(E::Malformed)?)
+                }
+                Some(_) => return Err(E::Malformed),
+            },
+            P::Scheme => match self.scheme.as_mut() {
+                None => {
+                    self.scheme = match field.value().as_bytes() {
+                        b"http" => Some(HttpScheme::HTTP),
+                        b"https" => Some(HttpScheme::HTTPS),
+                        _ => return Err(E::Malformed),
+                    }
+                }
+                Some(_) => return Err(E::Malformed),
+            },
+            P::Path => match self.path.as_mut() {
+                None => {
+                    self.path =
+                        Some(Path::from_bytes(field.value().clone()).map_err(|_| E::Malformed)?)
+                }
+                Some(_) => return Err(E::Malformed),
+            },
+            P::Authority => match self.authority.as_mut() {
+                None => {
+                    self.authority = Some(
+                        Authority::from_bytes(field.value().clone()).map_err(|_| E::Malformed)?,
+                    )
+                }
+                Some(_) => return Err(E::Malformed),
+            },
+        }
+
+        Ok(())
+    }
+
+    fn build(self) -> Result<Reqline, ConnectionError> {
+        use ConnectionError as E;
+
+        let Self {
+            method: Some(_method),
+            path: Some(path),
+            scheme: Some(scheme),
+            authority: Some(authority),
+        } = self
+        else {
+            return Err(E::Malformed);
+        };
+        let _target = HttpUri::from_parts(
+            scheme,
+            Host::from_slice(authority.host()).map_err(|_| E::Malformed)?,
+            path,
+        );
+        todo!("continue h2")
+        // Ok(Reqline { method, target, version: crate::http::Version::HTTP_2 })
+    }
+}
+
+

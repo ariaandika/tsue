@@ -217,6 +217,18 @@ static STATIC_HEADER_FIELDS: [HeaderField; 16] = header_fields![
     /*15*/ACCEPT_ENCODING, b"gzip, deflate",
 ];
 
+impl crate::h2::ReqPseudoHdrKind {
+    pub(crate) fn from_name(name: &HeaderName) -> Option<Self> {
+        match name.hpack_static()?.get() {
+            1 => Some(Self::Authority),
+            2 | 3 => Some(Self::Method),
+            4 | 5 => Some(Self::Path),
+            6 | 7 => Some(Self::Scheme),
+            _ => None,
+        }
+    }
+}
+
 #[test]
 fn test_hpack_static_idx() {
     // +---+---+---+---+---+---+---+---+
