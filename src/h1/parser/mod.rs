@@ -36,6 +36,69 @@ const VERSION_SIZE: usize = b"HTTP/1.1".len();
 
 // ===== Request Line =====
 
+pub fn find_crlf<'a>(bytes: &mut &'a [u8]) -> Option<&'a [u8]> {
+    // OPTIMIZE:use swar/simd for searching crlf
+    let lf = bytes.iter().position(|&b| b == b'\n')?;
+    if lf == 0 {
+        bytes.advance(1);
+        return Some(&[]);
+    }
+    let (line, rest) = bytes.split_at(lf + 1);
+    *bytes = rest;
+    Some(&line[..line.len() - 1 - (line.get(lf - 1) == Some(&b'\r')) as usize])
+}
+
+pub fn parse_reqline(mut line: BytesMut) -> Result<Reqline, ParseError> {
+    use ParseError as E;
+
+    let method = 'method: {
+        if line.first_chunk() == Some(b"GET ") {
+            line.advance(4);
+            break 'method Method::GET;
+        }
+        if line.first_chunk() == Some(b"POST ") {
+            line.advance(5);
+            break 'method Method::POST;
+        }
+
+        let len = line.iter().position(|&e|e == b' ').ok_or(E::InvalidSeparator)?;
+        let method = Method::from_bytes(&line[..len]).ok_or(E::UnknownMethod)?;
+        line.advance(len + 1);
+        method
+    };
+
+    let version = {
+        const VER: &[u8; 9] = b" HTTP/1.1";
+
+        if line.last_chunk() != Some(VER) {
+            return Err(E::UnsupportedVersion);
+        }
+        line.truncate(line.len() - VER.len());
+
+        Version::HTTP_11
+    };
+
+    Ok(Reqline {
+        method,
+        target: line,
+        version,
+    })
+}
+
+pub fn parse_header(line: &[u8]) -> Result<(&[u8], &[u8]), ParseError> {
+    use ParseError as E;
+
+    // OPTIMIZE:use swar/simd for searching space
+    let sp = line.iter().position(|&b| b == b' ').ok_or(E::InvalidSeparator)?;
+    if sp == 0 {
+        return Err(E::InvalidHeader);
+    }
+    if line.get(sp - 1..sp + 1) != Some(b": ") {
+        return Err(E::InvalidSeparator);
+    }
+    Ok((&line[..sp - 1], &line[sp + 1..]))
+}
+
 /// Parser request control data.
 ///
 /// This function performs a chunked parsing, see [module level documentation] for more details.
