@@ -193,14 +193,14 @@ fn test_find_crlf() {
 
     macro_rules! test {
         ($data:expr, $expect:expr, $rest:expr) => {{
-            let mut data = &$data[..];
+            let mut data = BytesMut::copy_from_slice($data);
             let line = find_crlf(&mut data).unwrap();
             assert_eq!(&line, $expect);
             assert_eq!(&data, $rest);
         }};
     }
 
-    assert!(find_crlf(&mut &b"GET / HTTP/1."[..]).is_none());
+    assert!(find_crlf(&mut BytesMut::copy_from_slice(b"GET / HTTP/1.")).is_none());
 
     // (input, result, rest)
     test!(b"\r\n", b"", b"");
@@ -311,7 +311,7 @@ fn test_parse_header() {
             $input:expr;
             $name:expr, $value:expr,
         } => {
-            let (name, val) = parse_header($input).unwrap();
+            let (name, val) = parse_header(BytesMut::copy_from_slice($input)).unwrap();
             assert_eq!(&name, $name);
             assert_eq!(&val, $value);
         };

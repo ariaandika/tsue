@@ -32,20 +32,22 @@ use crate::proto::{Header, Reqline};
 #[cfg(test)]
 mod test;
 
+use ParseError as E;
+
 const VERSION_SIZE: usize = b"HTTP/1.1".len();
 
 // ===== Request Line =====
 
-pub fn find_crlf<'a>(bytes: &mut &'a [u8]) -> Option<&'a [u8]> {
+pub fn find_crlf(bytes: &mut BytesMut) -> Option<BytesMut> {
     // OPTIMIZE:use swar/simd for searching crlf
     let lf = bytes.iter().position(|&b| b == b'\n')?;
     if lf == 0 {
         bytes.advance(1);
-        return Some(&[]);
+        return Some(BytesMut::new());
     }
-    let (line, rest) = bytes.split_at(lf + 1);
-    *bytes = rest;
-    Some(&line[..line.len() - 1 - (line.get(lf - 1) == Some(&b'\r')) as usize])
+    let reqline = bytes.split_to(lf + 1);
+    bytes.advance(1 + (reqline.get(lf - 1) == Some(&b'\r')) as usize);
+    Some(reqline)
 }
 
 pub fn parse_reqline(mut line: BytesMut) -> Result<Reqline, ParseError> {
@@ -85,9 +87,7 @@ pub fn parse_reqline(mut line: BytesMut) -> Result<Reqline, ParseError> {
     })
 }
 
-pub fn parse_header(line: &[u8]) -> Result<(&[u8], &[u8]), ParseError> {
-    use ParseError as E;
-
+pub fn parse_header(mut line: BytesMut) -> Result<(BytesMut, BytesMut), ParseError> {
     // OPTIMIZE:use swar/simd for searching space
     let sp = line.iter().position(|&b| b == b' ').ok_or(E::InvalidSeparator)?;
     if sp == 0 {
@@ -96,7 +96,7 @@ pub fn parse_header(line: &[u8]) -> Result<(&[u8], &[u8]), ParseError> {
     if line.get(sp - 1..sp + 1) != Some(b": ") {
         return Err(E::InvalidSeparator);
     }
-    Ok((&line[..sp - 1], &line[sp + 1..]))
+    Ok((line.split_to(sp - 1), line))
 }
 
 /// Parser request control data.

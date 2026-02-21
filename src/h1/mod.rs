@@ -5,3 +5,6 @@
 
 pub mod parser;
 pub mod connection;
+
+pub mod proto;
+pub mod conn;

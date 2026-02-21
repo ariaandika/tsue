@@ -24,7 +24,7 @@ pub trait HttpService:
         Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     >
 {
-    type ResBody;
+    type ResBody: crate::body::Body;
 }
 
 impl<S, B> HttpService for S
@@ -33,7 +33,8 @@ where
         Request<Incoming>,
         Response = Response<B>,
         Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
-    >
+    >,
+    B: crate::body::Body,
 {
     type ResBody = B;
 }
