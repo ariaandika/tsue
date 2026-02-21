@@ -45,8 +45,9 @@ pub fn find_crlf(bytes: &mut BytesMut) -> Option<BytesMut> {
         bytes.advance(1);
         return Some(BytesMut::new());
     }
-    let reqline = bytes.split_to(lf + 1);
-    bytes.advance(1 + (reqline.get(lf - 1) == Some(&b'\r')) as usize);
+    let cr = (bytes.get(lf - 1) == Some(&b'\r')) as usize;
+    let reqline = bytes.split_to(lf - cr);
+    bytes.advance(1 + cr);
     Some(reqline)
 }
 
@@ -96,7 +97,9 @@ pub fn parse_header(mut line: BytesMut) -> Result<(BytesMut, BytesMut), ParseErr
     if line.get(sp - 1..sp + 1) != Some(b": ") {
         return Err(E::InvalidSeparator);
     }
-    Ok((line.split_to(sp - 1), line))
+    let val = line.split_off(sp + 2);
+    line.truncate(sp - 1);
+    Ok((line, val))
 }
 
 /// Parser request control data.

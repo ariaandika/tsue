@@ -56,7 +56,7 @@ where
     <S::ResBody as Body>::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite,
 {
-    fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<bool, BoxError>> {
+    fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<(), BoxError>> {
         // SAFETY: self is pinned
         let Self { phase, session, read_buffer, write_buffer, service, io } = unsafe { self.get_unchecked_mut() };
         let mut io = unsafe { Pin::new_unchecked(io) };
@@ -65,7 +65,11 @@ where
             match phase {
                 Phase::Request(parser) => {
                     let Ready(reqline) = parser.poll_request(session, &mut *read_buffer)? else {
-                        break
+                        let read = ready!(io.as_mut().poll_read(&mut *read_buffer, cx)?);
+                        if read == 0 {
+                            return Ready(Ok(()))
+                        }
+                        continue;
                     };
                     let (request, state) = RequestState::new(reqline, session, read_buffer, cx)?;
                     let future = service.call(request);
@@ -100,6 +104,8 @@ where
                     *phase = Phase::Request(RequestParser::new());
                 }
                 Phase::Response(remaining, body, data_mut) => {
+                    ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?);
+
                     loop {
                         if let Some(data) = data_mut {
                             let len = data.remaining();
@@ -157,8 +163,6 @@ where
                 }
             }
         }
-
-        Poll::Ready(Ok(true))
     }
 }
 
@@ -171,17 +175,12 @@ where
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Self::Output> {
-        loop {
-            match ready!(self.as_mut().try_poll(cx)) {
-                Ok(true) => { }
-                Ok(false) => {
-                    println!("connection closed");
-                    break;
-                }
-                Err(err) => {
-                    eprintln!("connection aborted: {err}");
-                    break;
-                }
+        match ready!(self.as_mut().try_poll(cx)) {
+            Ok(()) => {
+                println!("connection closed");
+            }
+            Err(err) => {
+                eprintln!("connection aborted: {err}");
             }
         }
         Poll::Ready(())

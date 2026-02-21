@@ -6,9 +6,7 @@ use std::task::Poll;
 use tcio::bytes::Bytes;
 use tcio::bytes::BytesMut;
 use tokio::{net::TcpListener, runtime::Runtime};
-use tsue::body::Body;
-use tsue::body::Frame;
-use tsue::body::Incoming;
+use tsue::body::{Incoming, Full, Frame, Body};
 use tsue::http::request::Request;
 use tsue::http::response::{Parts, Response};
 use tsue::server::Http1Server;
@@ -26,7 +24,7 @@ fn main() -> io::Result<()> {
     })
 }
 
-async fn handle(req: Request<Incoming>) -> Response<Chunked> {
+async fn handle(req: Request<Incoming>) -> Response<Full<Bytes>> {
     if req.parts().uri.path() != "/null" {
         // tokio::spawn(async move {
         //     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -50,7 +48,7 @@ async fn handle(req: Request<Incoming>) -> Response<Chunked> {
         };
     }
 
-    Response::from_parts(Parts::default(), Chunked::new())
+    Response::from_parts(Parts::default(), Full::new(Bytes::copy_from_slice(b"Hello World!")))
 }
 
 #[allow(unused)]
@@ -61,6 +59,7 @@ struct Chunked {
 }
 
 impl Chunked {
+    #[allow(unused)]
     fn new() -> Self {
         Self {
             file: File::open("Cargo.lock").unwrap(),

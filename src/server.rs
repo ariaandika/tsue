@@ -51,7 +51,7 @@ where
 }
 
 pub mod driver {
-    use crate::{h1::connection::Connection, service::HttpService};
+    use crate::{h1::Connection, service::HttpService};
 
     pub trait Driver<IO, S> {
         type Future;
@@ -68,11 +68,11 @@ pub mod driver {
         B: crate::body::Body,
         B::Error: std::error::Error + Send + Sync + 'static,
     {
-        type Future = Connection<IO, S, B, B::Data, S::Future>;
+        type Future = Connection<S, IO>;
 
         #[inline]
         fn call(io: IO, service: S) -> Self::Future {
-            Connection::new(io, service)
+            Connection::new(service, io)
         }
     }
 }
