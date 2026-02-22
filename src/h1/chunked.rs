@@ -1,6 +1,6 @@
-use std::mem;
 use std::task::Poll::{self, *};
 use tcio::bytes::{Buf, BytesMut};
+use tcio::num::itoa;
 
 use crate::body::error::BodyError;
 
@@ -21,7 +21,7 @@ pub(crate) struct ChunkedCoder {
 /// The returned bytes must be written in following order: `header`, `chunk`, then `trail`.
 #[derive(Debug)]
 pub(crate) struct EncodedChunk<B> {
-    pub chunk: B,
+    pub data: B,
     pub trail: &'static [u8],
 }
 
@@ -137,29 +137,20 @@ impl ChunkedCoder {
 
     pub fn encode_chunk<B: Buf>(
         &mut self,
-        chunk: B,
-        write_buffer: &mut BytesMut,
+        data: B,
         is_last_chunk: bool,
+        write_buffer: &mut BytesMut,
     ) -> EncodedChunk<B> {
-        debug_assert!(chunk.has_remaining());
+        debug_assert!(data.has_remaining());
 
-        const CRLF: [u8; 2] = *b"\r\n";
-        const CRLF_LEN: usize = CRLF.len();
+        const TRAILING: &[u8; 7] = b"\r\n0\r\n\r\n";
 
-        write_buffer.reserve(<usize as itoa::Integer>::MAX_STR_LEN + CRLF_LEN);
-        let header: &mut [u8] = unsafe { mem::transmute(write_buffer.spare_capacity_mut()) };
+        write_buffer.extend_from_slice(itoa().format(data.remaining() as u64).as_bytes());
+        write_buffer.extend_from_slice(b"\r\n");
 
-        let mut b = itoa::Buffer::new();
-        let s = b.format(chunk.remaining()).as_bytes();
-        let len = s.len();
+        // if is_last_chunk { 7 } else { 2 }
+        let trail = 2 + (is_last_chunk as usize * 5);
 
-        unsafe {
-            std::ptr::copy_nonoverlapping(s.as_ptr(), header.as_mut_ptr(), len);
-            std::ptr::copy_nonoverlapping(CRLF.as_ptr(), header.as_mut_ptr().add(len), 2);
-        }
-
-        let crlf = (is_last_chunk as usize) << 1;
-
-        EncodedChunk { chunk, trail: &CRLF[..crlf] }
+        EncodedChunk { data, trail: &TRAILING[..trail] }
     }
 }
