@@ -1,3 +1,5 @@
+use tcio::bytes::Buf;
+
 use super::{Authority, Bytes, Host, HttpScheme, HttpUri, Path, Scheme, Uri, UriError, matches};
 
 impl Scheme {
