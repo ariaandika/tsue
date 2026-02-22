@@ -19,11 +19,13 @@ mod chunked;
 mod coder;
 
 // === IO ===
-pub(crate) mod handle;
-mod frame;
+pub(crate) mod shared;
+mod handle;
 mod incoming;
-mod collect;
 
+// === Types ===
+mod frame;
+mod collect;
 pub mod error;
 
 

@@ -2,7 +2,7 @@ use std::mem;
 use std::task::Poll::{self, *};
 use tcio::bytes::{Bytes, BytesMut};
 
-use crate::body::handle::SendHandle;
+use crate::body::shared::SendHandle;
 use crate::body::{Body, BodyCoder, Codec, Incoming};
 use crate::h1::chunked::ChunkedCoder;
 use crate::h1::parser::{find_crlf, parse_header, parse_reqline};

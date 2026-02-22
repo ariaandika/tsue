@@ -1,9 +1,10 @@
 use std::task::Poll;
 use tcio::bytes::Bytes;
 
-use super::Collect;
-use super::error::ReadError;
-use super::handle::{BodyHandle, IoHandle};
+use crate::body::Collect;
+use crate::body::error::ReadError;
+use crate::body::handle::BodyHandle;
+use crate::body::shared::RecvHandle;
 
 /// [`Body`] implemenation for HTTP server.
 ///
@@ -47,7 +48,7 @@ impl Incoming {
     }
 
     #[inline]
-    pub(crate) fn from_handle(handle: IoHandle, size_hint: Option<u64>) -> Self {
+    pub(crate) fn from_handle(handle: RecvHandle, size_hint: Option<u64>) -> Self {
         Self {
             repr: Repr::Handle(BodyHandle::new(handle, size_hint)),
         }

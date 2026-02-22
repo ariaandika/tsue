@@ -4,8 +4,35 @@ use std::task::{Poll, Waker, ready};
 use std::{io, mem};
 use tcio::bytes::{Bytes, BytesMut};
 
-use crate::body::coder::BodyCoder;
 use crate::body::error::{BodyError, ReadError};
+
+pub trait BodyDecoder {
+    fn decode_chunk(
+        &mut self,
+        read_buffer: &mut BytesMut,
+    ) -> Poll<Result<Option<BytesMut>, BodyError>>;
+
+    fn can_drain(&self) -> bool;
+
+    fn poll_drain(&mut self, read_buffer: &mut BytesMut) -> Poll<Result<(), BodyError>>;
+}
+
+impl<D: BodyDecoder> BodyDecoder for &mut D {
+    fn decode_chunk(
+        &mut self,
+        read_buffer: &mut BytesMut,
+    ) -> Poll<Result<Option<BytesMut>, BodyError>> {
+        D::decode_chunk(self, read_buffer)
+    }
+
+    fn can_drain(&self) -> bool {
+        D::can_drain(self)
+    }
+
+    fn poll_drain(&mut self, read_buffer: &mut BytesMut) -> Poll<Result<(), BodyError>> {
+        D::poll_drain(self, read_buffer)
+    }
+}
 
 /// Sender shared handle.
 pub struct SendHandle {
@@ -249,14 +276,14 @@ impl SendHandle {
     pub fn poll_read(
         &mut self,
         buf: &mut BytesMut,
-        decoder: &mut BodyCoder,
+        mut decoder: impl BodyDecoder,
         cx: &mut std::task::Context,
     ) -> Poll<()> {
         self.with_mut(cx, || {
             Poll::Ready(match ready!(decoder.decode_chunk(&mut *buf)) {
-                Some(Ok(data)) => Data::Ok(data.freeze()),
-                Some(Err(err)) => Data::BodyErr(err),
-                None => Data::Eof,
+                Ok(Some(data)) => Data::Ok(data.freeze()),
+                Ok(None) => Data::Eof,
+                Err(err) => Data::BodyErr(err),
             })
         })
     }
@@ -323,7 +350,7 @@ impl SendHandle {
     pub fn poll_close(
         &mut self,
         buf: &mut BytesMut,
-        decoder: &mut BodyCoder,
+        mut decoder: impl BodyDecoder,
         cx: &mut std::task::Context,
     ) -> Poll<Option<Result<bool, BodyError>>> {
         let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Relaxed);
@@ -332,21 +359,16 @@ impl SendHandle {
             // recv handle is still alive, user may read the body concurrently
             self.poll_read(buf, decoder, cx).map(|()|None)
         } else {
-            const MIN_BODY_DRAIN: u64 = 64 * 1024;
-
             // recv handle is dropped, drain body if it small enough or in chunked
-            if decoder.remaining().unwrap_or(u64::MAX) > MIN_BODY_DRAIN {
+            if !decoder.can_drain() {
                 return Poll::Ready(Some(Ok(false)));
             }
 
-            while decoder.has_remaining() {
-                match ready!(decoder.decode_chunk(&mut *buf)) {
-                    Some(Ok(_)) => {}
-                    Some(Err(err)) => return Poll::Ready(Some(Err(err))),
-                    None => break,
-                }
+            match decoder.poll_drain(buf) {
+                Poll::Ready(Ok(())) => Poll::Ready(Some(Ok(true))),
+                Poll::Ready(Err(err)) => Poll::Ready(Some(Err(err))),
+                Poll::Pending => Poll::Pending,
             }
-            Poll::Ready(Some(Ok(true)))
         }
     }
 }

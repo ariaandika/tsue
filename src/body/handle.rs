@@ -1,11 +1,8 @@
 use std::task::{Poll, ready};
 use tcio::bytes::Bytes;
 
-use super::error::ReadError;
-
-mod shared;
-
-pub use shared::{SendHandle, RecvHandle as IoHandle};
+use crate::body::error::ReadError;
+use crate::body::shared::{RecvHandle as IoHandle, SendHandle};
 
 #[derive(Debug)]
 pub struct BodyHandle {

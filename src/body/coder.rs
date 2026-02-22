@@ -11,7 +11,7 @@ use tcio::num::atou;
 
 use crate::body::chunked::{ChunkedCoder, EncodedBuf};
 use crate::body::error::BodyError;
-use crate::body::handle::SendHandle;
+use crate::body::shared::{BodyDecoder, SendHandle};
 use crate::body::{Codec, Incoming};
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
@@ -147,6 +147,32 @@ impl BodyCoder {
             Kind::Chunked(_) => Codec::Chunked,
             Kind::ContentLength(len) => Codec::ContentLength(len),
         }
+    }
+}
+
+impl BodyDecoder for BodyCoder {
+    fn decode_chunk(
+        &mut self,
+        read_buffer: &mut BytesMut,
+    ) -> Poll<Result<Option<BytesMut>, BodyError>> {
+        self.decode_chunk(read_buffer)
+            .map(|result| result.transpose())
+    }
+
+    fn can_drain(&self) -> bool {
+        const MIN_BODY_DRAIN: u64 = 64 * 1024;
+        self.remaining().unwrap_or(u64::MAX) <= MIN_BODY_DRAIN
+    }
+
+    fn poll_drain(&mut self, read_buffer: &mut BytesMut) -> Poll<Result<(), BodyError>> {
+        while self.has_remaining() {
+            match std::task::ready!(BodyDecoder::decode_chunk(self, read_buffer)) {
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(err) => return Poll::Ready(Err(err)),
+            }
+        }
+        Poll::Ready(Ok(()))
     }
 }
 
