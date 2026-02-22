@@ -1,10 +1,12 @@
 use std::mem;
 use std::task::Poll::{self, *};
 use tcio::bytes::{Bytes, BytesMut};
+use tcio::num::itoa;
 
 use crate::body::shared::SendHandle;
-use crate::body::{Body, BodyCoder, Codec, Incoming};
+use crate::body::{Body, Incoming};
 use crate::h1::chunked::ChunkedCoder;
+use crate::h1::body::{H1BodyDecoder, BodyKind};
 use crate::h1::parser::{find_crlf, parse_header, parse_reqline};
 use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue, standard};
 use crate::http::{Method, Request, Response, httpdate_now, request, response};
@@ -64,7 +66,7 @@ impl RequestParser {
 #[derive(Debug)]
 pub(crate) struct RequestState {
     context: Context,
-    decoder: BodyCoder,
+    decoder: H1BodyDecoder,
 }
 
 impl RequestState {
@@ -77,8 +79,8 @@ impl RequestState {
     ) -> Result<(Request<Incoming>, Self), ProtoError> {
         let headers = mem::take(&mut session.headers);
 
-        let decoder = BodyCoder::new(&headers).expect("TODO");
-        let context = Context::new(method, &headers)?;
+        let decoder = H1BodyDecoder::new(&headers).expect("TODO");
+        let context = Context { method };
 
         let host = match headers.get(standard::HOST) {
             Some(value) => Bytes::from(value.clone()),
@@ -153,17 +155,15 @@ impl RequestState {
         response: Response<B>,
         session: &mut Session,
         write_buffer: &mut BytesMut,
-    ) -> (B, BodyKind)
+    ) -> Option<(B, BodyKind)>
     where
         B: Body,
     {
         let (parts, body) = response.into_parts();
-        let is_res_body = !body.is_end_stream();
+        let size_hint = body.size_hint();
+        let clen = size_hint.1.filter(|&l|l == size_hint.0);
 
-        let encoder = BodyCoder::from_len(body.size_hint().1);
-        let coding = is_res_body.then_some(encoder.coding());
-
-        write_response_head(&parts, &mut *write_buffer, coding);
+        write_response_head(&parts, &mut *write_buffer, clen);
 
         // reuse header map allocation
         let mut headers = parts.headers;
@@ -172,39 +172,36 @@ impl RequestState {
 
         let context = self.context.clone();
 
-        if context.is_res_body_allowed && is_res_body {
-            let (_, upper) = body.size_hint();
-            match upper {
-                Some(length) => (body, BodyKind::Exact(length)),
-                None => (body, BodyKind::Chunked(ChunkedCoder::new())),
-            }
-        } else {
-            (body, BodyKind::None)
+        if !context.is_res_body_allowed() {
+            return None;
+        }
+
+        match clen {
+            Some(len) => Some((body, BodyKind::ContentLength(len))),
+            None => Some((body, BodyKind::Chunked(ChunkedCoder::new()))),
         }
     }
 }
 
 // ===== Response Writer =====
 
-fn write_response_head(res: &response::Parts, buf: &mut BytesMut, coding: Option<Codec>) {
+fn write_response_head(res: &response::Parts, buf: &mut BytesMut, content_length: Option<u64>) {
     buf.extend_from_slice(res.version.as_str().as_bytes());
     buf.extend_from_slice(b" ");
     buf.extend_from_slice(res.status.as_str().as_bytes());
     buf.extend_from_slice(b"\r\nDate: ");
     buf.extend_from_slice(&httpdate_now()[..]);
 
-    if let Some(coding) = coding {
-        match coding {
-            Codec::Chunked => {
-                // FEAT: support compressed transfer-encodings
-                buf.extend_from_slice(b"\r\nTransfer-Encoding: chunked\r\n");
-            }
-            Codec::ContentLength(len) => {
-                buf.extend_from_slice(b"\r\nContent-Length: ");
-                buf.extend_from_slice(itoa::Buffer::new().format(len).as_bytes());
-                buf.extend_from_slice(b"\r\n");
-            }
-        }
+    match content_length {
+        Some(len) => {
+            buf.extend_from_slice(b"\r\nContent-Length: ");
+            buf.extend_from_slice(itoa().format(len).as_bytes());
+            buf.extend_from_slice(b"\r\n");
+        },
+        None => {
+            // FEAT: support compressed transfer-encodings
+            buf.extend_from_slice(b"\r\nTransfer-Encoding: chunked\r\n");
+        },
     }
 
     for f in &res.headers {
@@ -217,44 +214,46 @@ fn write_response_head(res: &response::Parts, buf: &mut BytesMut, coding: Option
     buf.extend_from_slice(b"\r\n");
 }
 
-pub(crate) enum BodyKind {
-    None,
-    Exact(u64),
-    Chunked(ChunkedCoder),
-}
+// pub(crate) enum BodyKind {
+//     None,
+//     Exact(u64),
+//     Chunked(ChunkedCoder),
+// }
 
 // ===== Context =====
 
 #[derive(Debug, Clone)]
 struct Context {
-    is_keep_alive: bool,
-    is_res_body_allowed: bool,
+    method: Method,
 }
 
 impl Context {
-    fn new(method: Method, headers: &HeaderMap) -> Result<Self, ProtoError> {
-        // https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
-        let is_res_body_allowed = !matches!(method, Method::HEAD);
-
-        let mut is_keep_alive = true;
-
-        if let Some(value) = headers.get(standard::CONNECTION) {
-            for conn in value.as_bytes().split(|&e| e == b',') {
-                if conn.eq_ignore_ascii_case(b"close") {
-                    is_keep_alive = false;
-                    break; // "close" is highest priority
-                }
-                if conn.eq_ignore_ascii_case(b"keep-alive") {
-                    is_keep_alive = true;
-                }
-            }
-        }
-
-        Ok(Self {
-            is_keep_alive,
-            is_res_body_allowed,
-        })
+    /// https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
+    fn is_res_body_allowed(&self) -> bool {
+        !matches!(self.method, Method::HEAD)
     }
+    // fn new(method: Method, headers: &HeaderMap) -> Result<Self, ProtoError> {
+    //     // https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
+    //     let is_res_body_allowed = !matches!(method, Method::HEAD);
+    //
+    //     let mut is_keep_alive = true;
+    //
+    //     if let Some(value) = headers.get(standard::CONNECTION) {
+    //         for conn in value.as_bytes().split(|&e| e == b',') {
+    //             if conn.eq_ignore_ascii_case(b"close") {
+    //                 is_keep_alive = false;
+    //                 break; // "close" is highest priority
+    //             }
+    //             if conn.eq_ignore_ascii_case(b"keep-alive") {
+    //                 is_keep_alive = true;
+    //             }
+    //         }
+    //     }
+    //
+    //     Ok(Self {
+    //         is_res_body_allowed,
+    //     })
+    // }
 }
 
 // ===== Session =====
@@ -264,6 +263,7 @@ pub(crate) struct Session {
     scheme: HttpScheme,
     headers: HeaderMap,
     shared: SendHandle,
+    keep_alive: bool,
 }
 
 impl Session {
@@ -272,6 +272,11 @@ impl Session {
             scheme: HttpScheme::HTTP,
             headers: HeaderMap::with_capacity(32),
             shared: SendHandle::new(),
+            keep_alive: true,
         }
+    }
+
+    pub(crate) fn keep_alive(&self) -> bool {
+        self.keep_alive
     }
 }

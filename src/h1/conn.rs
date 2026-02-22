@@ -5,9 +5,9 @@ use tcio::bytes::{Buf, BytesMut};
 use tcio::io::{AsyncRead, AsyncWrite};
 
 use crate::body::Body;
+use crate::h1::body::BodyKind;
 use crate::h1::chunked::{ChunkedCoder, EncodedChunk};
-use crate::h1::proto::{BodyKind, Session};
-use crate::h1::proto::{RequestParser, RequestState};
+use crate::h1::proto::{RequestParser, RequestState, Session};
 use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -33,6 +33,7 @@ enum Phase<F, B, D> {
     ResponseNoBody,
     Response(u64, B, Option<D>),
     ResponseChunk(ChunkedCoder, B, Option<EncodedChunk<D>>),
+    Complete,
 }
 
 impl<S, IO> Connection<S, IO>
@@ -58,8 +59,8 @@ where
     IO: AsyncRead + AsyncWrite,
 {
     fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<(), BoxError>> {
-        // SAFETY: self is pinned
         let Self { phase, session, read_buffer, write_buffer, service, io } = unsafe { self.get_unchecked_mut() };
+        // SAFETY: self is pinned
         let mut io = unsafe { Pin::new_unchecked(io) };
 
         loop {
@@ -91,18 +92,15 @@ where
                         }
                     };
 
-                    let (body, kind) = state.build_response_writer(response, session, write_buffer);
-
-                    let next_phase = match kind {
-                        BodyKind::None => Phase::ResponseNoBody,
-                        BodyKind::Exact(writer) => Phase::Response(writer, body, None),
-                        BodyKind::Chunked(writer) => Phase::ResponseChunk(writer, body, None),
+                    *phase = match state.build_response_writer(response, session, write_buffer) {
+                        Some((body, BodyKind::ContentLength(len))) => Phase::Response(len, body, None),
+                        Some((body, BodyKind::Chunked(encoder))) => Phase::ResponseChunk(encoder, body, None),
+                        None => Phase::ResponseNoBody,
                     };
-                    *phase = next_phase;
                 }
                 Phase::ResponseNoBody => {
                     ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?);
-                    *phase = Phase::Request(RequestParser::new());
+                    *phase = Phase::Complete;
                 }
                 Phase::Response(remaining, body, data_mut) => {
                     ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?);
@@ -136,9 +134,11 @@ where
                         }
                     }
 
-                    *phase = Phase::Request(RequestParser::new());
+                    *phase = Phase::Complete;
                 }
                 Phase::ResponseChunk(encoder, body, data_mut) => {
+                    ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?);
+
                     loop {
                         if let Some(EncodedChunk { chunk, trail }) = data_mut {
                             let chunk = write_buffer.chain(chunk).chain(trail);
@@ -160,6 +160,12 @@ where
                         }
                     }
 
+                    *phase = Phase::Complete;
+                }
+                Phase::Complete => {
+                    if !session.keep_alive() {
+                        return Ready(Ok(()));
+                    }
                     *phase = Phase::Request(RequestParser::new());
                 }
             }
