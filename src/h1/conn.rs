@@ -7,7 +7,8 @@ use tcio::io::{AsyncRead, AsyncWrite};
 use crate::body::Body;
 use crate::h1::body::BodyKind;
 use crate::h1::chunked::{ChunkedCoder, EncodedChunk};
-use crate::h1::proto::{RequestParser, RequestState, Session};
+use crate::h1::proto::{RequestParser, RequestState};
+use crate::h1::states::Session;
 use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -163,7 +164,7 @@ where
                     *phase = Phase::Complete;
                 }
                 Phase::Complete => {
-                    if !session.keep_alive() {
+                    if !session.keep_alive {
                         return Ready(Ok(()));
                     }
                     *phase = Phase::Request(RequestParser::new());

@@ -3,15 +3,15 @@ use std::task::Poll::{self, *};
 use tcio::bytes::{Bytes, BytesMut};
 use tcio::num::itoa;
 
-use crate::body::shared::SendHandle;
 use crate::body::{Body, Incoming};
+use crate::h1::body::{BodyKind, H1BodyDecoder};
 use crate::h1::chunked::ChunkedCoder;
-use crate::h1::body::{H1BodyDecoder, BodyKind};
 use crate::h1::parser::{find_crlf, parse_header, parse_reqline};
-use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue, standard};
+use crate::h1::states::{Context, Session};
+use crate::headers::{HeaderField, HeaderName, HeaderValue, standard};
 use crate::http::{Method, Request, Response, httpdate_now, request, response};
 use crate::proto::error::{ParseError, ProtoError};
-use crate::uri::{Host, HttpScheme, HttpUri, Path};
+use crate::uri::{Host, HttpUri, Path};
 
 pub(crate) struct RequestParser {
     reqline: Option<(Method, Bytes)>,
@@ -214,69 +214,3 @@ fn write_response_head(res: &response::Parts, buf: &mut BytesMut, content_length
     buf.extend_from_slice(b"\r\n");
 }
 
-// pub(crate) enum BodyKind {
-//     None,
-//     Exact(u64),
-//     Chunked(ChunkedCoder),
-// }
-
-// ===== Context =====
-
-#[derive(Debug, Clone)]
-struct Context {
-    method: Method,
-}
-
-impl Context {
-    /// https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
-    fn is_res_body_allowed(&self) -> bool {
-        !matches!(self.method, Method::HEAD)
-    }
-    // fn new(method: Method, headers: &HeaderMap) -> Result<Self, ProtoError> {
-    //     // https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
-    //     let is_res_body_allowed = !matches!(method, Method::HEAD);
-    //
-    //     let mut is_keep_alive = true;
-    //
-    //     if let Some(value) = headers.get(standard::CONNECTION) {
-    //         for conn in value.as_bytes().split(|&e| e == b',') {
-    //             if conn.eq_ignore_ascii_case(b"close") {
-    //                 is_keep_alive = false;
-    //                 break; // "close" is highest priority
-    //             }
-    //             if conn.eq_ignore_ascii_case(b"keep-alive") {
-    //                 is_keep_alive = true;
-    //             }
-    //         }
-    //     }
-    //
-    //     Ok(Self {
-    //         is_res_body_allowed,
-    //     })
-    // }
-}
-
-// ===== Session =====
-
-#[derive(Debug)]
-pub(crate) struct Session {
-    scheme: HttpScheme,
-    headers: HeaderMap,
-    shared: SendHandle,
-    keep_alive: bool,
-}
-
-impl Session {
-    pub(crate) fn new() -> Self {
-        Self {
-            scheme: HttpScheme::HTTP,
-            headers: HeaderMap::with_capacity(32),
-            shared: SendHandle::new(),
-            keep_alive: true,
-        }
-    }
-
-    pub(crate) fn keep_alive(&self) -> bool {
-        self.keep_alive
-    }
-}
