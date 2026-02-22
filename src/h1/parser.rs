@@ -29,37 +29,12 @@ pub fn find_crlf(bytes: &mut BytesMut) -> Option<BytesMut> {
     if bytes.len() < MIN_REQLINE_LEN {
         return None;
     }
+    let lf = find_crlf_swar(bytes)?;
 
-    let lf_ptr = 'swar: {
-        let mut state = bytes.as_slice();
-
-        while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
-            let block = usize::from_ne_bytes(*chunk);
-
-            // '\n'
-            let is_lf = (block ^ LF).wrapping_sub(LSB) & MSB;
-
-            if is_lf != 0 {
-                let nth = (is_lf.trailing_zeros() / 8) as usize;
-                break 'swar unsafe { chunk.as_ptr().add(nth) };
-            }
-
-            state = rest;
-        }
-
-        for byte in state {
-            if let b'\n' = byte {
-                break 'swar byte as *const u8;
-            }
-        }
-
-        return None;
-    };
-
-    let lf = unsafe { lf_ptr.offset_from_unsigned(bytes.as_ptr()) };
-    let cr = (bytes.get(lf - 1) == Some(&b'\r')) as usize;
-    let reqline = bytes.split_to(lf - cr);
-    bytes.advance(1 + cr);
+    // SAFETY: `lf - 1` cannot overflow because `Some(b'\n') != bytes.first()`
+    let cr = unsafe { *bytes.get_unchecked(lf - 1) == b'\r' } as usize;
+    let mut reqline = bytes.split_to(lf + 1);
+    unsafe { reqline.set_len(reqline.len() - 1 - cr) };
     Some(reqline)
 }
 
@@ -101,4 +76,40 @@ pub fn parse_header(mut line: BytesMut) -> Result<(BytesMut, BytesMut), ParseErr
     let val = line.split_off(sp + 2);
     line.truncate(sp - 1);
     Ok((line, val))
+}
+
+// ===== SWAR =====
+
+fn find_crlf_swar(bytes: &BytesMut) -> Option<usize> {
+    let lf_ptr = 'swar: {
+        let mut state = bytes.as_slice();
+
+        while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
+            let block = usize::from_ne_bytes(*chunk);
+
+            // '\n'
+            let is_lf = (block ^ LF).wrapping_sub(LSB) & MSB;
+
+            if is_lf != 0 {
+                let nth = (is_lf.trailing_zeros() / 8) as usize;
+                break 'swar unsafe { chunk.as_ptr().add(nth) };
+            }
+
+            state = rest;
+        }
+
+        for byte in state {
+            if let b'\n' = byte {
+                break 'swar byte as *const u8;
+            }
+        }
+
+        return None;
+    };
+
+    let lf = unsafe { lf_ptr.offset_from_unsigned(bytes.as_ptr()) };
+
+    unsafe { std::hint::assert_unchecked(lf < bytes.len()) };
+
+    Some(lf)
 }
