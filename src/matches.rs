@@ -152,14 +152,6 @@ byte_map! {
 // ===== lookup table =====
 
 byte_map! {
-    /// method  = token
-    #[inline(always)]
-    pub const fn is_method(byte: u8) {
-        is_token(byte)
-    }
-}
-
-byte_map! {
     /// scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
     #[inline(always)]
     pub const fn is_scheme(byte: u8) {

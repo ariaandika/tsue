@@ -64,14 +64,14 @@ where
         loop {
             match phase {
                 Phase::Request(parser) => {
-                    let Ready(reqline) = parser.poll_request(session, &mut *read_buffer)? else {
+                    let Ready((method, target)) = parser.poll_request(session, &mut *read_buffer)? else {
                         let read = ready!(io.as_mut().poll_read(&mut *read_buffer, cx)?);
                         if read == 0 {
                             return Ready(Ok(()))
                         }
                         continue;
                     };
-                    let (request, state) = RequestState::new(reqline, session, read_buffer, cx)?;
+                    let (request, state) = RequestState::new(method, target, session, read_buffer, cx)?;
                     let future = service.call(request);
                     *phase = Phase::Service(state, future);
                 }

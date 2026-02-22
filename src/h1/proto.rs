@@ -9,11 +9,10 @@ use crate::h1::parser::{find_crlf, parse_header, parse_reqline};
 use crate::headers::{HeaderField, HeaderMap, HeaderName, HeaderValue, standard};
 use crate::http::{Method, Request, Response, httpdate_now, request, response};
 use crate::proto::error::{ParseError, ProtoError};
-use crate::proto::{Reqline, TargetKind};
 use crate::uri::{Host, HttpScheme, HttpUri, Path};
 
 pub(crate) struct RequestParser {
-    reqline: Option<Reqline>,
+    reqline: Option<(Method, BytesMut)>,
 }
 
 impl RequestParser {
@@ -25,7 +24,7 @@ impl RequestParser {
         &mut self,
         session: &mut Session,
         read_buffer: &mut BytesMut,
-    ) -> Poll<Result<Reqline, ProtoError>> {
+    ) -> Poll<Result<(Method, BytesMut), ProtoError>> {
 
         if self.reqline.is_none() {
             let Some(reqline) = find_crlf(read_buffer) else {
@@ -70,7 +69,8 @@ pub(crate) struct RequestState {
 
 impl RequestState {
     pub(crate) fn new(
-        reqline: Reqline,
+        method: Method,
+        target: BytesMut,
         session: &mut Session,
         read_buffer: &mut BytesMut,
         cx: &mut std::task::Context,
@@ -78,28 +78,29 @@ impl RequestState {
         let headers = mem::take(&mut session.headers);
 
         let decoder = BodyCoder::new(&headers).expect("TODO");
-        let context = Context::new(&reqline, &headers)?;
+        let context = Context::new(method, &headers)?;
 
-        let Reqline {
-            method,
-            target,
-            version,
-        } = reqline;
         let host = match headers.get(standard::HOST) {
             Some(value) => Bytes::from(value.clone()),
             None => return Err(ProtoError::MissingHost),
         };
 
-        let kind = TargetKind::new(&method, &target);
         let uri_host;
         let path;
 
-        match kind {
-            TargetKind::Origin => {
+        match target.as_slice() {
+            [b'/', ..] => {
+                // origin
                 uri_host = Host::from_bytes(host)?;
                 path = Path::from_bytes(target)?;
             }
-            TargetKind::Absolute => {
+            b"*" => {
+                // asterisk
+                uri_host = Host::from_bytes(host)?;
+                path = Path::from_static(b"*");
+            }
+            _ => if method != Method::CONNECT {
+                // absolute
                 let uri = HttpUri::from_bytes(target)?;
                 if uri.host().as_bytes() == host.as_slice() {
                     return Err(ParseError::MissmatchHost.into());
@@ -107,12 +108,8 @@ impl RequestState {
                 let (_, h, p) = uri.into_parts();
                 uri_host = h;
                 path = p;
-            }
-            TargetKind::Asterisk => {
-                uri_host = Host::from_bytes(host)?;
-                path = Path::from_static(b"*");
-            }
-            TargetKind::Authority => {
+            } else {
+                // auth
                 if target != host {
                     return Err(ParseError::MissmatchHost.into());
                 }
@@ -120,12 +117,13 @@ impl RequestState {
                 path = Path::from_static(b"");
             }
         }
+
         let uri = HttpUri::from_parts(session.scheme, uri_host, path);
 
         let parts = request::Parts {
             method,
             uri,
-            version,
+            version: crate::http::Version::HTTP_11,
             headers,
             extensions: crate::http::Extensions::new(),
         };
@@ -392,9 +390,9 @@ struct Context {
 }
 
 impl Context {
-    fn new(reqline: &Reqline, headers: &HeaderMap) -> Result<Self, ProtoError> {
+    fn new(method: Method, headers: &HeaderMap) -> Result<Self, ProtoError> {
         // https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
-        let is_res_body_allowed = !matches!(reqline.method, Method::HEAD);
+        let is_res_body_allowed = !matches!(method, Method::HEAD);
 
         let mut is_keep_alive = true;
 

@@ -8,7 +8,6 @@ use crate::h2::settings::{self, Settings};
 use crate::h2::stream::{self, StreamList};
 use crate::headers::{HeaderField, HeaderMap};
 use crate::http::Method;
-use crate::proto::Reqline;
 use crate::uri::{Authority, Host, HttpScheme, HttpUri, Path};
 
 const PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
@@ -358,7 +357,7 @@ impl ReqlineBuilder {
         Ok(())
     }
 
-    fn build(self) -> Result<Reqline, ConnectionError> {
+    fn build(self) -> Result<(Method, BytesMut), ConnectionError> {
         use ConnectionError as E;
 
         let Self {
