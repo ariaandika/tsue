@@ -2,27 +2,27 @@ use std::task::{Poll, ready};
 use tcio::bytes::Bytes;
 
 use crate::body::error::ReadError;
-use crate::body::shared::{RecvHandle as IoHandle, SendHandle};
+use crate::body::shared::RecvHandle;
 
 #[derive(Debug)]
 pub struct BodyHandle {
-    handle: IoHandle,
+    handle: RecvHandle,
     size_hint: Option<u64>,
 }
 
 impl BodyHandle {
-    pub fn new(handle: IoHandle, size_hint: Option<u64>) -> Self {
-        Self {
-            handle,
-            size_hint,
-        }
+    pub fn new(handle: RecvHandle, size_hint: Option<u64>) -> Self {
+        Self { handle, size_hint }
     }
 
     pub const fn size_hint(&self) -> Option<u64> {
         self.size_hint
     }
 
-    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<Result<Bytes, ReadError>>> {
+    pub fn poll_read(
+        &mut self,
+        cx: &mut std::task::Context,
+    ) -> Poll<Option<Result<Bytes, ReadError>>> {
         let Some(data) = ready!(self.handle.poll_read(cx)?) else {
             return Poll::Ready(None);
         };
