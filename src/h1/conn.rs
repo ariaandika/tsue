@@ -5,7 +5,8 @@ use tcio::bytes::{Buf, BytesMut};
 use tcio::io::{AsyncRead, AsyncWrite};
 
 use crate::body::Body;
-use crate::h1::proto::{BodyKind, ChunkedEncoder, EncodedChunk, Session};
+use crate::h1::chunked::{ChunkedCoder, EncodedChunk};
+use crate::h1::proto::{BodyKind, Session};
 use crate::h1::proto::{RequestParser, RequestState};
 use crate::service::HttpService;
 
@@ -31,7 +32,7 @@ enum Phase<F, B, D> {
     Service(RequestState, F),
     ResponseNoBody,
     Response(u64, B, Option<D>),
-    ResponseChunk(ChunkedEncoder, B, Option<EncodedChunk<D>>),
+    ResponseChunk(ChunkedCoder, B, Option<EncodedChunk<D>>),
 }
 
 impl<S, IO> Connection<S, IO>

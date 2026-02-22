@@ -1,5 +1,6 @@
 //! HTTP/1.1 Protocol.
 mod parser;
+mod chunked;
 mod proto;
 mod conn;
 
