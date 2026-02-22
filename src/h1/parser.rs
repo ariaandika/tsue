@@ -1,4 +1,4 @@
-use tcio::bytes::{Buf, BytesMut};
+use tcio::bytes::{Buf, Bytes, BytesMut};
 
 use crate::http::Method;
 use crate::proto::error::ParseError;
@@ -29,7 +29,7 @@ pub fn find_crlf(bytes: &mut BytesMut) -> Option<BytesMut> {
     Some(reqline)
 }
 
-pub fn parse_reqline(mut line: BytesMut) -> Result<(Method, BytesMut), ParseError> {
+pub fn parse_reqline(mut line: BytesMut) -> Result<(Method, Bytes), ParseError> {
     let method = 'method: {
         if line.first_chunk() == Some(b"GET ") {
             line.advance(4);
@@ -52,17 +52,17 @@ pub fn parse_reqline(mut line: BytesMut) -> Result<(Method, BytesMut), ParseErro
     };
     line.truncate(line.len() - VER.len());
 
-    Ok((method, line))
+    Ok((method, line.freeze()))
 }
 
-pub fn parse_header(mut line: BytesMut) -> Result<(BytesMut, BytesMut), ParseError> {
+pub fn parse_header(mut line: BytesMut) -> Result<(BytesMut, Bytes), ParseError> {
     let Some(col) = find_hdr_delim_swar(&line) else {
         return Err(E::InvalidSeparator);
     };
-    if line.get(col..col + 2) != Some(b": ") {
+    let Some(b": ") = line.get(col..col + 2) else {
         return Err(E::InvalidSeparator);
-    }
-    let val = line.split_off(col + 2);
+    };
+    let val = line.split_off(col + 2).freeze();
     line.truncate(col);
     Ok((line, val))
 }

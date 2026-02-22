@@ -12,7 +12,7 @@ use crate::proto::error::{ParseError, ProtoError};
 use crate::uri::{Host, HttpScheme, HttpUri, Path};
 
 pub(crate) struct RequestParser {
-    reqline: Option<(Method, BytesMut)>,
+    reqline: Option<(Method, Bytes)>,
 }
 
 impl RequestParser {
@@ -24,7 +24,7 @@ impl RequestParser {
         &mut self,
         session: &mut Session,
         read_buffer: &mut BytesMut,
-    ) -> Poll<Result<(Method, BytesMut), ProtoError>> {
+    ) -> Poll<Result<(Method, Bytes), ProtoError>> {
 
         if self.reqline.is_none() {
             let Some(reqline) = find_crlf(read_buffer) else {
@@ -70,7 +70,7 @@ pub(crate) struct RequestState {
 impl RequestState {
     pub(crate) fn new(
         method: Method,
-        target: BytesMut,
+        target: Bytes,
         session: &mut Session,
         read_buffer: &mut BytesMut,
         cx: &mut std::task::Context,
