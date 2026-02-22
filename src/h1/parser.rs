@@ -7,15 +7,56 @@ use ParseError as E;
 
 mod matches;
 
-// ===== Request Line =====
+const BLOCK: usize = size_of::<usize>();
+const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+const LF: usize = usize::from_ne_bytes([b'\n'; BLOCK]);
+
+// OPTIMIZE:use simd for h1 parsing
+
+const MIN_REQLINE_LEN: usize = b"GET / HTTP/1.1".len();
 
 pub fn find_crlf(bytes: &mut BytesMut) -> Option<BytesMut> {
-    // OPTIMIZE:use swar/simd for searching crlf
-    let lf = bytes.iter().position(|&b| b == b'\n')?;
-    if lf == 0 {
+    // header list termination
+    if let Some(b'\n') = bytes.first() {
         bytes.advance(1);
         return Some(BytesMut::new());
     }
+    if let Some(b"\r\n") = bytes.first_chunk() {
+        bytes.advance(2);
+        return Some(BytesMut::new());
+    }
+    if bytes.len() < MIN_REQLINE_LEN {
+        return None;
+    }
+
+    let lf_ptr = 'swar: {
+        let mut state = bytes.as_slice();
+
+        while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
+            let block = usize::from_ne_bytes(*chunk);
+
+            // '\n'
+            let is_lf = (block ^ LF).wrapping_sub(LSB) & MSB;
+
+            if is_lf != 0 {
+                let nth = (is_lf.trailing_zeros() / 8) as usize;
+                break 'swar unsafe { chunk.as_ptr().add(nth) };
+            }
+
+            state = rest;
+        }
+
+        for byte in state {
+            if let b'\n' = byte {
+                break 'swar byte as *const u8;
+            }
+        }
+
+        return None;
+    };
+
+    let lf = unsafe { lf_ptr.offset_from_unsigned(bytes.as_ptr()) };
     let cr = (bytes.get(lf - 1) == Some(&b'\r')) as usize;
     let reqline = bytes.split_to(lf - cr);
     bytes.advance(1 + cr);

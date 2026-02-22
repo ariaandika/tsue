@@ -8,8 +8,8 @@ fn test_find_crlf() {
         ($data:expr, $expect:expr, $rest:expr) => {{
             let mut data = BytesMut::copy_from_slice($data);
             let line = find_crlf(&mut data).unwrap();
-            assert_eq!(&line, $expect);
-            assert_eq!(&data, $rest);
+            assert_eq!(line.as_slice(), $expect);
+            assert_eq!(data.as_slice(), $rest);
         }};
     }
 
