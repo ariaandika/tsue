@@ -5,15 +5,6 @@ use crate::proto::error::ParseError;
 
 use ParseError as E;
 
-mod matches;
-
-const BLOCK: usize = size_of::<usize>();
-const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
-const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-const LF: usize = usize::from_ne_bytes([b'\n'; BLOCK]);
-
-// OPTIMIZE:use simd for h1 parsing
-
 const MIN_REQLINE_LEN: usize = b"GET / HTTP/1.1".len();
 
 pub fn find_crlf(bytes: &mut BytesMut) -> Option<BytesMut> {
@@ -56,45 +47,47 @@ pub fn parse_reqline(mut line: BytesMut) -> Result<(Method, BytesMut), ParseErro
     };
 
     const VER: &[u8; 9] = b" HTTP/1.1";
-    if line.last_chunk() != Some(VER) {
+    let Some(VER) = line.last_chunk() else {
         return Err(E::UnsupportedVersion);
-    }
+    };
     line.truncate(line.len() - VER.len());
 
     Ok((method, line))
 }
 
 pub fn parse_header(mut line: BytesMut) -> Result<(BytesMut, BytesMut), ParseError> {
-    // OPTIMIZE:use swar/simd for searching space
-    let sp = line.iter().position(|&b| b == b' ').ok_or(E::InvalidSeparator)?;
-    if sp == 0 {
-        return Err(E::InvalidHeader);
-    }
-    if line.get(sp - 1..sp + 1) != Some(b": ") {
+    let Some(col) = find_hdr_delim_swar(&line) else {
+        return Err(E::InvalidSeparator);
+    };
+    if line.get(col..col + 2) != Some(b": ") {
         return Err(E::InvalidSeparator);
     }
-    let val = line.split_off(sp + 2);
-    line.truncate(sp - 1);
+    let val = line.split_off(col + 2);
+    line.truncate(col);
     Ok((line, val))
 }
 
 // ===== SWAR =====
 
-fn find_crlf_swar(bytes: &BytesMut) -> Option<usize> {
-    let lf_ptr = 'swar: {
-        let mut state = bytes.as_slice();
+const BLOCK: usize = size_of::<usize>();
+const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+const LF: usize = usize::from_ne_bytes([b'\n'; BLOCK]);
+const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
 
+// OPTIMIZE:use simd for finding delimiter
+
+fn find_crlf_swar(bytes: &[u8]) -> Option<usize> {
+    let lf_ptr = 'swar: {
+        let mut state = bytes;
         while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
             let block = usize::from_ne_bytes(*chunk);
-
             // '\n'
             let is_lf = (block ^ LF).wrapping_sub(LSB) & MSB;
-
             if is_lf != 0 {
                 let nth = (is_lf.trailing_zeros() / 8) as usize;
                 break 'swar unsafe { chunk.as_ptr().add(nth) };
             }
-
             state = rest;
         }
 
@@ -103,13 +96,40 @@ fn find_crlf_swar(bytes: &BytesMut) -> Option<usize> {
                 break 'swar byte as *const u8;
             }
         }
-
         return None;
     };
 
     let lf = unsafe { lf_ptr.offset_from_unsigned(bytes.as_ptr()) };
-
+    // helps BytesMut::split* bounds checking
     unsafe { std::hint::assert_unchecked(lf < bytes.len()) };
-
     Some(lf)
 }
+
+fn find_hdr_delim_swar(bytes: &[u8]) -> Option<usize> {
+    let ptr = 'swar: {
+        let mut state = bytes;
+        while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
+            let block = usize::from_ne_bytes(*chunk);
+            // ':'
+            let is_col = (block ^ COL).wrapping_sub(LSB) & MSB;
+            if is_col != 0 {
+                let nth = (is_col.trailing_zeros() / 8) as usize;
+                break 'swar unsafe { chunk.as_ptr().add(nth) };
+            }
+            state = rest;
+        }
+
+        for byte in state {
+            if let b':' = byte {
+                break 'swar byte as *const u8;
+            }
+        }
+        return None;
+    };
+
+    let idx = unsafe { ptr.offset_from_unsigned(bytes.as_ptr()) };
+    // helps BytesMut::split* bounds checking
+    unsafe { std::hint::assert_unchecked(idx < bytes.len()) };
+    Some(idx)
+}
+
