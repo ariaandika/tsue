@@ -7,7 +7,7 @@ use crate::body::{Body, Incoming};
 use crate::h1::body::{BodyKind, H1BodyDecoder};
 use crate::h1::chunked::ChunkedCoder;
 use crate::h1::parser::{find_crlf, parse_header, parse_reqline};
-use crate::h1::states::{Context, Session};
+use crate::h1::states::Session;
 use crate::headers::{HeaderField, HeaderName, HeaderValue, standard};
 use crate::http::{Method, Request, Response, httpdate_now, request, response};
 use crate::proto::error::{ParseError, ProtoError};
@@ -64,12 +64,12 @@ impl RequestParser {
 // ===== Service Manager =====
 
 #[derive(Debug)]
-pub(crate) struct RequestState {
-    context: Context,
-    decoder: H1BodyDecoder,
+pub(crate) struct RequestContext {
+    pub method: Method,
+    pub decoder: H1BodyDecoder,
 }
 
-impl RequestState {
+impl RequestContext {
     pub(crate) fn new(
         method: Method,
         target: Bytes,
@@ -80,7 +80,6 @@ impl RequestState {
         let headers = mem::take(&mut session.headers);
 
         let decoder = H1BodyDecoder::new(&headers).expect("TODO");
-        let context = Context { method };
 
         let host = match headers.get(standard::HOST) {
             Some(value) => Bytes::from(value.clone()),
@@ -132,7 +131,7 @@ impl RequestState {
         let body = decoder.build_body(read_buffer, &mut session.shared, cx);
         let request = Request::from_parts(parts, body);
 
-        Ok((request, Self { context, decoder }))
+        Ok((request, Self { method, decoder, }))
     }
 
     /// Poll for request body, returns `true` if more read is required.
@@ -170,9 +169,8 @@ impl RequestState {
         headers.clear();
         session.headers = headers;
 
-        let context = self.context.clone();
-
-        if !context.is_res_body_allowed() {
+        // https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
+        if matches!(self.method, Method::HEAD) {
             return None;
         }
 

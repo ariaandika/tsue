@@ -1,19 +1,6 @@
 use crate::body::shared::SendHandle;
 use crate::headers::HeaderMap;
-use crate::http::Method;
 use crate::uri::HttpScheme;
-
-#[derive(Debug, Clone)]
-pub struct Context {
-    pub method: Method,
-}
-
-impl Context {
-    /// https://www-rfc-editor.org/rfc/rfc9110.html#section-6.4.2-4
-    pub fn is_res_body_allowed(&self) -> bool {
-        !matches!(self.method, Method::HEAD)
-    }
-}
 
 #[derive(Debug)]
 pub struct Session {

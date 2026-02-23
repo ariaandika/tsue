@@ -16,12 +16,12 @@ use crate::h1::chunked::ChunkedCoder;
 use crate::headers::HeaderMap;
 use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct H1BodyDecoder {
     kind: BodyKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum BodyKind {
     ContentLength(u64),
     Chunked(ChunkedCoder),
