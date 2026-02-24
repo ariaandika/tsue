@@ -1,6 +1,6 @@
 use std::slice::from_raw_parts;
 
-use super::{Authority, Host, HttpScheme, HttpUri, Path, Scheme, Uri, matches};
+use super::{Authority, Host, Path, Scheme, Uri, matches};
 
 impl Scheme {
     /// Extracts a string slice containing the scheme.
@@ -16,32 +16,6 @@ impl Scheme {
         // Although schemes are case-insensitive, the canonical form is lowercase and documents
         // that specify schemes must do so with lowercase letters.
         self.as_str().eq_ignore_ascii_case(scheme)
-    }
-}
-
-impl HttpScheme {
-    /// HTTP Scheme.
-    pub const HTTP: Self = Self(false);
-    /// HTTPS Scheme.
-    pub const HTTPS: Self = Self(true);
-
-    /// Returns `true` if this is an HTTP scheme.
-    #[inline]
-    pub const fn is_http(&self) -> bool {
-        !self.0
-    }
-
-    /// Returns `true` if this is an HTTPS scheme.
-    #[inline]
-    pub const fn is_https(&self) -> bool {
-        self.0
-    }
-
-    /// Extracts a string slice containing http scheme.
-    #[inline]
-    pub const fn as_str(&self) -> &str {
-        const HTTPS: &str = "https";
-        unsafe { str::from_utf8_unchecked(from_raw_parts(HTTPS.as_ptr(), 4 + self.0 as usize)) }
     }
 }
 
@@ -383,106 +357,6 @@ impl Uri {
     }
 }
 
-impl HttpUri {
-    /// Returns `true` if the scheme is HTTP.
-    #[inline]
-    pub const fn is_http(&self) -> bool {
-        self.scheme.is_http()
-    }
-
-    /// Returns `true` if the scheme is HTTPS.
-    #[inline]
-    pub const fn is_https(&self) -> bool {
-        self.scheme.is_https()
-    }
-
-    /// Returns the host component.
-    ///
-    /// ```not_rust
-    /// http://example.com:8042/over/there?name=ferret
-    ///        \______________/
-    ///               |
-    ///             host
-    /// ```
-    #[inline]
-    pub const fn host(&self) -> &str {
-        self.host.as_str()
-    }
-
-    /// Returns the host component as [`Host`].
-    #[inline]
-    pub const fn as_host(&self) -> &Host {
-        &self.host
-    }
-
-    /// Returns the path component.
-    ///
-    /// ```not_rust
-    /// http://example.com:8042/over/there?name=ferret
-    ///                        \_________/
-    ///                             |
-    ///                           path
-    /// ```
-    #[inline]
-    pub const fn path(&self) -> &str {
-        self.path.path()
-    }
-
-    /// Returns the query component if exists.
-    ///
-    /// ```not_rust
-    /// http://example.com:8042/over/there?name=ferret
-    ///                                    \_________/
-    ///                                         |
-    ///                                       query
-    /// ```
-    #[inline]
-    pub const fn query(&self) -> Option<&str> {
-        self.path.query()
-    }
-
-    /// Returns the path and query component.
-    ///
-    /// ```not_rust
-    /// http://example.com:8042/over/there?name=ferret
-    ///                        \_____________________/
-    ///                                   |
-    ///                             path and query
-    /// ```
-    #[inline]
-    pub const fn path_and_query(&self) -> &str {
-        self.path.as_str()
-    }
-
-    /// Consume `HttpUri` into each components.
-    #[inline]
-    pub fn into_parts(self) -> (HttpScheme, Host, Path) {
-        (self.scheme, self.host, self.path)
-    }
-
-    /// Returns the HTTP port or its default value if it does not exists.
-    ///
-    /// ```not_rust
-    /// example.com:8042
-    ///             \__/
-    ///              |
-    ///             port
-    /// ```
-    #[inline]
-    pub const fn port(&self) -> u16 {
-        match self.host.port() {
-            Some(port) => port,
-            None => {
-                if self.scheme.is_http() {
-                    80
-                } else {
-                    443
-                }
-            }
-        }
-    }
-}
-
 // ===== Formatting =====
 
 macro_rules! delegate_fmt {
@@ -506,7 +380,7 @@ macro_rules! delegate_fmt {
     () => {}
 }
 
-delegate_fmt!(Scheme, HttpScheme, Authority, Host, Path);
+delegate_fmt!(Scheme, Authority, Host, Path);
 
 // ===== FromStr =====
 
@@ -523,7 +397,7 @@ macro_rules! impl_from_str {
     )*};
 }
 
-impl_from_str!(Scheme, Authority, Host, Path, Uri, HttpUri);
+impl_from_str!(Scheme, Authority, Host, Path, Uri);
 
 // ===== Util =====
 

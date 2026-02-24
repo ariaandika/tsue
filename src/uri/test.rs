@@ -132,6 +132,7 @@ fn test_http_uri() {
     assert!(!http.is_https());
     assert_eq!(http.host(), "example.com");
     assert_eq!(http.path(), "/users/all");
+    assert_eq!(http.query(), Some("page=420"));
 
     // authority required
 

@@ -131,6 +131,8 @@ impl Host {
 }
 
 impl Path {
+    pub(crate) const MAX_LEN: u16 = 8 * 1024;
+
     /// Parse path from static bytes.
     ///
     /// Path fragment is trimmed.
@@ -232,12 +234,6 @@ impl Uri {
 }
 
 impl HttpUri {
-    /// Creates [`HttpUri`] from [`HttpScheme`], [`Host`], and [`Path`].
-    #[inline]
-    pub const fn from_parts(scheme: HttpScheme, host: Host, path: Path) -> Self {
-        Self { scheme, host, path }
-    }
-
     /// Parse HTTP URI from [`Bytes`].
     ///
     /// # Examples
@@ -387,7 +383,7 @@ const fn validate_path(mut bytes: &[u8]) -> Result<(u16, usize), UriError> {
         return Ok((0, 0));
     }
 
-    if bytes.len() > u16::MAX as usize {
+    if bytes.len() > Path::MAX_LEN as usize {
         return Err(UriError::TooLong);
     }
 
@@ -484,10 +480,6 @@ fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
 
     let path = Path::from_slice(bytes)?;
 
-    Ok(HttpUri {
-        scheme,
-        host,
-        path,
-    })
+    Ok(HttpUri::from_parts(scheme, host, path))
 }
 

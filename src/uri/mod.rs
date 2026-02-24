@@ -51,7 +51,10 @@ use tcio::bytes::Bytes;
 mod matches;
 mod parser;
 mod impls;
+mod http;
 mod error;
+
+pub use http::{HttpScheme, HttpUri};
 
 #[cfg(test)]
 mod test;
@@ -88,15 +91,6 @@ pub struct Scheme {
     /// is valid ASCII
     value: Bytes,
 }
-
-/// HTTP Scheme.
-///
-/// HTTP/HTTPS scheme.
-///
-/// This struct is usually used when building HTTP URI [from parts][HttpUri::from_parts].
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct HttpScheme(bool);
 
 /// URI Authority.
 ///
@@ -234,39 +228,6 @@ pub struct Path {
 pub struct Uri {
     scheme: Scheme,
     authority: Option<Authority>,
-    path: Path,
-}
-
-/// HTTP URI.
-///
-/// HTTP/HTTPS Scheme of a URI.
-///
-/// # Example
-///
-/// The following is an example HTTP URI and their component parts:
-///
-/// ```not_rust
-///  https://example.com:80/over/there?name=ferret
-///  \___/   \____________/\_________/ \_________/
-///    |           |          |            |
-///  scheme    authority     path        query
-/// ```
-///
-/// [`HttpUri`] used to represent HTTP scheme URI.
-///
-/// ```rust
-/// use tsue::uri::HttpUri;
-///
-/// let uri = HttpUri::from_bytes("https://example.com:80/over/there?name=ferret").unwrap();
-/// assert!(uri.is_https());
-/// assert_eq!(uri.host(), "example.com:80");
-/// assert_eq!(uri.path(), "/over/there");
-/// assert_eq!(uri.query(), Some("name=ferret"));
-/// ```
-#[derive(Debug, Clone)]
-pub struct HttpUri {
-    scheme: HttpScheme,
-    host: Host,
     path: Path,
 }
 
