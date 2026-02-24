@@ -20,7 +20,7 @@ pub fn find_crlf(bytes: &mut BytesMut) -> Option<BytesMut> {
     if bytes.len() < MIN_REQLINE_LEN {
         return None;
     }
-    let lf = find_crlf_swar(bytes)?;
+    let lf = crate::matches::find_byte::<b'\n'>(bytes)?;
 
     // SAFETY: `lf - 1` cannot overflow because `Some(b'\n') != bytes.first()`
     let cr = unsafe { *bytes.get_unchecked(lf - 1) == b'\r' } as usize;
@@ -72,38 +72,9 @@ pub fn parse_header(mut line: BytesMut) -> Result<(BytesMut, Bytes), ParseError>
 const BLOCK: usize = size_of::<usize>();
 const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
 const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
-const LF: usize = usize::from_ne_bytes([b'\n'; BLOCK]);
 const COL: usize = usize::from_ne_bytes([b':'; BLOCK]);
 
 // OPTIMIZE:use simd for finding delimiter
-
-fn find_crlf_swar(bytes: &[u8]) -> Option<usize> {
-    let lf_ptr = 'swar: {
-        let mut state = bytes;
-        while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
-            let block = usize::from_ne_bytes(*chunk);
-            // '\n'
-            let is_lf = (block ^ LF).wrapping_sub(LSB) & MSB;
-            if is_lf != 0 {
-                let nth = (is_lf.trailing_zeros() / 8) as usize;
-                break 'swar unsafe { chunk.as_ptr().add(nth) };
-            }
-            state = rest;
-        }
-
-        for byte in state {
-            if let b'\n' = byte {
-                break 'swar byte as *const u8;
-            }
-        }
-        return None;
-    };
-
-    let lf = unsafe { lf_ptr.offset_from_unsigned(bytes.as_ptr()) };
-    // helps BytesMut::split* bounds checking
-    unsafe { std::hint::assert_unchecked(lf < bytes.len()) };
-    Some(lf)
-}
 
 fn find_hdr_delim_swar(bytes: &[u8]) -> Option<usize> {
     let ptr = 'swar: {

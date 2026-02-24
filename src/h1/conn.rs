@@ -179,9 +179,9 @@ where
                     ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?);
 
                     loop {
-                        while let Some(EncodedChunk { data, trail }) = data_mut {
-                            let mut chunks = write_buffer.chain(data).chain(trail);
-                            let mut io_slice = [std::io::IoSlice::new(&[]); 8];
+                        while let Some(chunk) = data_mut {
+                            let mut chunks = write_buffer.chain(chunk);
+                            let mut io_slice = [std::io::IoSlice::new(&[]); 16];
                             let cnt = chunks.chunks_vectored(&mut io_slice);
                             let write = ready!(io.as_mut().poll_write_vectored(&io_slice[..cnt], cx)?);
                             chunks.advance(write);
