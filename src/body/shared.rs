@@ -156,7 +156,10 @@ impl Drop for RecvHandle {
 }
 
 impl RecvHandle {
-    pub fn poll_read(&mut self, cx: &mut std::task::Context) -> Poll<Option<Result<Bytes, ReadError>>> {
+    pub fn poll_read(
+        &mut self,
+        cx: &mut std::task::Context,
+    ) -> Poll<Option<Result<Bytes, ReadError>>> {
         let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Relaxed);
 
         // DATA is unset, WANT is set
@@ -216,22 +219,28 @@ impl RecvHandle {
     }
 }
 
-impl SendHandle {
-    pub fn new() -> Self {
-        let inner = SharedInner {
+impl SharedInner {
+    fn new_non_null() -> NonNull<Self> {
+        NonNull::new(Box::into_raw(Box::new(Self {
             data: Data::default(),
             waker: WakerHandle::None,
             flag: AtomicU8::new(INITIAL_FLAG),
-        };
+        })))
+        .expect("box cannot be null")
+    }
+}
+
+impl SendHandle {
+    pub fn new() -> Self {
         Self {
-            inner: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(inner))) },
+            inner: SharedInner::new_non_null(),
         }
     }
 
     /// Create `RecvHandle`.
     ///
     /// It is required that there is no other `RecvHandle` still alive. Use
-    /// [`SendHandle::poll_close`] to ensure it.
+    /// [`SendHandle::detach`] to ensure it.
     ///
     /// # Panics
     ///
@@ -241,7 +250,7 @@ impl SendHandle {
         let flag = unsafe { self.inner.as_ref() }.flag.fetch_or(SHARED_MASK, Ordering::Relaxed);
 
         // ensure no other handle are alive
-        assert!(flag.is_unset::<SHARED_MASK>());
+        debug_assert!(flag.is_unset::<SHARED_MASK>());
 
         // SAFETY: it is ensured that no other handle are holding the shared data
         let inner = unsafe { self.inner.as_mut() };
@@ -307,7 +316,7 @@ impl SendHandle {
 
         let data = ready!(f());
 
-        // WANT flag is set, thus recv is idle and the data is owned by send handle
+        // SAFETY: WANT flag is set, thus recv is idle and the data is owned by send handle
         let inner = unsafe { self.inner.as_mut() };
         inner.data = data;
 
@@ -322,6 +331,40 @@ impl SendHandle {
         inner.flag.store(flag & !WANT_MASK | DATA_MASK, Ordering::Release);
 
         Poll::Ready(())
+    }
+
+    pub fn detach(&mut self) {
+        // unset SHARED flag
+        let old_flag = unsafe { self.inner.as_ref() }
+            .flag
+            .fetch_and(!SHARED_MASK, Ordering::Release);
+
+        if old_flag.is_set::<SHARED_MASK>() {
+            // recv handle is still alive
+
+            if old_flag.is_set::<WANT_MASK>() {
+                // if WANT flag is set, the memory is owned by the send handle and the recv handle
+                // is idle, thus send handle must call waker if needed
+                fence(Ordering::Acquire);
+                if let WakerHandle::Recv(waker) =
+                    mem::take(unsafe { &mut self.inner.as_mut().waker })
+                {
+                    waker.wake();
+                }
+            } else {
+                // otherwise, if WANT flag is unset, the send handle is idle and the memory is
+                // owned by recv handle, thus nothing need to be done here
+            }
+
+            // but this send handle needs to be used for subsequent request, for new service, and
+            // new handle
+            //
+            // so let recv handle have the old shared memory, and create new one
+            self.inner = SharedInner::new_non_null();
+
+        } else {
+            // recv handle already dropped
+        }
     }
 }
 

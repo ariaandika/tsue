@@ -226,6 +226,7 @@ where
                     if !session.keep_alive {
                         return Ready(Ok(()));
                     }
+                    session.shared.detach();
                     read_buffer.reclaim();
                     *phase = Phase::Request;
                 }
