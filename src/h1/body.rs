@@ -121,8 +121,6 @@ impl BodyDecoder {
 
 // ===== Encoder =====
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
 pub enum BodyEncoder {
     Length(LengthEncoder),
     Chunked(ChunkedCoder),
@@ -147,20 +145,16 @@ impl LengthEncoder {
         self.remaining != 0
     }
 
-    pub fn encode<D>(&mut self, data: crate::body::Frame<D>) -> Result<D, BoxError>
+    pub fn encode<D>(&mut self, data: D) -> Result<D, UserError>
     where
         D: tcio::bytes::Buf,
     {
-        match data.into_data() {
-            Ok(data) => match self.remaining.checked_sub(data.remaining() as u64) {
-                Some(remain) => {
-                    self.remaining = remain;
-                    Ok(data)
-                }
-                None => Err("user content larger than given size hint".into()),
-            },
-            // NOTE: currently trailer from user are dropped
-            Err(_) => todo!(),
+        match self.remaining.checked_sub(data.remaining() as u64) {
+            Some(remain) => {
+                self.remaining = remain;
+                Ok(data)
+            }
+            None => Err(UserError::ExcessiveContent),
         }
     }
 }

@@ -196,10 +196,7 @@ where
                             None => break,
                         };
 
-                        // NOTE: currently trailer from user are dropped
-                        if let Ok(data) = data.into_data() {
-                            *data_mut = Some(encoder.encode_chunk(data, body.is_end_stream(), write_buffer));
-                        }
+                        *data_mut = Some(encoder.encode_chunk(data, body.is_end_stream(), write_buffer));
                     }
 
                     // TODO: check for recv shared handle should be dropped

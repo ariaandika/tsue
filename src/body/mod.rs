@@ -20,17 +20,14 @@ mod handle;
 mod incoming;
 
 // === Types ===
-mod frame;
 mod collect;
 pub mod error;
 
 
 pub use full::Full;
-pub use frame::Frame;
 pub use incoming::Incoming;
 pub use collect::Collect;
 
-#[allow(clippy::type_complexity)]
 pub trait Body {
     type Data: tcio::bytes::Buf;
 
@@ -39,7 +36,7 @@ pub trait Body {
     fn poll_data(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context,
-    ) -> std::task::Poll<Option<Result<Frame<Self::Data>, Self::Error>>>;
+    ) -> std::task::Poll<Option<Result<Self::Data, Self::Error>>>;
 
     fn is_end_stream(&self) -> bool;
 

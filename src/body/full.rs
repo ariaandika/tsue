@@ -1,7 +1,6 @@
 use std::{convert::Infallible, task::Poll};
 use tcio::bytes::Buf;
 
-use crate::body::Frame;
 use crate::body::Body;
 
 /// A [`Body`] implementation that consist of a single chunk.
@@ -32,14 +31,14 @@ where
     fn poll_data(
         self: std::pin::Pin<&mut Self>,
         _: &mut std::task::Context,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
         // SAFETY: self is pinned
         // no `Drop`, nor manual `Unpin` implementation.
         let data = unsafe {
             let me = self.get_unchecked_mut();
             &mut me.data
         };
-        Poll::Ready(data.take().map(|d|Ok(Frame::data(d))))
+        Poll::Ready(data.take().map(Ok))
     }
 
     fn is_end_stream(&self) -> bool {

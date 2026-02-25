@@ -6,7 +6,7 @@ use std::task::Poll;
 use tcio::bytes::Bytes;
 use tcio::bytes::BytesMut;
 use tokio::{net::TcpListener, runtime::Runtime};
-use tsue::body::{Incoming, Full, Frame, Body};
+use tsue::body::{Incoming, Full, Body};
 use tsue::http::request::Request;
 use tsue::http::response::{Parts, Response};
 use tsue::server::Http1Server;
@@ -77,7 +77,7 @@ impl Body for Chunked {
     fn poll_data(
         self: std::pin::Pin<&mut Self>,
         _: &mut std::task::Context,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
         let Chunked { file, buffer, eof } = self.get_mut();
         if *eof {
             return Poll::Ready(None);
@@ -87,9 +87,7 @@ impl Body for Chunked {
             *eof = true;
             return Poll::Ready(None);
         }
-        Poll::Ready(Some(Ok(Frame::data(
-            BytesMut::copy_from_slice(&buffer[..read]).freeze(),
-        ))))
+        Poll::Ready(Some(Ok(BytesMut::copy_from_slice(&buffer[..read]).freeze())))
     }
 
     fn is_end_stream(&self) -> bool {
