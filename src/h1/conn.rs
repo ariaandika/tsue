@@ -89,7 +89,7 @@ where
         loop {
             match phase {
                 Phase::Request => {
-                    let Ready(context) = poll_request(session, &mut *read_buffer)? else {
+                    let Ready(mut context) = poll_request(session, &mut *read_buffer)? else {
                         let read = ready!(io.as_mut().poll_read(&mut *read_buffer, cx)?);
                         if read == 0 {
                             return Ready(Ok(()))
@@ -141,7 +141,7 @@ where
                             *data_mut = None;
                         }
 
-                        if encoder.has_remaining() {
+                        if encoder.is_exhausted() {
                             break;
                         }
 
@@ -160,7 +160,7 @@ where
                     }
 
                     *phase = if context.needs_drain()? {
-                        let Phase::Service(context, _) = mem::replace(phase, Phase::Request) else {
+                        let Phase::Response(context, _, _, _) = mem::replace(phase, Phase::Request) else {
                             unreachable!()
                         };
                         Phase::Drain(context)
@@ -202,7 +202,7 @@ where
                     // TODO: check for recv shared handle should be dropped
 
                     *phase = if context.needs_drain()? {
-                        let Phase::Service(context, _) = mem::replace(phase, Phase::Request) else {
+                        let Phase::ResponseChunked(context, _, _, _) = mem::replace(phase, Phase::Request) else {
                             unreachable!()
                         };
                         Phase::Drain(context)

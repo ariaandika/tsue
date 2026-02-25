@@ -54,18 +54,19 @@ impl BodyDecode for BodyDecoder {
 
 impl BodyDecoder {
     pub fn build_body(
-        &self,
+        &mut self,
         buffer: &mut BytesMut,
         shared: &mut SendHandle,
         cx: &mut std::task::Context,
     ) -> Incoming {
-        match self.kind {
+        match &mut self.kind {
             DecoderKind::Length(0) => Incoming::empty(),
             DecoderKind::Length(len) => {
-                if buffer.len() as u64 == len {
+                if buffer.len() as u64 == *len {
+                    *len = 0;
                     Incoming::new(buffer.split())
                 } else {
-                    Incoming::from_handle(shared.handle(cx), Some(len))
+                    Incoming::from_handle(shared.handle(cx), Some(*len))
                 }
             }
             DecoderKind::Chunked(_) => Incoming::from_handle(shared.handle(cx), None),
@@ -97,13 +98,13 @@ impl BodyDecoder {
     ///
     /// Returns error if message body draining is unable to be performed.
     pub fn needs_drain(&self) -> Result<bool, UserError> {
-        let DecoderKind::Length(len) = self.kind else {
+        let DecoderKind::Length(remain) = self.kind else {
             return Err(UserError::UnreadRequestContent);
         };
-        if len > MIN_BODY_DRAIN {
+        if remain > MIN_BODY_DRAIN {
             return Err(UserError::UnreadRequestContent);
         }
-        Ok(len != 0)
+        Ok(remain != 0)
     }
 
     pub fn poll_drain(&mut self, read: usize) -> Poll<()> {
@@ -141,8 +142,8 @@ pub struct LengthEncoder {
 }
 
 impl LengthEncoder {
-    pub fn has_remaining(&self) -> bool {
-        self.remaining != 0
+    pub fn is_exhausted(&self) -> bool {
+        self.remaining == 0
     }
 
     pub fn encode<D>(&mut self, data: D) -> Result<D, UserError>

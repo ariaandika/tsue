@@ -251,7 +251,7 @@ pub struct RequestContext {
 
 impl RequestContext {
     pub fn build_request(
-        &self,
+        &mut self,
         session: &mut Session,
         read_buffer: &mut BytesMut,
         cx: &mut std::task::Context,
