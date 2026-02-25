@@ -7,111 +7,42 @@
 
 use std::task::Poll;
 use tcio::bytes::BytesMut;
-use tcio::num::wrapping_atou;
 
 use crate::body::Incoming;
 use crate::body::error::BodyError;
-use crate::body::shared::{BodyDecoder, SendHandle};
+use crate::body::shared::{BodyDecode, SendHandle};
 use crate::h1::chunked::ChunkedCoder;
-use crate::headers::HeaderMap;
-use crate::headers::standard::{CONTENT_LENGTH, TRANSFER_ENCODING};
+use crate::proto::error::UserError;
 
-#[derive(Debug, Clone)]
-pub struct H1BodyDecoder {
-    kind: BodyKind,
+const MIN_BODY_DRAIN: u64 = 64 * 1024;
+
+pub enum ContentKind {
+    ContentLength(u64),
+    Chunked,
 }
 
-#[derive(Debug, Clone)]
-pub enum BodyKind {
-    ContentLength(u64),
+// ===== Decoder =====
+
+pub struct BodyDecoder {
+    kind: DecoderKind,
+}
+
+enum DecoderKind {
+    Length(u64),
     Chunked(ChunkedCoder),
 }
 
-impl H1BodyDecoder {
-    pub fn new(headers: &HeaderMap) -> Result<Self, BodyError> {
-        let mut content_lengths = headers.get_all(&CONTENT_LENGTH);
-        let mut transfer_encodings = headers.get_all(&TRANSFER_ENCODING);
-
-        let kind = match (content_lengths.next(), transfer_encodings.has_remaining()) {
-            (None, false) => BodyKind::ContentLength(0),
-            (None, true) => {
-                // TODO: support compressed transfer-encodings
-
-                let ok = transfer_encodings.all(|e|e.as_bytes().eq_ignore_ascii_case(b"chunked"));
-                if !ok {
-                    return Err(BodyError::UnknownCodings);
-                }
-
-                BodyKind::Chunked(ChunkedCoder::new())
-            }
-            (Some(length), false) => {
-                if content_lengths.next().is_some() {
-                    return Err(BodyError::InvalidContentLength);
-                }
-                match wrapping_atou(length.as_bytes()) {
-                    Some(length) => BodyKind::ContentLength(length),
-                    None => return Err(BodyError::InvalidContentLength),
-                }
-            }
-            (Some(_), true) => return Err(BodyError::InvalidCodings),
+impl BodyDecoder {
+    pub fn new(kind: ContentKind) -> Self {
+        let kind = match kind {
+            ContentKind::ContentLength(len) => DecoderKind::Length(len),
+            ContentKind::Chunked => DecoderKind::Chunked(ChunkedCoder::new())
         };
-        Ok(Self { kind })
-    }
-
-    pub fn has_remaining(&self) -> bool {
-        match &self.kind {
-            BodyKind::Chunked(chunked) => !chunked.is_eof(),
-            BodyKind::ContentLength(len) => *len != 0,
-        }
-    }
-
-    pub fn remaining(&self) -> Option<u64> {
-        match self.kind {
-            BodyKind::Chunked(_) => None,
-            BodyKind::ContentLength(len) => Some(len),
-        }
-    }
-
-    pub fn build_body(
-        &self,
-        buffer: &mut BytesMut,
-        shared: &mut SendHandle,
-        cx: &mut std::task::Context,
-    ) -> Incoming {
-        match self.kind {
-            BodyKind::ContentLength(0) => Incoming::empty(),
-            BodyKind::Chunked(_) => Incoming::from_handle(shared.handle(cx), None),
-            BodyKind::ContentLength(len) => {
-                if buffer.len() as u64 == len {
-                    Incoming::new(buffer.split())
-                } else {
-                    Incoming::from_handle(shared.handle(cx), Some(len))
-                }
-            }
-        }
-    }
-
-    /// Returns Poll::Pending if more data read is required.
-    pub(crate) fn decode_chunk(
-        &mut self,
-        buffer: &mut BytesMut,
-    ) -> Poll<Option<Result<BytesMut, BodyError>>> {
-        match &mut self.kind {
-            BodyKind::Chunked(decoder) => decoder.decode_chunk(buffer),
-            BodyKind::ContentLength(0) => Poll::Ready(None),
-            BodyKind::ContentLength(remaining_mut) => {
-                if buffer.is_empty() {
-                    return Poll::Pending;
-                }
-                let cnt = (*remaining_mut).min(buffer.len() as u64);
-                *remaining_mut -= cnt;
-                Poll::Ready(Some(Ok(buffer.split_to(cnt as usize))))
-            }
-        }
+        Self { kind }
     }
 }
 
-impl BodyDecoder for H1BodyDecoder {
+impl BodyDecode for BodyDecoder {
     fn decode_chunk(
         &mut self,
         read_buffer: &mut BytesMut,
@@ -119,21 +50,117 @@ impl BodyDecoder for H1BodyDecoder {
         self.decode_chunk(read_buffer)
             .map(|result| result.transpose())
     }
+}
 
-    fn can_drain(&self) -> bool {
-        const MIN_BODY_DRAIN: u64 = 64 * 1024;
-        self.remaining().unwrap_or(u64::MAX) <= MIN_BODY_DRAIN
+impl BodyDecoder {
+    pub fn build_body(
+        &self,
+        buffer: &mut BytesMut,
+        shared: &mut SendHandle,
+        cx: &mut std::task::Context,
+    ) -> Incoming {
+        match self.kind {
+            DecoderKind::Length(0) => Incoming::empty(),
+            DecoderKind::Length(len) => {
+                if buffer.len() as u64 == len {
+                    Incoming::new(buffer.split())
+                } else {
+                    Incoming::from_handle(shared.handle(cx), Some(len))
+                }
+            }
+            DecoderKind::Chunked(_) => Incoming::from_handle(shared.handle(cx), None),
+        }
     }
 
-    fn poll_drain(&mut self, read_buffer: &mut BytesMut) -> Poll<Result<(), BodyError>> {
-        while self.has_remaining() {
-            match std::task::ready!(BodyDecoder::decode_chunk(self, read_buffer)) {
-                Ok(Some(_)) => {}
-                Ok(None) => break,
-                Err(err) => return Poll::Ready(Err(err)),
+    /// Returns Poll::Pending if more data read is required.
+    pub fn decode_chunk(
+        &mut self,
+        buffer: &mut BytesMut,
+    ) -> Poll<Option<Result<BytesMut, BodyError>>> {
+        match &mut self.kind {
+            DecoderKind::Length(0) => Poll::Ready(None),
+            DecoderKind::Length(remaining_mut) => {
+                if buffer.is_empty() {
+                    return Poll::Pending;
+                }
+                let cnt = (*remaining_mut).min(buffer.len() as u64);
+                *remaining_mut -= cnt;
+                Poll::Ready(Some(Ok(buffer.split_to(cnt as usize))))
             }
+            DecoderKind::Chunked(decoder) => decoder.decode_chunk(buffer),
         }
-        Poll::Ready(Ok(()))
+    }
+
+    /// Returns `Ok(bool)` indicating whether message body draining is required.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if message body draining is unable to be performed.
+    pub fn needs_drain(&self) -> Result<bool, UserError> {
+        let DecoderKind::Length(len) = self.kind else {
+            return Err(UserError::UnreadRequestContent);
+        };
+        if len > MIN_BODY_DRAIN {
+            return Err(UserError::UnreadRequestContent);
+        }
+        Ok(len != 0)
+    }
+
+    pub fn poll_drain(&mut self, read: usize) -> Poll<()> {
+        let DecoderKind::Length(remain_mut) = &mut self.kind else {
+            unreachable!("chunked encoding cannot be drained");
+        };
+        *remain_mut = remain_mut.saturating_sub(read as u64);
+        if *remain_mut == 0 {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
     }
 }
 
+// ===== Encoder =====
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+pub enum BodyEncoder {
+    Length(LengthEncoder),
+    Chunked(ChunkedCoder),
+}
+
+impl BodyEncoder {
+    pub fn new_length(remaining: u64) -> Self {
+        Self::Length(LengthEncoder { remaining })
+    }
+
+    pub fn new_chunked() -> Self {
+        Self::Chunked(ChunkedCoder::new())
+    }
+}
+
+pub struct LengthEncoder {
+    remaining: u64,
+}
+
+impl LengthEncoder {
+    pub fn has_remaining(&self) -> bool {
+        self.remaining != 0
+    }
+
+    pub fn encode<D>(&mut self, data: crate::body::Frame<D>) -> Result<D, BoxError>
+    where
+        D: tcio::bytes::Buf,
+    {
+        match data.into_data() {
+            Ok(data) => match self.remaining.checked_sub(data.remaining() as u64) {
+                Some(remain) => {
+                    self.remaining = remain;
+                    Ok(data)
+                }
+                None => Err("user content larger than given size hint".into()),
+            },
+            // NOTE: currently trailer from user are dropped
+            Err(_) => todo!(),
+        }
+    }
+}

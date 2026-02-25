@@ -6,31 +6,19 @@ use tcio::bytes::{Bytes, BytesMut};
 
 use crate::body::error::{BodyError, ReadError};
 
-pub trait BodyDecoder {
+pub trait BodyDecode {
     fn decode_chunk(
         &mut self,
         read_buffer: &mut BytesMut,
     ) -> Poll<Result<Option<BytesMut>, BodyError>>;
-
-    fn can_drain(&self) -> bool;
-
-    fn poll_drain(&mut self, read_buffer: &mut BytesMut) -> Poll<Result<(), BodyError>>;
 }
 
-impl<D: BodyDecoder> BodyDecoder for &mut D {
+impl<D: BodyDecode> BodyDecode for &mut D {
     fn decode_chunk(
         &mut self,
         read_buffer: &mut BytesMut,
     ) -> Poll<Result<Option<BytesMut>, BodyError>> {
         D::decode_chunk(self, read_buffer)
-    }
-
-    fn can_drain(&self) -> bool {
-        D::can_drain(self)
-    }
-
-    fn poll_drain(&mut self, read_buffer: &mut BytesMut) -> Poll<Result<(), BodyError>> {
-        D::poll_drain(self, read_buffer)
     }
 }
 
@@ -276,7 +264,7 @@ impl SendHandle {
     pub fn poll_read(
         &mut self,
         buf: &mut BytesMut,
-        mut decoder: impl BodyDecoder,
+        mut decoder: impl BodyDecode,
         cx: &mut std::task::Context,
     ) -> Poll<()> {
         self.with_mut(cx, || {
@@ -334,42 +322,6 @@ impl SendHandle {
         inner.flag.store(flag & !WANT_MASK | DATA_MASK, Ordering::Release);
 
         Poll::Ready(())
-    }
-
-    /// Wait for recv handle to be dropped.
-    ///
-    /// Otherwise supply data by calling `SendHandle::poll_read`.
-    ///
-    /// Returns `Poll::Pending` if more data read is required.
-    ///
-    /// Returns `Poll::Ready(None)` when recv handle have not been dropped yet, the waker will be
-    /// assigned to wake the task on further action.
-    ///
-    /// Returns `Poll::Ready(Some(Ok(bool)))` when recv handle have been dropped, the boolean
-    /// indicating whether a connection can be kept alive.
-    pub fn poll_close(
-        &mut self,
-        buf: &mut BytesMut,
-        mut decoder: impl BodyDecoder,
-        cx: &mut std::task::Context,
-    ) -> Poll<Option<Result<bool, BodyError>>> {
-        let flag = unsafe { self.inner.as_ref() }.flag.load(Ordering::Relaxed);
-
-        if flag.is_set::<SHARED_MASK>() {
-            // recv handle is still alive, user may read the body concurrently
-            self.poll_read(buf, decoder, cx).map(|()|None)
-        } else {
-            // recv handle is dropped, drain body if it small enough or in chunked
-            if !decoder.can_drain() {
-                return Poll::Ready(Some(Ok(false)));
-            }
-
-            match decoder.poll_drain(buf) {
-                Poll::Ready(Ok(())) => Poll::Ready(Some(Ok(true))),
-                Poll::Ready(Err(err)) => Poll::Ready(Some(Err(err))),
-                Poll::Pending => Poll::Pending,
-            }
-        }
     }
 }
 

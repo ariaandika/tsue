@@ -20,11 +20,6 @@ impl<'a> GetAll<'a> {
             hash,
         }
     }
-
-    /// Returns `true` if there is still remaining value.
-    pub(crate) fn has_remaining(&self) -> bool {
-        self.probe.peek().is_some()
-    }
 }
 
 impl<'a> Iterator for GetAll<'a> {

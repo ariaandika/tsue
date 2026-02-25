@@ -567,10 +567,6 @@ impl<'a> Probe<'a> {
             index: mask_by_capacity(map.cap, hash),
         }
     }
-
-    pub(crate) fn peek(&self) -> Option<&HeaderField> {
-        unsafe { self.map.fields.add(self.index as usize).as_ref().as_ref() }
-    }
 }
 
 impl<'a> Iterator for Probe<'a> {

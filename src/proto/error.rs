@@ -60,16 +60,18 @@ impl From<UriError> for ParseError {
 pub enum ProtoError {
     /// Too many headers.
     TooManyHeaders,
-    /// Missing host header.
-    MissingHost,
+    /// Missing, duplicate, or invalid host header.
+    InvalidHost,
+    /// Missing, duplicate, or invalid representation metadata.
+    InvalidRepresentation,
     /// Invalid `Connection` header value.
     InvalidConnectionOption,
     /// Invalid or duplicate Content-Length value.
     InvalidContentLength,
     /// Invalid message body codings.
     InvalidCodings,
-    /// Unknown or unsupported `Transfer-Encoding` codings.
-    UnknownCodings,
+    /// Unsupported transfer codings.
+    UnsupportedCodings,
     /// Too many `Transfer-Encoding` values.
     TooManyEncodings,
     /// Header parsing error.
@@ -84,11 +86,12 @@ impl std::fmt::Display for ProtoError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::TooManyHeaders => f.write_str("too many headers"),
+            Self::InvalidHost => f.write_str("invalid host"),
+            Self::InvalidRepresentation => f.write_str("invalid representation metadata"),
             Self::InvalidContentLength => f.write_str("invalid content length"),
-            Self::MissingHost => f.write_str("missing host header"),
             Self::InvalidConnectionOption => f.write_str("invalid connection option"),
             Self::InvalidCodings => f.write_str("invalid message body codings"),
-            Self::UnknownCodings => f.write_str("unknown or unsupported message body codings"),
+            Self::UnsupportedCodings => f.write_str("unsupported transfer codings"),
             Self::TooManyEncodings => f.write_str("too many chunked encodings"),
             Self::HeaderError(err) => write!(f, "header error: {err}"),
             Self::ParseError(err) => write!(f, "parse error: {err}"),
@@ -123,3 +126,24 @@ impl From<crate::headers::error::TryReserveError> for ProtoError {
         Self::TooManyHeaders
     }
 }
+
+// ===== User Error =====
+
+/// User error.
+#[derive(Debug)]
+pub enum UserError {
+    ExcessiveContent,
+    UnreadRequestContent,
+}
+
+impl std::error::Error for UserError {}
+
+impl std::fmt::Display for UserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::ExcessiveContent => f.write_str("user content is larger than given size hint"),
+            Self::UnreadRequestContent => f.write_str("user did not drain the request content"),
+        }
+    }
+}
+

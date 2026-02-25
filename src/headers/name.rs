@@ -1,4 +1,4 @@
-use tcio::bytes::{Bytes, BytesMut};
+use tcio::bytes::Bytes;
 
 use crate::headers::matches;
 use crate::headers::error::HeaderError;
@@ -79,17 +79,19 @@ impl HeaderName {
         }
     }
 
-    pub(crate) fn from_internal_lowercase(name: Bytes) -> Result<(Self, u32), HeaderError> {
-        if matches!(name.len(), 1..=MAX_HEADER_NAME_LEN) {
-            internal_header_name_lowercase(name)
-        } else {
-            Err(HeaderError::invalid_len(name.len()))
+    // # Safety
+    //
+    // `name` must be valid ASCII.
+    pub(crate) unsafe fn from_bytes_unchecked(name: Bytes) -> Self {
+        debug_assert!(Self::from_slice(&name).is_ok());
+        Self {
+            repr: Repr::Arbitrary(name),
         }
     }
 
-    pub(crate) fn from_internal(name: BytesMut) -> Result<(Self, u32), HeaderError> {
+    pub(crate) fn from_internal_lowercase(name: Bytes) -> Result<(Self, u32), HeaderError> {
         if matches!(name.len(), 1..=MAX_HEADER_NAME_LEN) {
-            internal_to_header_name(name)
+            internal_header_name_lowercase(name)
         } else {
             Err(HeaderError::invalid_len(name.len()))
         }
@@ -227,32 +229,6 @@ fn internal_header_name_lowercase(bytes: Bytes) -> Result<(HeaderName, u32), Hea
     Ok((
         HeaderName {
             repr: Repr::Arbitrary(bytes),
-        },
-        hash,
-    ))
-}
-
-fn internal_to_header_name(mut bytes: BytesMut) -> Result<(HeaderName, u32), HeaderError> {
-    use HeaderError as E;
-
-    const BASIS: u32 = 0x811C_9DC5;
-    const PRIME: u32 = 0x0100_0193;
-
-    let mut hash = BASIS;
-
-    for byte in bytes.as_mut_slice() {
-        // Any invalid character will have it MSB set
-        if *byte & 128 != 128 {
-            *byte = matches::HEADER_NAME[*byte as usize];
-            hash = PRIME.wrapping_mul(hash ^ *byte as u32);
-        } else {
-            return Err(E::Invalid);
-        }
-    }
-
-    Ok((
-        HeaderName {
-            repr: Repr::Arbitrary(bytes.freeze()),
         },
         hash,
     ))

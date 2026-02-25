@@ -6,16 +6,16 @@ use tcio::bytes::{Buf, BytesMut};
 use tcio::io::{AsyncRead, AsyncWrite};
 
 use crate::body::Body;
-use crate::h1::body::BodyKind;
+use crate::h1::body::{BodyEncoder, LengthEncoder};
 use crate::h1::chunked::{ChunkedCoder, EncodedChunk};
-use crate::h1::proto::{RequestContext, RequestParser};
+use crate::h1::proto::{RequestContext, poll_request};
 use crate::h1::states::Session;
+use crate::proto::error::UserError;
 use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 const DEFAULT_BUFFER_CAP: usize = 1024;
-const MIN_BODY_DRAIN: u64 = 64 * 1024;
 
 /// HTTP/1.1 Connection.
 pub struct Connection<S, IO>
@@ -32,14 +32,23 @@ where
 
 enum Phase<S>
 where
-    S: HttpService
+    S: HttpService,
 {
-    Request(RequestParser),
+    Request,
     Service(RequestContext, S::Future),
-    ResponseNoBody,
-    Response(RequestContext, u64, S::ResBody, Option<<S::ResBody as Body>::Data>),
-    ResponseChunk(ChunkedCoder, S::ResBody, Option<EncodedChunk<<S::ResBody as Body>::Data>>),
-    Drain(u64),
+    Response(
+        RequestContext,
+        LengthEncoder,
+        S::ResBody,
+        Option<<S::ResBody as Body>::Data>,
+    ),
+    ResponseChunked(
+        RequestContext,
+        ChunkedCoder,
+        S::ResBody,
+        Option<EncodedChunk<<S::ResBody as Body>::Data>>,
+    ),
+    Drain(RequestContext),
     Complete,
 }
 
@@ -49,7 +58,7 @@ where
 {
     pub fn new(service: S, io: IO) -> Self {
         Self {
-            phase: Phase::Request(RequestParser::new()),
+            phase: Phase::Request,
             session: Session::new(),
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
@@ -79,15 +88,15 @@ where
 
         loop {
             match phase {
-                Phase::Request(parser) => {
-                    let Ready((method, target)) = parser.poll_request(session, &mut *read_buffer)? else {
+                Phase::Request => {
+                    let Ready(context) = poll_request(session, &mut *read_buffer)? else {
                         let read = ready!(io.as_mut().poll_read(&mut *read_buffer, cx)?);
                         if read == 0 {
                             return Ready(Ok(()))
                         }
                         continue;
                     };
-                    let (request, context) = RequestContext::new(method, target, session, read_buffer, cx)?;
+                    let request = context.build_request(session, read_buffer, cx);
                     *phase = Phase::Service(context, service.call(request));
                 }
                 Phase::Service(context, future) => {
@@ -99,83 +108,67 @@ where
                         Pending => {
                             read_buffer.reserve(DEFAULT_BUFFER_CAP);
                             while context.poll_read(session, read_buffer, cx) {
-                                match ready!(io.as_mut().poll_read(&mut *read_buffer, cx)) {
-                                    Ok(0) => {
-                                        session.shared.set_io_error(
-                                            std::io::ErrorKind::ConnectionAborted.into(),
-                                            cx
-                                        );
-                                        break;
-                                    },
-                                    Ok(_) => {},
-                                    Err(err) => {
-                                        session.shared.set_io_error(err, cx);
-                                        break;
-                                    },
+                                let result = match ready!(io.as_mut().poll_read(&mut *read_buffer, cx)) {
+                                    Ok(0) => Err(std::io::ErrorKind::ConnectionAborted.into()),
+                                    Ok(_) => Ok(()),
+                                    Err(err) => Err(err),
                                 };
+                                if let Err(err) = result {
+                                    session.shared.set_io_error(err, cx);
+                                    break;
+                                }
                             }
                             continue;
                         }
                     };
 
-                    let Phase::Service(context, _) = mem::replace(phase, Phase::ResponseNoBody) else {
+                    let Phase::Service(context, _) = mem::replace(phase, Phase::Request) else {
                         unreachable!()
                     };
 
-                    *phase = match context.build_response_writer(response, session, write_buffer) {
-                        Some((body, BodyKind::ContentLength(len))) => Phase::Response(context, len, body, None),
-                        Some((body, BodyKind::Chunked(encoder))) => Phase::ResponseChunk(encoder, body, None),
-                        None => Phase::ResponseNoBody,
+                    let (body, kind) = context.build_response_writer(response, session, write_buffer);
+                    *phase = match kind {
+                        BodyEncoder::Length(encoder) => Phase::Response(context, encoder, body, None),
+                        BodyEncoder::Chunked(encoder) => Phase::ResponseChunked(context, encoder, body, None),
                     };
                 }
-                Phase::ResponseNoBody => {
-                    ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?);
-                    *phase = Phase::Complete;
-                }
-                Phase::Response(context, remaining, body, data_mut) => {
+                Phase::Response(context, encoder, body, data_mut) => {
                     ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?);
 
                     loop {
                         if let Some(data) = data_mut {
-                            let len = data.remaining();
                             ready!(io.as_mut().poll_write_all_buf(data, cx)?);
-                            let Some(new_remain) = remaining.checked_sub(len as u64) else {
-                                break;
-                            };
-                            *remaining = new_remain;
                             *data_mut = None;
                         }
 
-                        if *remaining == 0 {
-                            break
+                        if encoder.has_remaining() {
+                            break;
                         }
 
                         // SAFETY: `self` is pinned, thus `self.phase` is also pinned
                         let body = unsafe { Pin::new_unchecked(&mut *body) };
-                        let data = match ready!(body.poll_data(cx)) {
-                            Some(Ok(ok)) => ok,
-                            Some(Err(err)) => return Poll::Ready(Err(err.into())),
-                            None => break,
-                        };
-
-                        // NOTE: currently trailer from user are dropped
-                        if let Ok(data) = data.into_data() {
-                            *data_mut = Some(data);
-                        }
-                    }
-
-                    if context.decoder.has_remaining() {
-                        match context.decoder.remaining() {
-                            Some(remaining) if remaining <= MIN_BODY_DRAIN => {
-                                *phase = Phase::Drain(remaining);
+                        match ready!(body.poll_data(cx)) {
+                            Some(Ok(data)) => {
+                                *data_mut = Some(encoder.encode(data)?);
                             },
-                            _ => return Ready(Ok(())),
-                        }
-                    } else {
-                        *phase = Phase::Complete;
+                            None => {
+                                // has remaining, but body is exhausted
+                                return Ready(Err(UserError::ExcessiveContent.into()));
+                            }
+                            Some(Err(err)) => return Poll::Ready(Err(err.into())),
+                        };
                     }
+
+                    *phase = if context.needs_drain()? {
+                        let Phase::Service(context, _) = mem::replace(phase, Phase::Request) else {
+                            unreachable!()
+                        };
+                        Phase::Drain(context)
+                    } else {
+                        Phase::Complete
+                    };
                 }
-                Phase::ResponseChunk(encoder, body, data_mut) => {
+                Phase::ResponseChunked(context, encoder, body, data_mut) => {
                     ready!(io.as_mut().poll_write_all_buf(&mut *write_buffer, cx)?);
 
                     loop {
@@ -189,6 +182,10 @@ where
                                 *data_mut = None;
                                 break;
                             }
+                        }
+
+                        if encoder.is_eof() {
+                            break;
                         }
 
                         // SAFETY: `self` is pinned, thus `self.phase` is also pinned
@@ -205,31 +202,35 @@ where
                         }
                     }
 
-                    *phase = Phase::Complete;
+                    // TODO: check for recv shared handle should be dropped
+
+                    *phase = if context.needs_drain()? {
+                        let Phase::Service(context, _) = mem::replace(phase, Phase::Request) else {
+                            unreachable!()
+                        };
+                        Phase::Drain(context)
+                    } else {
+                        Phase::Complete
+                    };
                 }
-                Phase::Drain(remaining_mut) => {
+                Phase::Drain(context) => {
                     loop {
-                        if *remaining_mut == 0 {
-                            break;
-                        }
                         let read = ready!(io.as_mut().poll_read(&mut *read_buffer, cx)?);
                         if read == 0 {
                             return Ready(Ok(()))
                         }
-                        let Some(new_remain) = remaining_mut.checked_sub(read as u64) else {
+                        if let Ready(()) = context.poll_drain(read) {
                             break
-                        };
-                        *remaining_mut = new_remain;
-                        read_buffer.clear();
+                        }
                     }
-
                     *phase = Phase::Complete;
                 }
                 Phase::Complete => {
                     if !session.keep_alive {
                         return Ready(Ok(()));
                     }
-                    *phase = Phase::Request(RequestParser::new());
+                    read_buffer.reclaim();
+                    *phase = Phase::Request;
                 }
             }
         }
@@ -244,6 +245,7 @@ where
 {
     type Output = ();
 
+    #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Self::Output> {
         match ready!(self.as_mut().try_poll(cx)) {
             Ok(()) => {
