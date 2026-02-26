@@ -117,12 +117,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
-name = "itoa"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
-
-[[package]]
 name = "jiff"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -293,7 +287,7 @@ dependencies = [
 [[package]]
 name = "tcio"
 version = "0.1.4"
-source = "git+https://github.com/ariaandika/tcio#12c01e9b7ec37ac326da0dea90fff506d213ef6b"
+source = "git+https://github.com/ariaandika/tcio#bade987d19de1c6e0c2aae72a1f784fd8c29a443"
 dependencies = [
  "tokio",
 ]
@@ -316,7 +310,6 @@ name = "tsue"
 version = "0.1.0"
 dependencies = [
  "futures-core",
- "itoa",
  "log",
  "tcio",
  "tokio",

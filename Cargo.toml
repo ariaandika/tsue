@@ -11,7 +11,6 @@ tokio = { version = "1.46.1", features = ["net", "sync", "rt"] }
 # Optionals
 
 log = { version = "0.4.26", optional = true }
-itoa = "1.0.15"
 
 [features]
 log = ["dep:log"]
