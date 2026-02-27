@@ -88,14 +88,14 @@ where
         loop {
             match phase {
                 Phase::Request => {
-                    let Ready(mut context) = poll_request(session, &mut *read_buffer)? else {
+                    let Ready((parts, mut context)) = poll_request(session, &mut *read_buffer)? else {
                         let read = ready!(io.as_mut().poll_read(&mut *read_buffer, cx)?);
                         if read == 0 {
                             return Ready(Ok(()))
                         }
                         continue;
                     };
-                    let request = context.build_request(session, read_buffer, cx);
+                    let request = context.build_request(parts, session, read_buffer, cx);
                     *phase = Phase::Service(context, service.call(request));
                 }
                 Phase::Service(context, future) => {

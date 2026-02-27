@@ -20,7 +20,7 @@ const MIN_REQLINE_LEN: usize = b"GET / HTTP/1.1".len();
 pub fn poll_request(
     session: &mut Session,
     read_buffer: &mut BytesMut,
-) -> Poll<Result<RequestContext, ProtoError>> {
+) -> Poll<Result<(request::Parts, RequestContext), ProtoError>> {
     let (reqline_len, mut state) = {
         if read_buffer.len() < MIN_REQLINE_LEN {
             return Pending;
@@ -233,38 +233,44 @@ pub fn poll_request(
     };
     let decoder = BodyDecoder::new(content_kind);
 
+    // ===== Request =====
 
-    Ready(Ok(RequestContext {
+    let parts = request::Parts {
         method,
-        target,
+        uri: target,
+        version: crate::http::Version::HTTP_11,
+        headers: mem::take(&mut session.headers),
+        extensions: crate::http::Extensions::new(),
+    };
+
+    let context = RequestContext {
+        method,
         decoder,
-    }))
+    };
+
+    Ready(Ok((parts, context)))
 }
 
 // ===== Service Manager =====
 
 pub struct RequestContext {
     pub method: Method,
-    pub target: HttpUri,
     pub decoder: BodyDecoder,
 }
 
 impl RequestContext {
     pub fn build_request(
         &mut self,
+        parts: request::Parts,
         session: &mut Session,
         read_buffer: &mut BytesMut,
         cx: &mut std::task::Context,
     ) -> Request<Incoming> {
-        let parts = request::Parts {
-            method: self.method,
-            uri: self.target.clone(),
-            version: crate::http::Version::HTTP_11,
-            headers: mem::take(&mut session.headers),
-            extensions: crate::http::Extensions::new(),
-        };
-        let body = self.decoder.build_body(read_buffer, &mut session.shared, cx);
-        Request::from_parts(parts, body)
+        Request::from_parts(
+            parts,
+            self.decoder
+                .build_body(read_buffer, &mut session.shared, cx),
+        )
     }
 
     /// Poll for request body, returns `true` if more read is required.
