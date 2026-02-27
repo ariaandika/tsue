@@ -71,7 +71,6 @@ where
 impl<S, IO> Connection<S, IO>
 where
     S: HttpService,
-    <S::ResBody as Body>::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite,
 {
     fn try_poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Result<(), BoxError>> {
@@ -238,7 +237,6 @@ where
 impl<S, IO> Future for Connection<S, IO>
 where
     S: HttpService,
-    <S::ResBody as Body>::Error: Into<BoxError>,
     IO: AsyncRead + AsyncWrite,
 {
     type Output = ();

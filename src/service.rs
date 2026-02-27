@@ -2,7 +2,7 @@
 use std::convert::Infallible;
 use tcio::futures::{Map, map};
 
-use crate::body::Incoming;
+use crate::body::{Body, Incoming};
 use crate::http::{Request, Response};
 
 // ===== Service =====
@@ -17,24 +17,29 @@ pub trait Service<Request> {
     fn call(&self, request: Request) -> Self::Future;
 }
 
+// ===== HttpService =====
+
 pub trait HttpService:
     Service<
         Request<Incoming>,
         Response = Response<Self::ResBody>,
         Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     >
+where
+    <Self::ResBody as Body>::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
 {
-    type ResBody: crate::body::Body;
+    type ResBody: Body;
 }
 
 impl<S, B> HttpService for S
 where
     S: Service<
-        Request<Incoming>,
-        Response = Response<B>,
-        Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
-    >,
-    B: crate::body::Body,
+            Request<Incoming>,
+            Response = Response<B>,
+            Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+        >,
+    B: Body,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
 {
     type ResBody = B;
 }
