@@ -736,3 +736,128 @@ macro_rules! standard_header {
 }
 
 use standard_header;
+
+pub mod lookup {
+    pub use super::request::header as request_header;
+}
+
+mod request {
+    use super::*;
+
+    const CAP: u32 = 32;
+    const MASK: u32 = 0b00011111;
+
+    const _: () = assert!(MASK == CAP - 1);
+
+    const fn calc_index(hash: u32) -> u32 {
+        const MUL: u32 = 134221691;
+        const SHIFT: u32 = 15;
+        hash.wrapping_mul(MUL) >> SHIFT
+    }
+
+    pub fn header(hash: u32, name: &[u8]) -> Option<HeaderName> {
+        let hash = calc_index(hash);
+        let s = unsafe { LOOKUP.get_unchecked((hash & MASK) as usize) };
+        if s.string.as_bytes() == name {
+            Some(HeaderName {
+                repr: Repr::Static(s)
+            })
+        } else {
+            None
+        }
+    }
+
+    macro_rules! static_hdr {
+        ($s:literal, $hpack:expr) => {
+            Static {
+                string: $s,
+                hash: matches::hash_32($s.as_bytes()),
+                hpack_idx: std::num::NonZeroU8::new($hpack),
+            }
+        };
+        ($s:literal) => {
+            static_hdr!($s, 0)
+        };
+    }
+
+    pub static ACCEPT: Static = static_hdr!("accept", 19);
+    pub static ACCEPT_CHARSET: Static = static_hdr!("accept-charset", 15);
+    pub static ACCEPT_ENCODING: Static = static_hdr!("accept-encoding", 16);
+    pub static ACCEPT_LANGUAGE: Static = static_hdr!("accept-language", 17);
+    pub static AUTHORIZATION: Static = static_hdr!("authorization", 23);
+    pub static CACHE_CONTROL: Static = static_hdr!("cache-control", 24);
+    pub static CONNECTION: Static = static_hdr!("connection");
+    pub static CONTENT_LENGTH: Static = static_hdr!("content-length", 28);
+    pub static CONTENT_TYPE: Static = static_hdr!("content-type", 31);
+    pub static COOKIE: Static = static_hdr!("cookie", 32);
+    pub static HOST: Static = static_hdr!("host", 38);
+    pub static IF_MODIFIED_SINCE: Static = static_hdr!("if-modified-since", 40);
+    pub static KEEP_ALIVE: Static = static_hdr!("keep-alive");
+    pub static ORIGIN: Static = static_hdr!("origin");
+    pub static REFERER: Static = static_hdr!("referer", 51);
+    pub static SEC_FETCH_DEST: Static = static_hdr!("sec-fetch-dest");
+    pub static SEC_FETCH_MODE: Static = static_hdr!("sec-fetch-mode");
+    pub static SEC_FETCH_SITE: Static = static_hdr!("sec-fetch-site");
+    pub static TE: Static = static_hdr!("te");
+    pub static TRANSFER_ENCODING: Static = static_hdr!("transfer-encoding");
+    pub static UPGRADE: Static = static_hdr!("upgrade");
+    pub static UPGRADE_INSECURE_REQUESTS: Static = static_hdr!("upgrade-insecure-requests");
+    pub static USER_AGENT: Static = static_hdr!("user-agent");
+
+    static LOOKUP: [&Static; 32] = {
+        let headers = [
+            &ACCEPT,
+            &ACCEPT_CHARSET,
+            &ACCEPT_ENCODING,
+            &ACCEPT_LANGUAGE,
+            &AUTHORIZATION,
+            &CACHE_CONTROL,
+            &CONNECTION,
+            &CONTENT_LENGTH,
+            &CONTENT_TYPE,
+            &COOKIE,
+            &HOST,
+            &IF_MODIFIED_SINCE,
+            &KEEP_ALIVE,
+            &ORIGIN,
+            &REFERER,
+            &SEC_FETCH_DEST,
+            &SEC_FETCH_MODE,
+            &SEC_FETCH_SITE,
+            &TE,
+            &TRANSFER_ENCODING,
+            &UPGRADE,
+            &UPGRADE_INSECURE_REQUESTS,
+            &USER_AGENT,
+        ];
+        let mut lookup = [const {
+            &Static {
+                string: "_",
+                hash: 0,
+                hpack_idx: std::num::NonZeroU8::new(0),
+            }
+        }; CAP as usize];
+        let mut i = 0;
+        while i < headers.len() {
+            let s = headers[i];
+            let index = calc_index(s.hash) & (CAP - 1);
+            assert!(lookup[index as usize].hash == 0, "{}", s.string);
+            lookup[index as usize] = s;
+            i += 1;
+        }
+        lookup
+    };
+
+    #[test]
+    fn test_static_header_lookup() {
+        for name in LOOKUP {
+            if name.string == "_" {
+                continue;
+            }
+            let hdr = header(name.hash, name.string.as_bytes()).expect(name.string);
+            assert_eq!(hdr.as_str(), name.string);
+            assert_eq!(hdr.hash(), name.hash);
+            assert_eq!(hdr.hpack_static(), name.hpack_idx);
+        }
+    }
+}

@@ -6,7 +6,7 @@ use tcio::num::{itoa, wrapping_atou};
 use crate::body::{Body, Incoming};
 use crate::h1::body::{BodyDecoder, BodyEncoder, ContentKind};
 use crate::h1::states::Session;
-use crate::headers::{HeaderField, HeaderName, HeaderValue, standard};
+use crate::headers::{HeaderField, HeaderName, HeaderValue, lookup};
 use crate::http::{Method, Request, Response, httpdate_now, request, response};
 use crate::matches;
 use crate::proto::error::{ParseError, ProtoError, UserError};
@@ -21,58 +21,68 @@ pub fn poll_request(
     session: &mut Session,
     read_buffer: &mut BytesMut,
 ) -> Poll<Result<(request::Parts, RequestContext), ProtoError>> {
-    let (reqline_len, mut state) = {
-        if read_buffer.len() < MIN_REQLINE_LEN {
-            return Pending;
-        }
-        let Some(lf) = matches::find_byte::<b'\n'>(read_buffer) else {
-            return Pending;
-        };
-        if lf == 0 {
-            return Ready(Err(P::InvalidSeparator.into()));
-        }
-        // gtfo
-        if read_buffer[lf - 1] != b'\r' {
-            return Ready(Err(P::InvalidSeparator.into()));
-        }
-        let len = lf + 1;
-        (len, &read_buffer[len..])
+    // ===== Reqline =====
+
+    if read_buffer.len() < MIN_REQLINE_LEN {
+        return Pending;
+    }
+    let Some(lf) = matches::find_byte::<b'\n'>(read_buffer) else {
+        return Pending;
+    };
+    let Some(suffix) = read_buffer[..lf].last_chunk() else {
+        return Ready(Err(P::InvalidSeparator.into()));
     };
 
-    const MAX_HEADERS: u8 = 32;
-    let mut headers_len = 0u8;
-    let mut headers = [const { mem::MaybeUninit::uninit() }; MAX_HEADERS as usize];
+    const SUFFIX: &[u8; 10] = b" HTTP/1.1\r";
+    if suffix != SUFFIX {
+        return Ready(Err(P::UnsupportedVersion.into()));
+    }
+
+    let mut state = &read_buffer[lf + 1..];
+    let reqline_len = lf - SUFFIX.len();
+
+    // ===== Headers =====
+
+    let mut headers = Headers::new();
     loop {
         let Some(prefix) = state.first_chunk::<2>() else {
             return Pending;
         };
         match prefix[0] {
-            b'\r' => if prefix[1] == b'\n' {
-                state = &state[2..];
-                break;
-            } else {
-                return Ready(Err(P::InvalidSeparator.into()));
-            },
-                b'\n' => return Ready(Err(P::InvalidSeparator.into())),
-                _ => {}
+            b'\r' => {
+                if prefix[1] == b'\n' {
+                    break;
+                } else {
+                    return Ready(Err(P::InvalidSeparator.into()));
+                }
+            }
+            b'\n' => return Ready(Err(P::InvalidSeparator.into())),
+            _ => {}
         }
         let Some(lf) = matches::find_byte::<b'\n'>(state) else {
             return Pending;
         };
-        if headers_len >= MAX_HEADERS {
-            return Ready(Err(E::TooManyHeaders));
-        }
-        state = &state[lf + 1..];
-        headers[headers_len as usize].write(u16::try_from(lf + 1).map_err(|_|P::TooLong)?);
-        headers_len += 1;
+        let line_len = lf + 1;
+        headers.insert(line_len)?;
+        state = &state[line_len..];
     }
 
-    let mut bytes = unsafe { read_buffer.split_to(state.as_ptr().offset_from_unsigned(read_buffer.as_ptr())) };
+    let reqline = unsafe { read_buffer.split_to_unchecked(reqline_len) };
 
+    unsafe { std::hint::assert_unchecked(reqline.len() < MIN_REQLINE_LEN) };
+
+    Ready(process_request(reqline, &headers, session, read_buffer))
+}
+
+// ===== Request Line Parser =====
+
+fn process_request(
+    mut reqline: BytesMut,
+    headers: &Headers,
+    session: &mut Session,
+    read_buffer: &mut BytesMut,
+) -> Result<(request::Parts, RequestContext), ProtoError> {
     // ===== Request Line =====
-
-    let mut reqline = bytes.split_to(reqline_len);
-    reqline.truncate(reqline_len - 2);
 
     let method;
     if reqline.first_chunk() == Some(b"GET ") {
@@ -90,11 +100,6 @@ pub fn poll_request(
         reqline.advance(len + 1);
     }
 
-    const VER: &[u8; 9] = b" HTTP/1.1";
-    let Some(VER) = reqline.last_chunk() else {
-        return Ready(Err(P::UnsupportedVersion.into()));
-    };
-    reqline.truncate(reqline.len() - VER.len());
     let target = reqline;
 
     // ===== Headers =====
@@ -102,96 +107,109 @@ pub fn poll_request(
     let mut host = None;
     let mut content = None;
 
-    for &header in unsafe { headers[..headers_len as usize].assume_init_ref() } {
-        const BASIS: u32 = 0x811C_9DC5;
-        const PRIME: u32 = 0x0100_0193;
-
-        let mut line_buf = bytes.split_to(header as usize);
+    for &hdr_index in headers.as_slice() {
+        let mut line_buf = unsafe { read_buffer.split_to_unchecked(hdr_index as usize) };
         line_buf.truncate(line_buf.len() - 2);
         let mut line = line_buf.as_mut_slice();
-        let mut hash = BASIS;
+        let mut hash = matches::BASIS_32;
 
+        // look for ': ' separator while hashing
         loop {
-            let Some(byte_mut) = line.first_mut() else {
-                return Ready(Err(P::InvalidSeparator.into()));
+            let Some((byte_mut, rest)) = line.split_first_mut() else {
+                return Err(P::InvalidSeparator.into());
             };
             let byte = matches::HEADER_NAME[*byte_mut as usize];
             // Any invalid character will have it MSB set
             if byte & 128 == 0 {
                 *byte_mut = byte;
-                hash = PRIME.wrapping_mul(hash ^ byte as u32);
-                line = &mut line[1..];
+                hash = matches::PRIME_32.wrapping_mul(hash ^ byte as u32);
+                line = rest;
             } else {
+                // rest.split_first_mut()
+                if *byte_mut != b':' {
+                    return Err(P::InvalidSeparator.into());
+                };
+                line = rest;
                 break
             }
         }
 
-        let Some(b": ") = line.first_chunk() else {
-            return Ready(Err(crate::headers::error::HeaderError::Invalid.into()));
-        };
+        // skip whitespaces
+        while let Some(lead) = line.first() {
+            if *lead == b' ' {
+                line = &mut line[1..];
+            } else {
+                break;
+            }
+        }
 
         let name_len = unsafe { line.as_ptr().offset_from_unsigned(line_buf.as_ptr()) };
-        let hash = hash;
-        let value;
+        let mut value = line_buf;
 
-        let name = match hash {
-            hash::HOST => {
-                line_buf.advance(name_len + 2);
-                value = line_buf.freeze();
-                if host.is_some() {
-                    return Ready(Err(E::InvalidRepresentation));
+        unsafe { std::hint::assert_unchecked(name_len < value.len()) };
+
+        let hash = hash;
+        let name = lookup::request_header(hash, &value[..name_len]);
+
+        let name = if let Some(name) = name {
+            // contant header
+            value.advance(name_len + 2);
+
+            const HOST: u32 = matches::hash_32(b"host");
+            const CONTENT_LENGTH: u32 = matches::hash_32(b"content-length");
+            const TRANSFER_ENCODING: u32 = matches::hash_32(b"transfer-encoding");
+            const CONNECTION: u32 = matches::hash_32(b"connection");
+
+            match hash {
+                HOST => {
+                    if host.is_some() {
+                        return Err(E::InvalidRepresentation);
+                    }
+                    host = Some(Host::from_bytes(value.clone())?);
                 }
-                host = Some(Host::from_bytes(value.clone())?);
-                standard::HOST
-            }
-            hash::CONTENT_LENGTH => {
-                line_buf.advance(name_len + 2);
-                value = line_buf.freeze();
-                if content.is_some() {
-                    return Ready(Err(E::InvalidRepresentation));
+                CONTENT_LENGTH => {
+                    if content.is_some() {
+                        return Err(E::InvalidRepresentation);
+                    }
+                    if value.len() > 16 {
+                        return Err(E::InvalidRepresentation);
+                    }
+                    let Some(content_len) = wrapping_atou(&value) else {
+                        return Err(E::InvalidRepresentation);
+                    };
+                    content = Some(ContentKind::ContentLength(content_len));
                 }
-                if value.len() > 16 {
-                    return Ready(Err(E::InvalidRepresentation));
+                TRANSFER_ENCODING => {
+                    if content.is_some() {
+                        return Err(E::InvalidRepresentation);
+                    }
+                    // TODO: support compressed transfer-encodings
+                    if &value != b"chunked" {
+                        return Err(E::UnsupportedCodings);
+                    }
+                    content = Some(ContentKind::Chunked);
                 }
-                let Some(content_len) = wrapping_atou(&value) else {
-                    return Ready(Err(E::InvalidRepresentation));
-                };
-                content = Some(ContentKind::ContentLength(content_len));
-                standard::CONTENT_LENGTH
-            }
-            hash::TRANSFER_ENCODING => {
-                line_buf.advance(name_len + 2);
-                value = line_buf.freeze();
-                if content.is_some() {
-                    return Ready(Err(E::InvalidRepresentation));
+                CONNECTION => {
+                    session.keep_alive = match value.as_slice() {
+                        b"keep-alive" => true,
+                        b"close" => false,
+                        _ => return Err(E::InvalidConnectionOption),
+                    };
                 }
-                // TODO: support compressed transfer-encodings
-                if &value != b"chunked" {
-                    return Ready(Err(E::UnsupportedCodings));
-                }
-                content = Some(ContentKind::Chunked);
-                standard::TRANSFER_ENCODING
-            }
-            hash::CONNECTION => {
-                line_buf.advance(name_len + 2);
-                value = line_buf.freeze();
-                session.keep_alive = match value.as_slice() {
-                    b"keep-alive" => true,
-                    b"close" => false,
-                    _ => return Ready(Err(E::InvalidConnectionOption)),
-                };
-                standard::CONNECTION
-            }
-            _ => {
-                let name = line_buf.split_to(name_len);
-                line_buf.advance(2);
-                value = line_buf.freeze();
-                // SAFETY: checks previously also ensure valid ASCII
-                unsafe { HeaderName::from_bytes_unchecked(name.freeze()) }
-            }
+                _ => {}
+            };
+
+            name
+        } else {
+            let name = value.split_to(name_len);
+            value.advance(2);
+
+            // SAFETY: checks previously also ensure valid ASCII
+            unsafe { HeaderName::from_bytes_unchecked(name.freeze()) }
         };
 
-        let value = HeaderValue::from_bytes(value)?;
+
+        let value = HeaderValue::from_bytes(value.freeze())?;
         let field = HeaderField::with_hash(name, value, hash);
         let _ = session.headers.try_append_field(field);
     }
@@ -199,7 +217,7 @@ pub fn poll_request(
     // ===== Target URI =====
 
     let Some(host) = host else {
-        return Ready(Err(E::InvalidHost));
+        return Err(E::InvalidHost);
     };
     let path = match target.as_slice() {
         // origin
@@ -212,13 +230,13 @@ pub fn poll_request(
             // absolute
             let uri = HttpUri::from_bytes(target)?;
             if uri.host() == host.as_str() {
-                return Ready(Err(P::MissmatchHost.into()));
+                return Err(P::MissmatchHost.into());
             }
             uri.into()
         } else {
             // auth
             if target.as_slice() != host.as_str().as_bytes() {
-                return Ready(Err(P::MissmatchHost.into()));
+                return Err(P::MissmatchHost.into());
             }
             Path::from_static(b"")
         }
@@ -248,7 +266,45 @@ pub fn poll_request(
         decoder,
     };
 
-    Ready(Ok((parts, context)))
+    Ok((parts, context))
+}
+
+// ===== Header Parser =====
+
+struct Headers {
+    headers: [mem::MaybeUninit<u16>; Self::MAX_HEADERS as usize],
+    len: u8,
+}
+
+impl Headers {
+    const MAX_HEADERS: u8 = 32;
+
+    fn new() -> Self {
+        Self {
+            headers: [mem::MaybeUninit::uninit();_],
+            len: 0,
+        }
+    }
+
+    fn insert(&mut self, value: usize) -> Result<(), ProtoError> {
+        if self.len >= Self::MAX_HEADERS {
+            return Err(E::TooManyHeaders);
+        }
+        let Ok(value) = u16::try_from(value) else {
+            return Err(E::ParseError(P::TooLong));
+        };
+        self.headers[self.len as usize].write(value);
+        self.len += 1;
+        Ok(())
+    }
+
+    fn as_slice(&self) -> &[u16] {
+        unsafe {
+            self.headers
+                .get_unchecked(..self.len as usize)
+                .assume_init_ref()
+        }
+    }
 }
 
 // ===== Service Manager =====
@@ -363,20 +419,3 @@ fn write_response_head(res: &response::Parts, buf: &mut BytesMut, content_length
 
     buf.extend_from_slice(b"\r\n");
 }
-
-// ===== hash =====
-
-mod hash {
-    use crate::matches;
-
-    pub const HOST: u32 = matches::hash_32(b"host");
-    pub const CONTENT_LENGTH: u32 = matches::hash_32(b"content-length");
-    pub const TRANSFER_ENCODING: u32 = matches::hash_32(b"transfer-encoding");
-    pub const CONNECTION: u32 = matches::hash_32(b"connection");
-
-    // pub const USER_AGENT: u32 = matches::hash_32(b"user-agent");
-    // pub const TE: u32 = matches::hash_32(b"te");
-    // pub const DATE: u32 = matches::hash_32(b"date");
-    // pub const UPGRADE: u32 = matches::hash_32(b"date");
-}
-

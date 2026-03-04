@@ -274,14 +274,14 @@ pub const fn find_byte<const B: u8>(bytes: &[u8]) -> Option<usize> {
 
 // ===== hash =====
 
-pub const fn hash_32(mut bytes: &[u8]) -> u32 {
-    const BASIS: u32 = 0x811C_9DC5;
-    const PRIME: u32 = 0x0100_0193;
+pub const PRIME_32: u32 = 0x0100_0193;
+pub const BASIS_32: u32 = 0x811C_9DC5;
 
-    let mut hash = BASIS;
+pub const fn hash_32(mut bytes: &[u8]) -> u32 {
+    let mut hash = BASIS_32;
 
     while let [byte, rest @ ..] = bytes {
-        hash = PRIME.wrapping_mul(hash ^ *byte as u32);
+        hash = PRIME_32.wrapping_mul(hash ^ *byte as u32);
         bytes = rest;
     }
 

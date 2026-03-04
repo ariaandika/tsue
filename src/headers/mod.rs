@@ -75,7 +75,7 @@ mod test;
 
 pub mod error;
 
-pub use name::{HeaderName, standard};
+pub use name::{HeaderName, standard, lookup};
 pub use value::HeaderValue;
 pub use field::HeaderField;
 pub use map::{HeaderMap, AsHeaderName, IntoHeaderName};
