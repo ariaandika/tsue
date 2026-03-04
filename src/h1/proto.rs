@@ -21,7 +21,7 @@ pub fn poll_request(
     session: &mut Session,
     read_buffer: &mut BytesMut,
 ) -> Poll<Result<(request::Parts, RequestContext), ProtoError>> {
-    // ===== Reqline =====
+    // ===== Poll Reqline =====
 
     if read_buffer.len() < MIN_REQLINE_LEN {
         return Pending;
@@ -39,50 +39,31 @@ pub fn poll_request(
     }
 
     let mut state = &read_buffer[lf + 1..];
-    let reqline_len = lf - SUFFIX.len();
 
-    // ===== Headers =====
+    // ===== Poll Headers =====
 
     let mut headers = Headers::new();
     loop {
-        let Some(prefix) = state.first_chunk::<2>() else {
-            return Pending;
-        };
-        match prefix[0] {
-            b'\r' => {
-                if prefix[1] == b'\n' {
-                    break;
-                } else {
-                    return Ready(Err(P::InvalidSeparator.into()));
-                }
-            }
-            b'\n' => return Ready(Err(P::InvalidSeparator.into())),
-            _ => {}
+        if state.first_chunk::<2>() == Some(b"\r\n") {
+            break;
         }
         let Some(lf) = matches::find_byte::<b'\n'>(state) else {
             return Pending;
         };
+        if lf == 0 {
+            return Ready(Err(P::InvalidSeparator.into()));
+        }
         let line_len = lf + 1;
         headers.insert(line_len)?;
         state = &state[line_len..];
     }
 
-    let reqline = unsafe { read_buffer.split_to_unchecked(reqline_len) };
+    // ===== Request Line =====
+
+    let mut reqline = unsafe { read_buffer.split_to_unchecked(lf + 1) };
+    reqline.truncate(reqline.len() - (SUFFIX.len() + 1));
 
     unsafe { std::hint::assert_unchecked(reqline.len() < MIN_REQLINE_LEN) };
-
-    Ready(process_request(reqline, &headers, session, read_buffer))
-}
-
-// ===== Request Line Parser =====
-
-fn process_request(
-    mut reqline: BytesMut,
-    headers: &Headers,
-    session: &mut Session,
-    read_buffer: &mut BytesMut,
-) -> Result<(request::Parts, RequestContext), ProtoError> {
-    // ===== Request Line =====
 
     let method;
     if reqline.first_chunk() == Some(b"GET ") {
@@ -116,7 +97,7 @@ fn process_request(
         // look for ': ' separator while hashing
         loop {
             let Some((byte_mut, rest)) = line.split_first_mut() else {
-                return Err(P::InvalidSeparator.into());
+                return Ready(Err(P::InvalidSeparator.into()));
             };
             let byte = matches::HEADER_NAME[*byte_mut as usize];
             // Any invalid character will have it MSB set
@@ -127,7 +108,7 @@ fn process_request(
             } else {
                 // rest.split_first_mut()
                 if *byte_mut != b':' {
-                    return Err(P::InvalidSeparator.into());
+                    return Ready(Err(P::InvalidSeparator.into()));
                 };
                 line = rest;
                 break
@@ -143,17 +124,17 @@ fn process_request(
             }
         }
 
-        let name_len = unsafe { line.as_ptr().offset_from_unsigned(line_buf.as_ptr()) };
+        let line_len = unsafe { line.as_ptr().offset_from_unsigned(line_buf.as_ptr()) };
         let mut value = line_buf;
 
-        unsafe { std::hint::assert_unchecked(name_len < value.len()) };
+        unsafe { std::hint::assert_unchecked(line_len < value.len()) };
 
         let hash = hash;
-        let name = lookup::request_header(hash, &value[..name_len]);
+        let name = lookup::request_header(hash, &value[..line_len - 2]);
 
         let name = if let Some(name) = name {
             // contant header
-            value.advance(name_len + 2);
+            value.advance(line_len);
 
             const HOST: u32 = matches::hash_32(b"host");
             const CONTENT_LENGTH: u32 = matches::hash_32(b"content-length");
@@ -163,29 +144,29 @@ fn process_request(
             match hash {
                 HOST => {
                     if host.is_some() {
-                        return Err(E::InvalidRepresentation);
+                        return Ready(Err(E::InvalidRepresentation));
                     }
                     host = Some(Host::from_bytes(value.clone())?);
                 }
                 CONTENT_LENGTH => {
                     if content.is_some() {
-                        return Err(E::InvalidRepresentation);
+                        return Ready(Err(E::InvalidRepresentation));
                     }
                     if value.len() > 16 {
-                        return Err(E::InvalidRepresentation);
+                        return Ready(Err(E::InvalidRepresentation));
                     }
                     let Some(content_len) = wrapping_atou(&value) else {
-                        return Err(E::InvalidRepresentation);
+                        return Ready(Err(E::InvalidRepresentation));
                     };
                     content = Some(ContentKind::ContentLength(content_len));
                 }
                 TRANSFER_ENCODING => {
                     if content.is_some() {
-                        return Err(E::InvalidRepresentation);
+                        return Ready(Err(E::InvalidRepresentation));
                     }
                     // TODO: support compressed transfer-encodings
                     if &value != b"chunked" {
-                        return Err(E::UnsupportedCodings);
+                        return Ready(Err(E::UnsupportedCodings));
                     }
                     content = Some(ContentKind::Chunked);
                 }
@@ -193,7 +174,7 @@ fn process_request(
                     session.keep_alive = match value.as_slice() {
                         b"keep-alive" => true,
                         b"close" => false,
-                        _ => return Err(E::InvalidConnectionOption),
+                        _ => return Ready(Err(E::InvalidConnectionOption)),
                     };
                 }
                 _ => {}
@@ -201,8 +182,8 @@ fn process_request(
 
             name
         } else {
-            let name = value.split_to(name_len);
-            value.advance(2);
+            let mut name = value.split_to(line_len);
+            name.truncate(name.len() - 2);
 
             // SAFETY: checks previously also ensure valid ASCII
             unsafe { HeaderName::from_bytes_unchecked(name.freeze()) }
@@ -217,7 +198,7 @@ fn process_request(
     // ===== Target URI =====
 
     let Some(host) = host else {
-        return Err(E::InvalidHost);
+        return Ready(Err(E::InvalidHost));
     };
     let path = match target.as_slice() {
         // origin
@@ -230,13 +211,13 @@ fn process_request(
             // absolute
             let uri = HttpUri::from_bytes(target)?;
             if uri.host() == host.as_str() {
-                return Err(P::MissmatchHost.into());
+                return Ready(Err(P::MissmatchHost.into()));
             }
             uri.into()
         } else {
             // auth
             if target.as_slice() != host.as_str().as_bytes() {
-                return Err(P::MissmatchHost.into());
+                return Ready(Err(P::MissmatchHost.into()));
             }
             Path::from_static(b"")
         }
@@ -266,7 +247,7 @@ fn process_request(
         decoder,
     };
 
-    Ok((parts, context))
+    Ready(Ok((parts, context)))
 }
 
 // ===== Header Parser =====
