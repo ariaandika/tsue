@@ -15,13 +15,13 @@ use crate::uri::{Host, HttpUri, Path};
 use ParseError as P;
 use ProtoError as E;
 
-const MIN_REQLINE_LEN: usize = b"GET / HTTP/1.1".len();
-
 pub fn poll_request(
     session: &mut Session,
     read_buffer: &mut BytesMut,
 ) -> Poll<Result<(request::Parts, RequestContext), ProtoError>> {
     // ===== Poll Reqline =====
+
+    const MIN_REQLINE_LEN: usize = b"GET / HTTP/1.1".len();
 
     if read_buffer.len() < MIN_REQLINE_LEN {
         return Pending;
@@ -60,16 +60,19 @@ pub fn poll_request(
 
     // ===== Request Line =====
 
+    // SAFETY: `matches::find_byte` returns `Some`, `lf` is in bounds
     let mut reqline = unsafe { read_buffer.split_to_unchecked(lf + 1) };
-    reqline.truncate(reqline.len() - (SUFFIX.len() + 1));
-
-    unsafe { std::hint::assert_unchecked(reqline.len() < MIN_REQLINE_LEN) };
+    unsafe {
+        // SAFETY: see poll request above
+        reqline.set_len(reqline.len() - (SUFFIX.len() + 1));
+        std::hint::assert_unchecked(reqline.len() >= 5)
+    }
 
     let method;
-    if reqline.first_chunk() == Some(b"GET ") {
+    if &reqline[..4] == b"GET " {
         reqline.advance(4);
         method = Method::GET;
-    } else if reqline.first_chunk() == Some(b"POST ") {
+    } else if &reqline[..5] == b"POST " {
         reqline.advance(5);
         method = Method::POST;
     } else {
@@ -89,14 +92,16 @@ pub fn poll_request(
     let mut content = None;
 
     for &hdr_index in headers.as_slice() {
-        let mut line_buf = unsafe { read_buffer.split_to_unchecked(hdr_index as usize) };
-        line_buf.truncate(line_buf.len() - 2);
-        let mut line = line_buf.as_mut_slice();
+        // SAFETY: `hdr_index` is in bounds, see poll headers loop above
+        let mut line = unsafe { read_buffer.split_to_unchecked(hdr_index as usize) };
+        line.truncate(line.len() - 2);
+        let mut line_ref = line.as_mut_slice();
         let mut hash = matches::BASIS_32;
 
-        // look for ': ' separator while hashing
+        // look for ':' separator while hashing and validating
         loop {
-            let Some((byte_mut, rest)) = line.split_first_mut() else {
+            let Some((byte_mut, rest)) = line_ref.split_first_mut() else {
+                // no ':' found
                 return Ready(Err(P::InvalidSeparator.into()));
             };
             let byte = matches::HEADER_NAME[*byte_mut as usize];
@@ -104,93 +109,92 @@ pub fn poll_request(
             if byte & 128 == 0 {
                 *byte_mut = byte;
                 hash = matches::PRIME_32.wrapping_mul(hash ^ byte as u32);
-                line = rest;
+                line_ref = rest;
             } else {
-                // rest.split_first_mut()
                 if *byte_mut != b':' {
                     return Ready(Err(P::InvalidSeparator.into()));
                 };
-                line = rest;
+                line_ref = rest;
                 break
             }
         }
 
-        // skip whitespaces
-        while let Some(lead) = line.first() {
-            if *lead == b' ' {
-                line = &mut line[1..];
-            } else {
-                break;
-            }
-        }
-
-        let line_len = unsafe { line.as_ptr().offset_from_unsigned(line_buf.as_ptr()) };
-        let mut value = line_buf;
-
-        unsafe { std::hint::assert_unchecked(line_len < value.len()) };
-
-        let hash = hash;
-        let name = lookup::request_header(hash, &value[..line_len - 2]);
-
-        let name = if let Some(name) = name {
-            // contant header
-            value.advance(line_len);
-
-            const HOST: u32 = matches::hash_32(b"host");
-            const CONTENT_LENGTH: u32 = matches::hash_32(b"content-length");
-            const TRANSFER_ENCODING: u32 = matches::hash_32(b"transfer-encoding");
-            const CONNECTION: u32 = matches::hash_32(b"connection");
-
-            match hash {
-                HOST => {
-                    if host.is_some() {
-                        return Ready(Err(E::InvalidRepresentation));
-                    }
-                    host = Some(Host::from_bytes(value.clone())?);
-                }
-                CONTENT_LENGTH => {
-                    if content.is_some() {
-                        return Ready(Err(E::InvalidRepresentation));
-                    }
-                    if value.len() > 16 {
-                        return Ready(Err(E::InvalidRepresentation));
-                    }
-                    let Some(content_len) = wrapping_atou(&value) else {
-                        return Ready(Err(E::InvalidRepresentation));
-                    };
-                    content = Some(ContentKind::ContentLength(content_len));
-                }
-                TRANSFER_ENCODING => {
-                    if content.is_some() {
-                        return Ready(Err(E::InvalidRepresentation));
-                    }
-                    // TODO: support compressed transfer-encodings
-                    if &value != b"chunked" {
-                        return Ready(Err(E::UnsupportedCodings));
-                    }
-                    content = Some(ContentKind::Chunked);
-                }
-                CONNECTION => {
-                    session.keep_alive = match value.as_slice() {
-                        b"keep-alive" => true,
-                        b"close" => false,
-                        _ => return Ready(Err(E::InvalidConnectionOption)),
-                    };
-                }
-                _ => {}
-            };
-
+        // SAFETY:
+        // - `line_ref` is subset of `line`
+        // - `-1` is the `:`
+        let name_ref = unsafe {
+            let name_len = line_ref.as_ptr().offset_from_unsigned(line.as_ptr()) - 1;
+            line.get_unchecked(..name_len)
+        };
+        let name = if let Some(name) = lookup::request_header(hash, name_ref) {
+            // using static header name, no need to split the Bytes
+            // SAFETY: `line.len() >= name_ref.len()`
+            unsafe { line.advance_unchecked(name_ref.len()) };
             name
         } else {
-            let mut name = value.split_to(line_len);
-            name.truncate(name.len() - 2);
-
-            // SAFETY: checks previously also ensure valid ASCII
-            unsafe { HeaderName::from_bytes_unchecked(name.freeze()) }
+            // arbitrary header name, split the Bytes
+            unsafe {
+                // SAFETY: `line.len() >= name_ref.len()`
+                let name = line.split_to_unchecked(name_ref.len());
+                // SAFETY: checks in previous loop ensure valid header name
+                HeaderName::from_bytes_unchecked(name.freeze())
+            }
         };
 
+        debug_assert_eq!(line.first(), Some(&b':'));
+        unsafe { line.advance_unchecked(1) };
 
-        let value = HeaderValue::from_bytes(value.freeze())?;
+        // separator may contains whitespace
+        while line.first() == Some(&b' ') {
+            line.advance(1);
+        }
+        let value = line.freeze();
+
+        const HOST: u32 = matches::hash_32(b"host");
+        const CONTENT_LENGTH: u32 = matches::hash_32(b"content-length");
+        const TRANSFER_ENCODING: u32 = matches::hash_32(b"transfer-encoding");
+        const CONNECTION: u32 = matches::hash_32(b"connection");
+
+        match hash {
+            HOST => {
+                if host.is_some() {
+                    return Ready(Err(E::InvalidRepresentation));
+                }
+                host = Some(Host::from_bytes(value.clone())?);
+            }
+            CONTENT_LENGTH => {
+                if content.is_some() {
+                    return Ready(Err(E::InvalidRepresentation));
+                }
+                if value.len() > 16 {
+                    return Ready(Err(E::InvalidRepresentation));
+                }
+                let Some(content_len) = wrapping_atou(&value) else {
+                    return Ready(Err(E::InvalidRepresentation));
+                };
+                content = Some(ContentKind::ContentLength(content_len));
+            }
+            TRANSFER_ENCODING => {
+                if content.is_some() {
+                    return Ready(Err(E::InvalidRepresentation));
+                }
+                // TODO: support compressed transfer-encodings
+                if &value != b"chunked" {
+                    return Ready(Err(E::UnsupportedCodings));
+                }
+                content = Some(ContentKind::Chunked);
+            }
+            CONNECTION => {
+                session.keep_alive = match value.as_slice() {
+                    b"keep-alive" => true,
+                    b"close" => false,
+                    _ => return Ready(Err(E::InvalidConnectionOption)),
+                };
+            }
+            _ => {}
+        };
+
+        let value = HeaderValue::from_bytes(value)?;
         let field = HeaderField::with_hash(name, value, hash);
         let _ = session.headers.try_append_field(field);
     }
