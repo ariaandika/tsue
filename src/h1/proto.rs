@@ -199,6 +199,9 @@ pub fn poll_request(
         let _ = session.headers.try_append_field(field);
     }
 
+    debug_assert_eq!(read_buffer.first_chunk(), Some(b"\r\n"));
+    unsafe { read_buffer.advance_unchecked(2) };
+
     // ===== Target URI =====
 
     let Some(host) = host else {
