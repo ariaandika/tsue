@@ -1,100 +1,114 @@
+use std::io;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Poll, ready};
 use tcio::io::{AsyncRead, AsyncWrite};
 
-pub use driver::Driver;
-pub use listener::Listener;
+use crate::h1;
+use crate::service::HttpService;
 
-pub type Http1Server<L, S> = Server<L, S, driver::Http1>;
+// ===== Server =====
 
 #[derive(Debug)]
-pub struct Server<L, S, D> {
-    listener: L,
+pub struct Server<S, L, D> {
     service: S,
+    listener: L,
     _p: PhantomData<D>,
 }
 
-impl<L, S, D> Server<L, S, D> {
+pub type Http1Server<S, L> = Server<S, L, Http1>;
+
+impl<S, L, D> Server<S, L, D> {
     #[inline]
-    pub fn new(listener: L, service: S) -> Self {
+    pub fn new(service: S, listener: L) -> Self {
         Self {
-            listener,
             service,
+            listener,
             _p: PhantomData,
         }
     }
 }
 
-impl<L, S, D> Future for Server<L, S, D>
+impl<S, L, D> Future for Server<S, L, D>
 where
-    L: Listener<Stream: AsyncRead + AsyncWrite>,
     S: Send + Sync + Clone + 'static,
-    D: Driver<L::Stream, S, Future: Future<Output: Send> + Send + 'static>,
+    L: Listener<Stream: AsyncRead + AsyncWrite>,
+    D: Driver<S, L::Stream, Future: Future<Output: Send> + Send + 'static>,
 {
     type Output = ();
 
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context) -> Poll<Self::Output> {
+        let me = unsafe { self.get_unchecked_mut() };
+        // SAFETY: `self` is pinned
+        let mut listener = unsafe { Pin::new_unchecked(&mut me.listener) };
+
         loop {
-            let (io, _) = match ready!(self.listener.poll_accept(cx)) {
+            let (io, _) = match ready!(listener.as_mut().poll_accept(cx)) {
                 Ok(ok) => ok,
                 Err(err) => {
-                    eprintln!("{err}");
+                    D::on_stream_error(err);
                     continue;
                 }
             };
 
-            tokio::spawn(D::call(self.service.clone(), io));
+            tokio::spawn(D::call(me.service.clone(), io));
         }
     }
 }
 
-pub mod driver {
-    use crate::{h1::Connection, service::HttpService};
+// ===== trait Driver =====
 
-    pub trait Driver<IO, S> {
-        type Future;
+pub trait Driver<S, IO> {
+    type Future;
 
-        fn call(service: S, io: IO) -> Self::Future;
-    }
+    fn call(service: S, io: IO) -> Self::Future;
 
-    #[derive(Debug)]
-    pub struct Http1;
-
-    impl<IO, S, B> Driver<IO, S> for Http1
-    where
-        S: HttpService<ResBody = B>,
-        B: crate::body::Body,
-        B::Error: std::error::Error + Send + Sync + 'static,
-    {
-        type Future = Connection<S, IO>;
-
-        #[inline]
-        fn call(service: S, io: IO) -> Self::Future {
-            Connection::new(service, io)
-        }
+    #[inline]
+    fn on_stream_error(err: io::Error) {
+        eprintln!("{err}");
     }
 }
+
+// ===== Http1 Driver =====
+
+#[derive(Debug)]
+pub struct Http1;
+
+impl<S, IO> Driver<S, IO> for Http1
+where
+    S: HttpService,
+{
+    type Future = h1::Connection<S, IO>;
+
+    #[inline]
+    fn call(service: S, io: IO) -> Self::Future {
+        h1::Connection::new(service, io)
+    }
+}
+
+// ===== Listener =====
+
+pub trait Listener {
+    type Stream: AsyncRead + AsyncWrite;
+
+    type Addr;
+
+    fn poll_accept(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context,
+    ) -> Poll<io::Result<(Self::Stream, Self::Addr)>>;
+}
+
+// ===== impl Listener =====
 
 mod listener {
-    use std::{io, net::SocketAddr, task::Poll};
-    use tcio::io::{AsyncRead, AsyncWrite};
+    use std::{io, net::SocketAddr, pin::Pin, task::Poll};
     use tokio::net::{TcpListener, TcpStream};
+    use super::Listener;
 
     #[cfg(unix)]
     use tokio::net::{UnixListener, UnixStream};
-
-    pub trait Listener {
-        type Stream: AsyncRead + AsyncWrite;
-
-        type Addr;
-
-        fn poll_accept(
-            &self,
-            cx: &mut std::task::Context,
-        ) -> Poll<io::Result<(Self::Stream, Self::Addr)>>;
-    }
 
     impl Listener for TcpListener {
         type Stream = TcpStream;
@@ -103,10 +117,10 @@ mod listener {
 
         #[inline]
         fn poll_accept(
-            &self,
+            self: Pin<&mut Self>,
             cx: &mut std::task::Context,
         ) -> Poll<io::Result<(Self::Stream, Self::Addr)>> {
-            TcpListener::poll_accept(self, cx)
+            TcpListener::poll_accept(&self, cx)
         }
     }
 
@@ -118,10 +132,10 @@ mod listener {
 
         #[inline]
         fn poll_accept(
-            &self,
+            self: Pin<&mut Self>,
             cx: &mut std::task::Context,
         ) -> Poll<io::Result<(Self::Stream, Self::Addr)>> {
-            UnixListener::poll_accept(self, cx)
+            UnixListener::poll_accept(&self, cx)
         }
     }
 }

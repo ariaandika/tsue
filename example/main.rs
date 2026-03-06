@@ -19,7 +19,7 @@ fn main() -> io::Result<()> {
 
         println!("listening in {}",io.local_addr().unwrap());
 
-        Http1Server::new(io, from_fn(handle)).await;
+        Http1Server::new(from_fn(handle), io).await;
         Ok(())
     })
 }
