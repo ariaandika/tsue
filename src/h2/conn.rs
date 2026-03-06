@@ -4,6 +4,7 @@ use tcio::bytes::BytesMut;
 use tcio::io::{AsyncRead, AsyncWrite};
 
 use crate::h2::state::{FrameResult, H2State};
+use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -11,12 +12,14 @@ const DEFAULT_BUFFER_CAP: usize = 512;
 
 /// HTTP/2 Connection.
 #[derive(Debug)]
-pub struct Connection<IO> {
-    io: IO,
+pub struct Connection<S, IO> {
     read_buffer: BytesMut,
     write_buffer: BytesMut,
     state: H2State,
     phase: Phase,
+    #[allow(unused, reason = "TODO")]
+    service: S,
+    io: IO,
 }
 
 #[derive(Debug)]
@@ -34,20 +37,22 @@ type ConnectionProject<'a, IO> = (
     &'a mut Phase,
 );
 
-impl<IO> Connection<IO> {
-    pub fn new(io: IO) -> Self {
+impl<S, IO> Connection<S, IO> {
+    pub fn new(service: S, io: IO) -> Self {
         Self {
-            io,
             read_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             write_buffer: BytesMut::with_capacity(DEFAULT_BUFFER_CAP),
             state: H2State::new(),
             phase: Phase::Handshake,
+            service,
+            io,
         }
     }
 }
 
-impl<IO> Connection<IO>
+impl<S, IO> Connection<S, IO>
 where
+    S: HttpService,
     IO: AsyncRead + AsyncWrite,
 {
     fn try_poll(
@@ -81,8 +86,9 @@ where
     }
 }
 
-impl<IO> Future for Connection<IO>
+impl<S, IO> Future for Connection<S, IO>
 where
+    S: HttpService,
     IO: AsyncRead + AsyncWrite,
 {
     type Output = ();
@@ -107,7 +113,7 @@ where
 
 // ===== Projection =====
 
-impl<IO> Connection<IO> {
+impl<S, IO> Connection<S, IO> {
     fn project(self: Pin<&mut Self>) -> ConnectionProject<'_, IO> {
         // SAFETY: self is pinned, no custom Drop and Unpin
         unsafe {
