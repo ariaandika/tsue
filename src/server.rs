@@ -45,7 +45,7 @@ where
                 }
             };
 
-            tokio::spawn(D::call(io, self.service.clone()));
+            tokio::spawn(D::call(self.service.clone(), io));
         }
     }
 }
@@ -56,7 +56,7 @@ pub mod driver {
     pub trait Driver<IO, S> {
         type Future;
 
-        fn call(io: IO, service: S) -> Self::Future;
+        fn call(service: S, io: IO) -> Self::Future;
     }
 
     #[derive(Debug)]
@@ -71,7 +71,7 @@ pub mod driver {
         type Future = Connection<S, IO>;
 
         #[inline]
-        fn call(io: IO, service: S) -> Self::Future {
+        fn call(service: S, io: IO) -> Self::Future {
             Connection::new(service, io)
         }
     }
