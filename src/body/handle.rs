@@ -33,4 +33,11 @@ impl BodyHandle {
 
         Poll::Ready(Some(Ok(data)))
     }
+
+    pub const fn is_end_stream(&self) -> bool {
+        match self.size_hint {
+            Some(len) => len == 0,
+            None => false,
+        }
+    }
 }

@@ -1,15 +1,13 @@
 use std::task::Poll;
 use tcio::bytes::Bytes;
 
-use crate::body::Collect;
+use crate::body::{Body, Collect};
 use crate::body::error::ReadError;
 use crate::body::handle::BodyHandle;
 use crate::body::shared::RecvHandle;
 
 /// [`Body`] implemenation for HTTP server.
-///
-/// [`Body`]: super::Body
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Incoming {
     repr: Repr,
 }
@@ -21,14 +19,16 @@ enum Repr {
     Handle(BodyHandle),
 }
 
-impl Default for Repr {
+// ===== Constructor =====
+
+impl Default for Incoming {
     #[inline]
     fn default() -> Self {
-        Repr::Bytes(Bytes::new())
+        Self {
+            repr: Repr::Bytes(Bytes::new()),
+        }
     }
 }
-
-// ===== Constructor =====
 
 impl Incoming {
     /// Create an exact size [`Body`].
@@ -104,6 +104,38 @@ impl Incoming {
                 Some(Ok(std::mem::take(b)))
             }),
             Repr::Handle(handle) => handle.poll_read(cx),
+        }
+    }
+}
+
+// ===== impl Body =====
+
+impl Body for Incoming {
+    type Data = Bytes;
+
+    type Error = ReadError;
+
+    fn poll_data(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context,
+    ) -> std::task::Poll<Option<Result<Self::Data, Self::Error>>> {
+        self.get_mut().poll_read(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        match &self.repr {
+            Repr::Bytes(b) => b.is_empty(),
+            Repr::Handle(b) => b.is_end_stream(),
+        }
+    }
+
+    fn size_hint(&self) -> (u64, Option<u64>) {
+        match &self.repr {
+            Repr::Bytes(b) => (b.len() as u64, Some(b.len() as u64)),
+            Repr::Handle(b) => {
+                let size_hint = b.size_hint();
+                (size_hint.unwrap_or_default(), size_hint)
+            }
         }
     }
 }
