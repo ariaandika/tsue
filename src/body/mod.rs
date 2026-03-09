@@ -3,12 +3,11 @@
 //! ## Core
 //!
 //! - [`Body`] the trait that represent a message body
-//! - [`Frame`] a single frame of a message body
 //!
 //! ## Implementation
 //!
 //! - [`Incoming`] streamed or buffered body
-//! - [`Full`] single chunk body
+//! - [`Full`] single chunk buffered body
 //!
 
 // === impl Body ===

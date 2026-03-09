@@ -5,7 +5,7 @@ use tcio::bytes::{Bytes, BytesMut};
 use crate::body::Incoming;
 use crate::body::error::{BodyError, ReadError};
 
-/// A future returned from [`Body::collect`], which buffer entire request body.
+/// A future returned from [`Incoming::collect`], which buffer entire request body.
 #[derive(Debug)]
 pub struct Collect {
     body: Incoming,

@@ -1,8 +1,6 @@
 //! HTTP Response
-use crate::{
-    headers::HeaderMap,
-    http::{Extensions, StatusCode, Version},
-};
+use crate::headers::HeaderMap;
+use crate::http::{Extensions, StatusCode, Version};
 
 /// HTTP Response Parts.
 #[derive(Debug, Default)]
@@ -20,7 +18,8 @@ pub struct Response<T> {
     body: T,
 }
 
-/// Constructor
+// ===== Constructor =====
+
 impl<T> Response<T> {
     /// Create [`Response`] from [`Parts`] and body.
     #[inline]
@@ -59,13 +58,13 @@ impl<T> Response<T> {
         headers_mut() -> HeaderMap;
     }
 
-    /// Returns shared reference to [`Incoming`].
+    /// Returns shared reference to response body.
     #[inline]
     pub fn body(&self) -> &T {
         &self.body
     }
 
-    /// Returns mutable reference to [`Incoming`].
+    /// Returns mutable reference to response body.
     #[inline]
     pub fn body_mut(&mut self) -> &mut T {
         &mut self.body
@@ -80,7 +79,7 @@ impl<T> Response<T> {
         (self.parts, self.body)
     }
 
-    /// Destruct response into [`Incoming`].
+    /// Destruct response into response body.
     #[inline]
     pub fn into_body(self) -> T {
         self.body

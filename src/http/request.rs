@@ -1,9 +1,7 @@
 //! HTTP Request
-use crate::{
-    headers::HeaderMap,
-    http::{Extensions, Method, Version},
-    uri::{Host, HttpScheme, HttpUri, Path},
-};
+use crate::headers::HeaderMap;
+use crate::http::{Extensions, Method, Version};
+use crate::uri::{Host, HttpScheme, HttpUri, Path};
 
 /// HTTP Request Parts.
 #[derive(Debug, Clone)]
@@ -82,13 +80,13 @@ impl<T> Request<T> {
         headers_mut() -> HeaderMap;
     }
 
-    /// Returns shared reference to body.
+    /// Returns shared reference to request body.
     #[inline]
     pub fn body(&self) -> &T {
         &self.body
     }
 
-    /// Returns mutable reference to body.
+    /// Returns mutable reference to request body.
     #[inline]
     pub fn body_mut(&mut self) -> &mut T {
         &mut self.body
@@ -103,7 +101,7 @@ impl<T> Request<T> {
         (self.parts, self.body)
     }
 
-    /// Destruct request into [`Body`].
+    /// Destruct request into request body.
     #[inline]
     pub fn into_body(self) -> T {
         self.body

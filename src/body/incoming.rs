@@ -68,7 +68,7 @@ impl Incoming {
     /// Specifically, `size_hint()` returns a tuple where the first element is the lower bound, and
     /// the second element is the upper bound.
     ///
-    /// The second half of the tuple that is returned is an [Option<usize>]. A [`None`] here means
+    /// The second half of the tuple that is returned is an [`Option<usize>`]. A [`None`] here means
     /// that either there is no known upper bound, or the upper bound is larger than [`usize`].
     pub fn size_hint(&self) -> (u64, Option<u64>) {
         match &self.repr {

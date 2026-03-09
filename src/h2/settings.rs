@@ -56,7 +56,7 @@ impl Id {
 }
 
 impl Id {
-    /// Creates [`SettingId`] from its integer identifier.
+    /// Creates settings [`Id`] from its integer identifier.
     ///
     /// An endpoint that receives a SETTINGS frame with any unknown or unsupported identifier MUST
     /// ignore that setting.
