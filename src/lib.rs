@@ -43,7 +43,8 @@
 
 mod log;
 mod matches;
-pub mod common;
+
+pub use tcio::bytes;
 
 // definitions
 pub mod uri;
