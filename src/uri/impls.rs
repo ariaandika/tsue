@@ -1,6 +1,6 @@
 use std::slice::from_raw_parts;
 
-use super::{Authority, Host, Path, Scheme, Uri, matches};
+use super::{Authority, Host, Path, Scheme, Uri};
 
 impl Scheme {
     /// Extracts a string slice containing the scheme.
@@ -21,7 +21,7 @@ impl Scheme {
 
 impl Authority {
     const fn split_userinfo(&self) -> Option<(&[u8], &[u8])> {
-        matches::split_at_sign(self.value.as_slice())
+        split_at_sign(self.value.as_slice())
     }
 
     const fn split_port(&self) -> Option<(&[u8], &[u8])> {
@@ -29,7 +29,7 @@ impl Authority {
             Some((_, host)) => host,
             None => self.value.as_slice(),
         };
-        matches::split_port(host)
+        split_port(host)
     }
 
     /// Returns the authority host.
@@ -62,7 +62,7 @@ impl Authority {
             Some((_, host)) => host,
             None => self.value.as_slice(),
         };
-        let hostname = match matches::split_port(host) {
+        let hostname = match split_port(host) {
             Some((hostname, _)) => hostname,
             None => host,
         };
@@ -113,7 +113,7 @@ impl Authority {
 
 impl Host {
     const fn split_port(&self) -> Option<(&[u8], &[u8])> {
-        matches::split_port(self.value.as_slice())
+        split_port(self.value.as_slice())
     }
 
     /// Returns the entire host.
@@ -411,3 +411,109 @@ const fn atou(mut bytes: &[u8]) -> u16 {
     o
 }
 
+/// Split '@'.
+pub const fn split_at_sign(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
+    const BLOCK: usize = size_of::<usize>();
+    const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
+    const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
+    const AT: usize = usize::from_ne_bytes([b'@'; BLOCK]);
+
+    let mut state: &[u8] = bytes;
+
+    while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
+        let block = usize::from_ne_bytes(*chunk);
+
+        // '@'
+        let is_at = (block ^ AT).wrapping_sub(LSB);
+
+        let result = is_at & MSB;
+        if result != 0 {
+            let nth = (result.trailing_zeros() / 8) as usize;
+            unsafe {
+                let nth_ptr = state.as_ptr().add(nth);
+                let end_ptr = bytes.as_ptr().add(bytes.len());
+
+                let start = bytes.as_ptr();
+                let start_len = nth_ptr.offset_from_unsigned(start);
+
+                // skip the '@'
+                let end = nth_ptr.add(1);
+                let end_len = end_ptr.offset_from_unsigned(end);
+
+                return Some((
+                    from_raw_parts(start, start_len),
+                    from_raw_parts(end, end_len),
+                ))
+            };
+        }
+
+        state = rest;
+    }
+
+    while let [byte, rest @ ..] = state {
+        if *byte == b'@' {
+            let start = bytes.as_ptr();
+            let lead = unsafe {
+                from_raw_parts(start,state.as_ptr().offset_from_unsigned(start))
+            };
+            return Some((lead,rest));
+        }
+
+        state = rest;
+    }
+
+    None
+}
+
+#[test]
+fn test_split_at_sign() {
+    assert!(split_at_sign(b"example.com").is_none());
+
+    let (left, right) = split_at_sign(b"user:passwd@example.com").unwrap();
+    assert_eq!(left, b"user:passwd");
+    assert_eq!(right, b"example.com");
+
+    let (left, right) = split_at_sign(b"a@b").unwrap();
+    assert_eq!(left, b"a");
+    assert_eq!(right, b"b");
+
+    let (left, right) = split_at_sign(b"user:passwd@b").unwrap();
+    assert_eq!(left, b"user:passwd");
+    assert_eq!(right, b"b");
+}
+
+/// Split ':'.
+const fn split_port(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
+    let mut state: &[u8] = bytes;
+
+    while let [lead @ .., byte] = state {
+        if !byte.is_ascii_digit() {
+            if *byte == b':' {
+                unsafe {
+                    let mid_ptr = bytes.as_ptr().add(state.len());
+                    let len = bytes.len() - state.len();
+                    return Some((lead, from_raw_parts(mid_ptr, len)));
+                };
+            } else {
+                return None;
+            }
+        }
+        state = lead;
+    }
+
+    None
+}
+
+#[test]
+fn test_split_port() {
+    assert!(split_port(b"example.com").is_none());
+    assert!(split_port(b"[a2f::1]").is_none());
+
+    let (left, right) = split_port(b"example.com:443").unwrap();
+    assert_eq!(left, b"example.com");
+    assert_eq!(right, b"443");
+
+    let (left, right) = split_port(b"[a2f::1]:443").unwrap();
+    assert_eq!(left, b"[a2f::1]");
+    assert_eq!(right, b"443");
+}

@@ -48,7 +48,6 @@
 //! All API does not Decode or Encode percent encoding by default.
 use tcio::bytes::Bytes;
 
-mod matches;
 mod parser;
 mod impls;
 mod http;

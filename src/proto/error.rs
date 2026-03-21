@@ -45,7 +45,7 @@ impl From<UriError> for ParseError {
     fn from(value: UriError) -> Self {
         use crate::uri::UriError as Error;
         match value {
-            Error::TooLong => Self::TooLong,
+            Error::ExcessiveBytes => Self::TooLong,
             Error::InvalidScheme | Error::InvalidAuthority | Error::InvalidPath => {
                 Self::InvalidTarget
             }

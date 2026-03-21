@@ -3,7 +3,7 @@
 #[derive(Clone)]
 pub enum UriError {
     /// Bytes length is too large.
-    TooLong,
+    ExcessiveBytes,
     InvalidScheme,
     InvalidAuthority,
     InvalidPath,
@@ -34,7 +34,7 @@ macro_rules! gen_error {
 }
 
 gen_error! {
-    TooLong => "URI too long",
+    ExcessiveBytes => "URI too long",
     InvalidScheme => "invalid scheme",
     InvalidAuthority => "invalid authority",
     InvalidPath => "invalid path",
