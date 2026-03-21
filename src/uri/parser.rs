@@ -328,17 +328,11 @@ const fn validate_authority(bytes: &[u8]) -> Option<&[u8]> {
 
     let mut state = bytes;
 
-    let delim = if *prefix == b'[' {
-        let Some(remain) = validate_ip_literal(bytes) else {
+    if *prefix == b'[' {
+        let Some(rest) = validate_ip_literal(bytes) else {
             return None;
         };
-        match remain.split_first() {
-            Some((delim, rest)) => {
-                state = rest;
-                *delim
-            },
-            None => return Some(remain)
-        }
+        state = rest;
     } else {
         // fast path for empty authority in hier-part
         if is_path_delim(*prefix) {
@@ -393,22 +387,30 @@ const fn validate_authority(bytes: &[u8]) -> Option<&[u8]> {
             return Some(state)
         }
 
-        loop {
-            let [byte, rest @ ..] = state else {
-                // with userinfo, without port
-                return Some(state);
-            };
-            state = rest;
-            if !is_regname(*byte) {
-                delim = *byte;
-                break;
+        if let [prefix, ..] = state && *prefix == b'[' {
+            match validate_ip_literal(state) {
+                Some(rest) => state = rest,
+                None => return None,
+            }
+        } else {
+            loop {
+                let [byte, rest @ ..] = state else {
+                    // with userinfo, without port
+                    return Some(state);
+                };
+                if !is_regname(*byte) {
+                    break;
+                }
+                state = rest;
             }
         }
+    }
 
-        delim
+    let Some((delim, mut state)) = state.split_first() else {
+        return Some(state);
     };
 
-    if delim != b':' {
+    if *delim != b':' {
         // with userinfo, without port, followed by other component
         return Some(state)
     }
