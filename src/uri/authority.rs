@@ -5,7 +5,9 @@ use crate::uri::{UriError, matches};
 
 /// URI Authority.
 ///
-/// The authority component of a URI.
+/// The [authority] component of a URI.
+///
+/// [authority]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2>
 ///
 /// ```not_rust
 /// foo://username@example.com:8042/over/there?name=ferret
@@ -14,13 +16,18 @@ use crate::uri::{UriError, matches};
 ///               authority
 /// ```
 ///
-/// This API follows the [RFC3986].
+/// Authority contains a host, and optional userinfo and port.
 ///
-/// [RFC3986]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2>
+/// ```not_rust
+/// username@example.com:8042
+/// \______/ \_________/ \__/
+///    |          |       |
+/// userinfo    host     port
+/// ```
 ///
 /// # Example
 ///
-/// To create [`Authority`] use one of the `Authority::from_*` method:
+/// To create `Authority` use one of the `Authority::from_*` method:
 ///
 /// ```
 /// use tsue::uri::Authority;
@@ -169,28 +176,26 @@ impl Authority {
 
 /// URI Host.
 ///
-/// The host component of a URI.
+/// The [host] component of a URI.
 ///
-/// Host is authority without userinfo.
+/// [host]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2.2>
 ///
 /// ```not_rust
 /// foo://username@example.com:8042/over/there?name=ferret
-///                \______________/
-///                       |
-///                     host
+///                \_________/
+///                     |
+///                   host
 /// ```
 ///
-/// This API follows the [RFC3986].
-///
-/// [RFC3986]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2.2>
+/// Host can be a registered domain name or an ip address.
 ///
 /// # Example
 ///
-/// To create [`Host`] use one of the `Host::from_*` method:
+/// To create `Host` use one of the `Host::from_*` method:
 ///
 /// ```
 /// use tsue::uri::Host;
-/// let authority = Host::from_bytes("example.com:8042").unwrap();
+/// let authority = Host::from_bytes("example.com").unwrap();
 /// assert_eq!(authority.hostname(), "example.com");
 /// assert_eq!(authority.port(), Some(8042));
 /// ```

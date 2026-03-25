@@ -47,8 +47,6 @@ impl HttpScheme {
 ///  scheme    authority     path        query
 /// ```
 ///
-/// [`HttpUri`] used to represent HTTP scheme URI.
-///
 /// ```rust
 /// use tsue::uri::HttpUri;
 ///

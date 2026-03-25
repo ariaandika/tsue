@@ -1,11 +1,13 @@
-
-/// A possible error value when parsing URI.
-#[derive(Clone)]
+/// An error that can occur during URI validation.
+#[derive(Debug, Clone)]
 pub enum UriError {
-    /// Bytes length is too large.
+    /// Excessive bytes length.
     ExcessiveBytes,
+    /// Invalid scheme.
     InvalidScheme,
+    /// Invalid authority.
     InvalidAuthority,
+    /// Invalid path.
     InvalidPath,
 }
 
@@ -26,7 +28,7 @@ macro_rules! gen_error {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 use UriError::*;
                 match self {
-                    $($variant => f.write_str($msg),)*
+                    $($variant => $msg.fmt(f),)*
                 }
             }
         }
@@ -34,16 +36,10 @@ macro_rules! gen_error {
 }
 
 gen_error! {
-    ExcessiveBytes => "URI too long",
+    ExcessiveBytes => "excessive bytes length",
     InvalidScheme => "invalid scheme",
     InvalidAuthority => "invalid authority",
     InvalidPath => "invalid path",
 }
 
 impl std::error::Error for UriError { }
-
-impl std::fmt::Debug for UriError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "\"{self}\"")
-    }
-}

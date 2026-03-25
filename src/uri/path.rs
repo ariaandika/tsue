@@ -4,31 +4,28 @@ use crate::uri::{UriError, matches};
 
 /// URI Path.
 ///
-/// The path and query component of a URI.
+/// The [path] component of a URI.
+///
+/// [path]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.3>
 ///
 /// ```not_rust
 ///   foo://example.com:8042/over/there?name=ferret
-///                         \_________/ \_________/
-///                             |            |
-///                            path        query
+///                         \_________/
+///                             |
+///                            path
 ///        _____________________|__
 ///       /                        \
 ///   urn:example:animal:ferret:nose
 /// ```
 ///
-/// This API follows the [RFC3986].
-///
-/// [RFC3986]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.3>
-///
 /// # Example
 ///
-/// To create [`Path`] use one of the `Path::from_*` method:
+/// To create `Path` use one of the `Path::from_*` method:
 ///
 /// ```
 /// use tsue::uri::Path;
-/// let path = Path::from_bytes("/over/there?name=ferret").unwrap();
-/// assert_eq!(path.path(), "/over/there");
-/// assert_eq!(path.query(), Some("name=ferret"));
+/// let path = Path::from_bytes("/over/there").unwrap();
+/// assert_eq!(path.as_str(), "/over/there");
 /// ```
 #[derive(Clone)]
 pub struct Path {
@@ -174,7 +171,7 @@ pub const fn is_path_delim(byte: u8) -> bool {
 }
 
 matches::ascii_lookup_table! {
-    /// pchar = unreserved / pct-encoded / sub-delims / ":" / "@"
+    /// `pchar = unreserved / pct-encoded / sub-delims / ":" / "@"`
     const fn is_pchar(byte: u8) -> bool {
         matches::unreserved(byte)
         || matches::pct_encoded(byte)
@@ -184,7 +181,7 @@ matches::ascii_lookup_table! {
 }
 
 matches::ascii_lookup_table! {
-    /// query = *( pchar / "/" / "?" )
+    /// `query = *( pchar / "/" / "?" )`
     const fn is_query(byte: u8) -> bool {
         is_pchar(byte)
         || matches!(byte, b'/' | b'?')
@@ -193,6 +190,7 @@ matches::ascii_lookup_table! {
 
 /// This allows for query component.
 ///
+/// ```not_rust
 /// path          = path-abempty    ; begins with "/" or is empty
 ///               / path-absolute   ; begins with "/" but not "//"
 ///               / path-noscheme   ; begins with a non-colon segment
@@ -211,6 +209,7 @@ matches::ascii_lookup_table! {
 ///               ; non-zero-length segment without any colon ":"
 ///
 /// pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
+/// ```
 const fn validate_path(mut bytes: &[u8]) -> Result<(u16, &[u8]), UriError> {
     if bytes.is_empty() {
         return Ok((0, &[]));

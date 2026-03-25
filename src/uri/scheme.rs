@@ -4,7 +4,9 @@ use crate::uri::UriError;
 
 /// URI Scheme.
 ///
-/// The scheme component of a URI.
+/// The [scheme] component of a URI.
+///
+/// [scheme]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.1>
 ///
 /// ```not_rust
 ///   foo://example.com:8042/over/there?name=ferret
@@ -16,13 +18,9 @@ use crate::uri::UriError;
 ///   urn:example:animal:ferret:nose
 /// ```
 ///
-/// This API follows the [RFC3986].
-///
-/// [RFC3986]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.1>
-///
 /// # Example
 ///
-/// To create [`Scheme`] use one of the `Scheme::from_*` method:
+/// To create `Scheme` use one of the `Scheme::from_*` method:
 ///
 /// ```
 /// use tsue::uri::Scheme;

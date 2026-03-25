@@ -16,8 +16,6 @@
 //!   urn:example:animal:ferret:nose
 //! ```
 //!
-//! [`Uri`] is used to represent generic scheme independent URI.
-//!
 //! ```
 //! use tsue::uri::Uri;
 //!

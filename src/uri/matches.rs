@@ -2,18 +2,20 @@ use std::slice::from_raw_parts;
 
 pub use crate::matches::*;
 
-/// pct-encoded = "%" HEXDIG HEXDIG
+/// `pct-encoded = "%" HEXDIG HEXDIG`
 pub const fn pct_encoded(byte: u8) -> bool {
     byte == b'%' || byte.is_ascii_hexdigit()
 }
 
-/// unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+/// `unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"`
 pub const fn unreserved(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
 }
 
+/// ```not_rust
 /// sub-delims = "!" / "$" / "&" / "'" / "(" / ")"
 ///            / "*" / "+" / "," / ";" / "="
+/// ```
 pub const fn sub_delims(byte: u8) -> bool {
     matches!(
         byte,
