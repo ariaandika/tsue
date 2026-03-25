@@ -46,9 +46,11 @@ impl From<UriError> for ParseError {
         use crate::uri::UriError as Error;
         match value {
             Error::ExcessiveBytes => Self::TooLong,
-            Error::InvalidScheme | Error::InvalidAuthority | Error::InvalidPath => {
-                Self::InvalidTarget
-            }
+            Error::InvalidScheme
+            | Error::InvalidAuthority
+            | Error::InvalidPath
+            | Error::InvalidHost
+            | Error::InvalidPort => Self::InvalidTarget,
         }
     }
 }

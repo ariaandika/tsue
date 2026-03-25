@@ -7,6 +7,10 @@ pub enum UriError {
     InvalidScheme,
     /// Invalid authority.
     InvalidAuthority,
+    /// Invalid host.
+    InvalidHost,
+    /// Invalid port.
+    InvalidPort,
     /// Invalid path.
     InvalidPath,
 }
@@ -39,6 +43,8 @@ gen_error! {
     ExcessiveBytes => "excessive bytes length",
     InvalidScheme => "invalid scheme",
     InvalidAuthority => "invalid authority",
+    InvalidHost => "invalid host",
+    InvalidPort => "invalid port",
     InvalidPath => "invalid path",
 }
 
