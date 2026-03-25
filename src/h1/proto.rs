@@ -253,7 +253,6 @@ pub fn poll_request(
         uri,
         version: crate::http::Version::HTTP_11,
         headers: mem::take(&mut session.headers),
-        extensions: crate::http::Extensions::new(),
     };
 
     let context = RequestContext {

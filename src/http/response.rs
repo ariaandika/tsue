@@ -1,6 +1,6 @@
 //! HTTP Response
 use crate::headers::HeaderMap;
-use crate::http::{Extensions, StatusCode, Version};
+use crate::http::{StatusCode, Version};
 
 /// HTTP Response Parts.
 #[derive(Debug, Default)]
@@ -8,7 +8,6 @@ pub struct Parts {
     pub version: Version,
     pub status: StatusCode,
     pub headers: HeaderMap,
-    pub extensions: Extensions,
 }
 
 /// HTTP Response.

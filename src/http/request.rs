@@ -1,6 +1,6 @@
 //! HTTP Request
 use crate::headers::HeaderMap;
-use crate::http::{Extensions, Method, Version};
+use crate::http::{Method, Version};
 use crate::uri::{Host, HttpScheme, HttpUri, Path};
 
 /// HTTP Request Parts.
@@ -10,7 +10,6 @@ pub struct Parts {
     pub uri: HttpUri,
     pub version: Version,
     pub headers: HeaderMap,
-    pub extensions: Extensions,
 }
 
 impl Default for Parts {
@@ -24,7 +23,6 @@ impl Default for Parts {
             ),
             version: <_>::default(),
             headers: <_>::default(),
-            extensions: <_>::default(),
         }
     }
 }
