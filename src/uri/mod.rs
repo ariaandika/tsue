@@ -46,7 +46,7 @@
 //! All API does not Decode or Encode percent encoding.
 mod matches;
 mod scheme;
-mod authority;
+pub(crate) mod authority;
 mod path;
 mod http;
 mod error;
