@@ -51,10 +51,11 @@ impl Authority {
     #[inline]
     pub const fn from_static(bytes: &'static [u8]) -> Self {
         match validate_authority(bytes) {
-            Some([]) => Self {
+            Ok([]) => Self {
                 value: Bytes::from_static(bytes),
             },
-            _ => UriError::InvalidAuthority.panic_const()
+            Ok(..) => UriError::InvalidAuthority.panic_const(),
+            Err(err) => err.panic_const(),
         }
     }
 
@@ -67,8 +68,9 @@ impl Authority {
     pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
         let value = bytes.into();
         match validate_authority(value.as_slice()) {
-            Some([]) => Ok(Self { value }),
-            _ => Err(UriError::InvalidAuthority)
+            Ok([]) => Ok(Self { value }),
+            Ok(..) => Err(UriError::InvalidAuthority),
+            Err(err) => Err(err)
         }
     }
 
@@ -80,10 +82,11 @@ impl Authority {
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
         match validate_authority(bytes.as_ref()) {
-            Some([]) => Ok(Self {
+            Ok([]) => Ok(Self {
                 value: Bytes::copy_from_slice(bytes.as_ref()),
             }),
-            _ => Err(UriError::InvalidAuthority),
+            Ok(..) => Err(UriError::InvalidAuthority),
+            Err(err) => Err(err)
         }
     }
 }
@@ -198,7 +201,7 @@ impl Host {
     pub const fn from_static(bytes: &'static [u8]) -> Self {
         match validate_host(bytes) {
             Some([]) => Self { value: Bytes::from_static(bytes) },
-            _ => UriError::InvalidAuthority.panic_const(),
+            _ => UriError::InvalidHost.panic_const(),
         }
     }
 
@@ -212,7 +215,7 @@ impl Host {
         let value = bytes.into();
         match validate_host(value.as_slice()) {
             Some([]) => Ok(Self { value }),
-            _ => Err(UriError::InvalidAuthority),
+            _ => Err(UriError::InvalidHost),
         }
     }
 
@@ -227,7 +230,7 @@ impl Host {
             Some([]) => Ok(Self {
                 value: Bytes::copy_from_slice(bytes.as_ref()),
             }),
-            _ => Err(UriError::InvalidAuthority),
+            _ => Err(UriError::InvalidHost),
         }
     }
 }
@@ -270,22 +273,22 @@ impl std::fmt::Display for Host {
 // ===== Validation =====
 
 /// `authority = [ userinfo "@" ] host [ ":" port ]`
-const fn validate_authority(bytes: &[u8]) -> Option<&[u8]> {
+const fn validate_authority(bytes: &[u8]) -> Result<&[u8], UriError> {
     let [prefix, ..] = bytes else {
-        return Some(bytes);
+        return Ok(bytes);
     };
 
     let mut state = bytes;
 
     if *prefix == b'[' {
         let Some(rest) = validate_ip_literal(bytes) else {
-            return None;
+            return Err(UriError::InvalidHost);
         };
         state = rest;
     } else {
         // fast path for empty authority in hier-part
         if path::is_path_delim(*prefix) {
-            return Some(bytes);
+            return Ok(bytes);
         }
 
         // userinfo or host
@@ -296,7 +299,7 @@ const fn validate_authority(bytes: &[u8]) -> Option<&[u8]> {
         let mut delim = loop {
             let [byte, rest @ ..] = state else {
                 // host only
-                return Some(state);
+                return Ok(state);
             };
             state = rest;
             if !is_regname(*byte) {
@@ -312,9 +315,9 @@ const fn validate_authority(bytes: &[u8]) -> Option<&[u8]> {
                 let [byte, rest @ ..] = state else {
                     // without userinfo, with port
                     return if is_port_ok {
-                        Some(state)
+                        Ok(state)
                     } else {
-                        None
+                        Err(UriError::InvalidPort)
                     }
                 };
 
@@ -333,19 +336,19 @@ const fn validate_authority(bytes: &[u8]) -> Option<&[u8]> {
 
         if delim != b'@' {
             // host only, followed by other component
-            return Some(state)
+            return Ok(state)
         }
 
         if let [prefix, ..] = state && *prefix == b'[' {
             match validate_ip_literal(state) {
                 Some(rest) => state = rest,
-                None => return None,
+                None => return Err(UriError::InvalidHost),
             }
         } else {
             loop {
                 let [byte, rest @ ..] = state else {
                     // with userinfo, without port
-                    return Some(state);
+                    return Ok(state);
                 };
                 if !is_regname(*byte) {
                     break;
@@ -356,22 +359,23 @@ const fn validate_authority(bytes: &[u8]) -> Option<&[u8]> {
     }
 
     let Some((delim, mut state)) = state.split_first() else {
-        return Some(state);
+        // maybe userinfo, without port
+        return Ok(state);
     };
 
     if *delim != b':' {
         // with userinfo, without port, followed by other component
-        return Some(state)
+        return Ok(state)
     }
 
     loop {
         let [digit, rest @ ..] = state else {
             // with userinfo and port
-            return Some(state);
+            return Ok(state);
         };
         if !digit.is_ascii_digit() {
             // with userinfo and port, followed by other component
-            return Some(state);
+            return Ok(state);
         }
         state = rest;
     }
@@ -398,7 +402,7 @@ matches::ascii_lookup_table! {
 ///               / "2" %x30-34 DIGIT     ; 200-249
 ///               / "25" %x30-35          ; 250-255
 /// ```
-const fn validate_host(bytes: &[u8]) -> Option<&[u8]> {
+pub(crate) const fn validate_host(bytes: &[u8]) -> Option<&[u8]> {
     let Some((prefix, mut state)) = bytes.split_first() else {
         return Some(bytes);
     };
