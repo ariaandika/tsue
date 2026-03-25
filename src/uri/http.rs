@@ -1,7 +1,7 @@
 use std::slice::from_raw_parts;
-use tcio::bytes::Bytes;
+use tcio::bytes::{Buf, Bytes};
 
-use crate::uri::{Host, Path};
+use crate::uri::{Host, Path, UriError, matches};
 
 /// HTTP/HTTPS Scheme.
 #[derive(Copy, Clone)]
@@ -73,13 +73,46 @@ const QUERY_MASK: u16 = u16::MAX >> 1;
 const SCHEME_MASK: u16 = !(u16::MAX >> 1);
 
 impl HttpUri {
+    /// Parse HTTP URI from [`Bytes`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tsue::uri::HttpUri;
+    /// let http = HttpUri::from_bytes("http://example.com/users/all").unwrap();
+    /// assert_eq!(http.host(), "example.com");
+    /// assert_eq!(http.path(), "/users/all");
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid HTTP URI.
+    #[inline]
+    pub fn from_bytes(bytes: impl Into<Bytes>) -> Result<Self, UriError> {
+        parse_http(bytes.into())
+    }
+
+    /// Parse HTTP URI by copying from slice of bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid HTTP URI.
+    #[inline]
+    pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+        parse_http(Bytes::copy_from_slice(bytes.as_ref()))
+    }
+}
+
+impl HttpUri {
     /// Creates [`HttpUri`] from [`HttpScheme`], [`Host`], and [`Path`].
     #[inline]
+    #[allow(unused)]
     pub fn from_parts(scheme: HttpScheme, host: Host, path: Path) -> Self {
-        let Path { value: path, query } = path;
-        const { assert!(Path::MAX_LEN < QUERY_MASK) };
-        let query = ((scheme.0 as u16) << 15) | (query & QUERY_MASK);
-        Self { host, path, query }
+        // let Path { value: path, query } = path;
+        // const { assert!(Path::MAX_LEN < QUERY_MASK) };
+        // let query = ((scheme.0 as u16) << 15) | (query & QUERY_MASK);
+        // Self { host, path, query }
+        todo!()
     }
 
     /// Returns `true` if the scheme is HTTP.
@@ -144,14 +177,15 @@ impl HttpUri {
     /// Consume `HttpUri` into each components.
     #[inline]
     pub fn into_parts(self) -> (HttpScheme, Host, Path) {
-        (
-            HttpScheme(self.is_https()),
-            self.host,
-            Path {
-                value: self.path,
-                query: self.query & QUERY_MASK,
-            },
-        )
+        // (
+        //     HttpScheme(self.is_https()),
+        //     self.host,
+        //     Path {
+        //         value: self.path,
+        //         query: self.query & QUERY_MASK,
+        //     },
+        // )
+        todo!()
     }
 
     /// Returns the HTTP port or its default value if it does not exists.
@@ -188,11 +222,12 @@ impl From<HttpUri> for Host {
 
 impl From<HttpUri> for Path {
     #[inline]
-    fn from(value: HttpUri) -> Self {
-        Self {
-            value: value.path,
-            query: value.query & QUERY_MASK,
-        }
+    fn from(_value: HttpUri) -> Self {
+        // Self {
+        //     value: value.path,
+        //     query: value.query & QUERY_MASK,
+        // }
+        todo!()
     }
 }
 
@@ -209,3 +244,34 @@ macro_rules! str_from {
 }
 
 use {str_from};
+
+/// ```not_rust
+/// http-URI = "http" "://" authority path-abempty [ "?" query ]
+/// https-URI = "https" "://" authority path-abempty [ "?" query ]
+/// ```
+fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
+    let scheme = if bytes.starts_with(b"http://") {
+        HttpScheme::HTTP
+    } else if bytes.starts_with(b"https://") {
+        HttpScheme::HTTPS
+    } else {
+        return Err(UriError::InvalidScheme);
+    };
+
+    bytes.advance(5 + 2 + scheme.is_https() as usize);
+
+    let host = match matches::find_path_delim(bytes.as_slice()) {
+        Some(at) => unsafe { bytes.split_to_unchecked(at) },
+        None => std::mem::take(&mut bytes),
+    };
+
+    // > A sender MUST NOT generate an "http" URI with an empty host identifier.
+    if host.is_empty() {
+        return Err(UriError::InvalidAuthority);
+    }
+
+    let host = Host::from_bytes(host)?;
+    let path = Path::from_slice(bytes)?;
+
+    Ok(HttpUri::from_parts(scheme, host, path))
+}
