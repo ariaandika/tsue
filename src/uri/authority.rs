@@ -32,9 +32,9 @@ use crate::uri::{UriError, matches};
 /// ```
 /// use tsue::uri::Authority;
 /// let authority = Authority::from_bytes("username@example.com:8042").unwrap();
-/// assert_eq!(authority.hostname(), "example.com");
-/// assert_eq!(authority.port(), Some(8042));
 /// assert_eq!(authority.userinfo(), Some("username"));
+/// assert_eq!(authority.host(), "example.com");
+/// assert_eq!(authority.port(), Some(8042));
 /// ```
 #[derive(Clone)]
 pub struct Authority {
@@ -89,63 +89,6 @@ impl Authority {
 }
 
 impl Authority {
-    /// Returns the authority host.
-    ///
-    /// ```not_rust
-    /// user:pass@example.com:8042
-    ///           \______________/
-    ///                  |
-    ///                 host
-    /// ```
-    #[inline]
-    pub const fn host(&self) -> &str {
-        match matches::split_at_sign(self.value.as_slice()) {
-            Some((_, host)) => unsafe { str::from_utf8_unchecked(host) },
-            None => self.as_str(),
-        }
-    }
-
-    /// Returns the authority hostname.
-    ///
-    /// ```not_rust
-    /// user:pass@example.com:8042
-    ///           \_________/
-    ///                |
-    ///             hostname
-    /// ```
-    #[inline]
-    pub const fn hostname(&self) -> &str {
-        let host = match matches::split_at_sign(self.value.as_slice()) {
-            Some((_, host)) => host,
-            None => self.value.as_slice(),
-        };
-        let hostname = match matches::split_port(host) {
-            Some((hostname, _)) => hostname,
-            None => host,
-        };
-        unsafe { str::from_utf8_unchecked(hostname) }
-    }
-
-    /// Returns the authority port.
-    ///
-    /// ```not_rust
-    /// user:pass@example.com:8042
-    ///                       \__/
-    ///                        |
-    ///                       port
-    /// ```
-    #[inline]
-    pub const fn port(&self) -> Option<u16> {
-        let host = match matches::split_at_sign(self.value.as_slice()) {
-            Some((_, host)) => host,
-            None => self.value.as_slice(),
-        };
-        match matches::split_port(host) {
-            Some((_, port)) => Some(matches::atou(port)),
-            None => None,
-        }
-    }
-
     /// Returns the authority userinfo.
     ///
     /// ```not_rust
@@ -160,6 +103,47 @@ impl Authority {
             Some((userinfo, _)) => unsafe {
                 Some(str::from_utf8_unchecked(userinfo))
             },
+            None => None,
+        }
+    }
+
+    /// Returns the authority host.
+    ///
+    /// ```not_rust
+    /// user:pass@example.com:8042
+    ///           \_________/
+    ///                |
+    ///              host
+    /// ```
+    #[inline]
+    pub const fn host(&self) -> &str {
+        let host_port = match matches::split_at_sign(self.value.as_slice()) {
+            Some((_, suffix)) => suffix,
+            None => self.value.as_slice(),
+        };
+        let host = match matches::split_port(host_port) {
+            Some((prefix, _)) => prefix,
+            None => host_port,
+        };
+        unsafe { str::from_utf8_unchecked(host) }
+    }
+
+    /// Returns the authority port.
+    ///
+    /// ```not_rust
+    /// user:pass@example.com:8042
+    ///                       \__/
+    ///                        |
+    ///                       port
+    /// ```
+    #[inline]
+    pub const fn port(&self) -> Option<u16> {
+        let host_port = match matches::split_at_sign(self.value.as_slice()) {
+            Some((_, suffix)) => suffix,
+            None => self.value.as_slice(),
+        };
+        match matches::split_port(host_port) {
+            Some((_, port)) => Some(matches::atou(port)),
             None => None,
         }
     }
@@ -180,6 +164,8 @@ impl Authority {
 ///
 /// [host]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2.2>
 ///
+/// Host can be a domain name or an ip address.
+///
 /// ```not_rust
 /// foo://username@example.com:8042/over/there?name=ferret
 ///                \_________/
@@ -187,17 +173,14 @@ impl Authority {
 ///                   host
 /// ```
 ///
-/// Host can be a registered domain name or an ip address.
-///
 /// # Example
 ///
 /// To create `Host` use one of the `Host::from_*` method:
 ///
 /// ```
 /// use tsue::uri::Host;
-/// let authority = Host::from_bytes("example.com").unwrap();
-/// assert_eq!(authority.hostname(), "example.com");
-/// assert_eq!(authority.port(), Some(8042));
+/// let host = Host::from_bytes("example.com").unwrap();
+/// assert_eq!(host.as_str(), "example.com");
 /// ```
 #[derive(Clone)]
 pub struct Host {
@@ -250,45 +233,6 @@ impl Host {
 }
 
 impl Host {
-    /// Returns the entire host.
-    #[inline]
-    pub const fn host(&self) -> &str {
-        self.as_str()
-    }
-
-    /// Returns the authority hostname.
-    ///
-    /// ```not_rust
-    /// example.com:8042
-    /// \_________/
-    ///      |
-    ///   hostname
-    /// ```
-    #[inline]
-    pub const fn hostname(&self) -> &str {
-        let hostname = match matches::split_port(self.value.as_slice()) {
-            Some((hostname, _)) => hostname,
-            None => self.value.as_slice(),
-        };
-        unsafe { str::from_utf8_unchecked(hostname) }
-    }
-
-    /// Returns the authority port.
-    ///
-    /// ```not_rust
-    /// example.com:8042
-    ///             \__/
-    ///              |
-    ///             port
-    /// ```
-    #[inline]
-    pub const fn port(&self) -> Option<u16> {
-        match matches::split_port(self.value.as_slice()) {
-            Some((_, port)) => Some(matches::atou(port)),
-            None => None,
-        }
-    }
-
     /// Extracts a string slice containing the host.
     #[inline]
     pub const fn as_str(&self) -> &str {
@@ -459,20 +403,16 @@ const fn validate_host(bytes: &[u8]) -> Option<&[u8]> {
         return Some(bytes);
     };
     if *prefix == b'[' {
-        match validate_ip_literal(bytes) {
-            Some([]) => Some(bytes),
-            _ => None,
+        return validate_ip_literal(bytes)
+    }
+    loop {
+        let [byte, rest @ ..] = state else {
+            return Some(state);
+        };
+        if !is_regname(*byte) {
+            return Some(state);
         }
-    } else {
-        loop {
-            let [byte, rest @ ..] = state else {
-                return Some(bytes);
-            };
-            if !is_regname(*byte) {
-                return Some(bytes);
-            }
-            state = rest;
-        }
+        state = rest;
     }
 }
 

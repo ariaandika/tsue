@@ -15,58 +15,49 @@ pub fn test_scheme() {
 pub fn test_authority() {
     let auth = Authority::from_slice("").unwrap();
     assert_eq!(auth.host(), "");
-    assert_eq!(auth.hostname(), "",);
     assert_eq!(auth.userinfo(), None);
     assert_eq!(auth.port(), None);
 
     let auth = Authority::from_slice("example.com").unwrap();
     assert_eq!(auth.host(), "example.com");
-    assert_eq!(auth.hostname(), "example.com");
     assert_eq!(auth.userinfo(), None);
     assert_eq!(auth.port(), None);
 
     let auth = Authority::from_slice("user:pass@example.com").unwrap();
     assert_eq!(auth.userinfo(), Some("user:pass"));
     assert_eq!(auth.host(), "example.com");
-    assert_eq!(auth.hostname(), "example.com");
     assert_eq!(auth.port(), None);
 
     let auth = Authority::from_slice("example.com:443").unwrap();
     assert_eq!(auth.userinfo(), None);
-    assert_eq!(auth.host(), "example.com:443");
-    assert_eq!(auth.hostname(), "example.com");
+    assert_eq!(auth.host(), "example.com");
     assert_eq!(auth.port(), Some(443));
 
     let auth = Authority::from_slice("user:pass@example.com:443").unwrap();
     assert_eq!(auth.userinfo(), Some("user:pass"));
-    assert_eq!(auth.host(), "example.com:443");
-    assert_eq!(auth.hostname(), "example.com");
+    assert_eq!(auth.host(), "example.com");
     assert_eq!(auth.port(), Some(443));
 
     // note that currently the exact syntax of ipv6 is not validated
 
     let auth = Authority::from_slice("[a2f::1]").unwrap();
     assert_eq!(auth.host(), "[a2f::1]",);
-    assert_eq!(auth.hostname(), "[a2f::1]");
     assert_eq!(auth.userinfo(), None);
     assert_eq!(auth.port(), None);
 
     let auth = Authority::from_slice("user:pass@[a2f::1]").unwrap();
     assert_eq!(auth.userinfo(), Some("user:pass"));
     assert_eq!(auth.host(), "[a2f::1]",);
-    assert_eq!(auth.hostname(), "[a2f::1]");
     assert_eq!(auth.port(), None);
 
     let auth = Authority::from_slice("[a2f::1]:443").unwrap();
     assert_eq!(auth.userinfo(), None);
-    assert_eq!(auth.host(), "[a2f::1]:443");
-    assert_eq!(auth.hostname(), "[a2f::1]");
+    assert_eq!(auth.host(), "[a2f::1]");
     assert_eq!(auth.port(), Some(443));
 
     let auth = Authority::from_slice("user:pass@[a2f::1]:443").unwrap();
     assert_eq!(auth.userinfo(), Some("user:pass"));
-    assert_eq!(auth.host(), "[a2f::1]:443");
-    assert_eq!(auth.hostname(), "[a2f::1]");
+    assert_eq!(auth.host(), "[a2f::1]");
     assert_eq!(auth.port(), Some(443));
 }
 

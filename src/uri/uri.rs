@@ -140,30 +140,14 @@ impl Uri {
     ///
     /// ```not_rust
     /// foo://example.com:8042/over/there?name=ferret
-    ///       \______________/
-    ///              |
-    ///            host
+    ///       \_________/
+    ///            |
+    ///          host
     /// ```
     #[inline]
     pub const fn host(&self) -> Option<&str> {
         match &self.authority {
             Some(auth) => Some(auth.host()),
-            None => None,
-        }
-    }
-
-    /// Returns the hostname component if exists.
-    ///
-    /// ```not_rust
-    /// foo://example.com:8042/over/there?name=ferret
-    ///       \_________/
-    ///            |
-    ///        hostname
-    /// ```
-    #[inline]
-    pub const fn hostname(&self) -> Option<&str> {
-        match &self.authority {
-            Some(auth) => Some(auth.hostname()),
             None => None,
         }
     }

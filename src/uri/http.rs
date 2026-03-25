@@ -189,16 +189,17 @@ impl HttpUri {
     /// Returns the HTTP port or its default value if it does not exists.
     #[inline]
     pub const fn port(&self) -> u16 {
-        match self.host.port() {
-            Some(port) => port,
-            None => {
-                if self.is_http() {
-                    80
-                } else {
-                    443
-                }
-            }
-        }
+        // match self.host.port() {
+        //     Some(port) => port,
+        //     None => {
+        //         if self.is_http() {
+        //             80
+        //         } else {
+        //             443
+        //         }
+        //     }
+        // }
+        todo!()
     }
 }
 
