@@ -29,6 +29,34 @@ pub fn poll_request(
     let Some(line) = matches::find_byte::<b'\n'>(read_buffer) else {
         return Pending;
     };
+    if line.len() < MIN_REQLINE_LEN {
+        return Ready(Err(P::InvalidSeparator.into()));
+    }
+
+    let (method, method_len) = if &line[..4] == b"GET " {
+        (Method::GET, 3)
+    } else if &line[..5] == b"POST " {
+        (Method::POST, 4)
+    } else {
+        let len = line
+            .iter()
+            .position(|&e| e == b' ')
+            .ok_or(P::InvalidSeparator)?;
+        let method = match &line[..len] {
+            b"HEAD" => Method::HEAD,
+            b"PUT" => Method::PUT,
+            b"DELETE" => Method::DELETE,
+            b"OPTIONS" => Method::OPTIONS,
+            b"TRACE" => Method::TRACE,
+            b"PATCH" => Method::PATCH,
+            // An origin server MAY accept a CONNECT request, but most origin servers do not
+            // implement CONNECT.
+            // b"CONNECT" => unimplemented!(),
+            _ => return Ready(Err(P::UnknownMethod.into())),
+        };
+        (method, len)
+    };
+
     let Some(suffix) = line.last_chunk() else {
         return Ready(Err(P::InvalidSeparator.into()));
     };
@@ -37,7 +65,8 @@ pub fn poll_request(
         return Ready(Err(P::UnsupportedVersion.into()));
     }
 
-    // SAFETY: `line` will always exclude the '\n' in the `read_buffer`
+    // SAFETY: `line` is a subset of `read_buffer`, `+1` because `line` will always exclude the
+    // '\n' in the `read_buffer`
     let mut state = unsafe { read_buffer.get_unchecked(..line.len() + 1) };
 
     // ===== Poll Headers =====
@@ -58,33 +87,20 @@ pub fn poll_request(
         state = &state[line_len..];
     }
 
-    // ===== Request Line =====
+    // polling complete, no more `Pending`
 
-    // SAFETY: `line` will always exclude the '\n' in the `read_buffer`
-    let mut reqline = unsafe { read_buffer.split_to_unchecked(line.len() + 1) };
-
-    unsafe {
+    let target = unsafe {
+        // SAFETY: `line` is a subset of `read_buffer`, `+1` because `line` will always exclude the
+        // '\n' in the `read_buffer`
+        let mut reqline = read_buffer.split_to_unchecked(line.len() + 1);
+        // remove reqline method
+        // SAFETY: checked at the start of the function
+        reqline.advance_unchecked(method_len + 1);
+        // remove reqline version, `+1` the '\n'
+        // SAFETY: the subtraction will not overflow, thus it always less than `reqline.len()`
         reqline.set_len(reqline.len() - (SUFFIX.len() + 1));
-        std::hint::assert_unchecked(reqline.len() >= 5)
-    }
-
-    let method;
-    if &reqline[..4] == b"GET " {
-        reqline.advance(4);
-        method = Method::GET;
-    } else if &reqline[..5] == b"POST " {
-        reqline.advance(5);
-        method = Method::POST;
-    } else {
-        let len = reqline
-            .iter()
-            .position(|&e| e == b' ')
-            .ok_or(P::InvalidSeparator)?;
-        method = Method::from_bytes(&reqline[..len]).ok_or(P::UnknownMethod)?;
-        reqline.advance(len + 1);
-    }
-
-    let target = reqline;
+        reqline
+    };
 
     // ===== Headers =====
 
@@ -207,29 +223,20 @@ pub fn poll_request(
     let Some(host) = host else {
         return Ready(Err(E::InvalidHost));
     };
-    let path = match target.as_slice() {
-        // origin
-        b"/" => Path::from_static(b"/"),
-        // asterisk
-        b"*" => Path::from_static(b"*"),
-        // origin
-        [b'/', ..] => Path::from_bytes(target)?,
-        _ => if method != Method::CONNECT {
-            // absolute
-            let uri = HttpUri::from_bytes(target)?;
-            if uri.host() == host.as_str() {
-                return Ready(Err(P::MissmatchHost.into()));
-            }
-            uri.into()
-        } else {
-            // auth
-            if target.as_slice() != host.as_str().as_bytes() {
-                return Ready(Err(P::MissmatchHost.into()));
-            }
-            Path::from_static(b"")
+    // - authority form are prohibited
+    // - asterisk form handled separately with OPTIONS method
+    let uri = if target.first() == Some(&b'/') {
+        // origin-form
+        let path = Path::from_bytes(target)?;
+        HttpUri::from_parts(session.scheme, host, path)
+    } else {
+        // absolute-form
+        let uri = HttpUri::from_bytes(target)?;
+        if uri.host() == host.as_str() {
+            return Ready(Err(P::MissmatchHost.into()));
         }
+        uri
     };
-    let target = HttpUri::from_parts(session.scheme, host, path);
 
     // ===== Message Body =====
 
@@ -243,7 +250,7 @@ pub fn poll_request(
 
     let parts = request::Parts {
         method,
-        uri: target,
+        uri,
         version: crate::http::Version::HTTP_11,
         headers: mem::take(&mut session.headers),
         extensions: crate::http::Extensions::new(),
@@ -257,7 +264,7 @@ pub fn poll_request(
     Ready(Ok((parts, context)))
 }
 
-// ===== Header Parser =====
+// ===== Headers Index =====
 
 struct Headers {
     headers: [mem::MaybeUninit<u16>; Self::MAX_HEADERS as usize],
@@ -274,11 +281,11 @@ impl Headers {
         }
     }
 
-    fn insert(&mut self, value: usize) -> Result<(), ProtoError> {
+    fn insert(&mut self, line_len: usize) -> Result<(), ProtoError> {
         if self.len >= Self::MAX_HEADERS {
             return Err(E::TooManyHeaders);
         }
-        let Ok(value) = u16::try_from(value) else {
+        let Ok(value) = u16::try_from(line_len) else {
             return Err(E::ParseError(P::TooLong));
         };
         self.headers[self.len as usize].write(value);
