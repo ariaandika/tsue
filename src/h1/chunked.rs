@@ -113,22 +113,22 @@ impl ChunkedCoder {
             let Some(suffix) = buffer.get(digits_len..digits_len + 1) else {
                 return Pending;
             };
-            let suffix_len = if let b"\r\n" = suffix {
+            let suffix_len = if suffix == b"\r\n" {
                 // CRLF
                 2
             } else {
                 // chunk-ext
                 // currently, extensions is ignored
-                let Some(lf) = crate::matches::find_byte::<b'\n'>(&buffer[digits_len..]) else {
+                let Some(line) = crate::matches::find_byte::<b'\n'>(&buffer[digits_len..]) else {
                     return Pending
                 };
-                if lf == 0 {
-                    return Ready(Some(Err(E::InvalidChunked)));
-                }
-                let b'\r' = buffer[lf - 1] else {
+                let Some(&suffix) = line.last() else {
                     return Ready(Some(Err(E::InvalidChunked)));
                 };
-                lf + 1
+                if suffix != b'\r' {
+                    return Ready(Some(Err(E::InvalidChunked)));
+                }
+                line.len() + 1
             };
 
             self.raw = chunk_len;

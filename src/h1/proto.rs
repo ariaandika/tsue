@@ -26,19 +26,19 @@ pub fn poll_request(
     if read_buffer.len() < MIN_REQLINE_LEN {
         return Pending;
     }
-    let Some(lf) = matches::find_byte::<b'\n'>(read_buffer) else {
+    let Some(line) = matches::find_byte::<b'\n'>(read_buffer) else {
         return Pending;
     };
-    let Some(suffix) = read_buffer[..lf].last_chunk() else {
+    let Some(suffix) = line.last_chunk() else {
         return Ready(Err(P::InvalidSeparator.into()));
     };
-
     const SUFFIX: &[u8; 10] = b" HTTP/1.1\r";
     if suffix != SUFFIX {
         return Ready(Err(P::UnsupportedVersion.into()));
     }
 
-    let mut state = &read_buffer[lf + 1..];
+    // SAFETY: `line` will always exclude the '\n' in the `read_buffer`
+    let mut state = unsafe { read_buffer.get_unchecked(..line.len() + 1) };
 
     // ===== Poll Headers =====
 
@@ -47,23 +47,23 @@ pub fn poll_request(
         if state.first_chunk::<2>() == Some(b"\r\n") {
             break;
         }
-        let Some(lf) = matches::find_byte::<b'\n'>(state) else {
+        let Some(line) = matches::find_byte::<b'\n'>(state) else {
             return Pending;
         };
-        if lf == 0 {
+        if line.is_empty() {
             return Ready(Err(P::InvalidSeparator.into()));
         }
-        let line_len = lf + 1;
+        let line_len = line.len() + 1;
         headers.insert(line_len)?;
         state = &state[line_len..];
     }
 
     // ===== Request Line =====
 
-    // SAFETY: `matches::find_byte` returns `Some`, `lf` is in bounds
-    let mut reqline = unsafe { read_buffer.split_to_unchecked(lf + 1) };
+    // SAFETY: `line` will always exclude the '\n' in the `read_buffer`
+    let mut reqline = unsafe { read_buffer.split_to_unchecked(line.len() + 1) };
+
     unsafe {
-        // SAFETY: see poll request above
         reqline.set_len(reqline.len() - (SUFFIX.len() + 1));
         std::hint::assert_unchecked(reqline.len() >= 5)
     }

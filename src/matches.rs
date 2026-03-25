@@ -178,38 +178,40 @@ const BLOCK: usize = size_of::<usize>();
 const MSB: usize = usize::from_ne_bytes([0b1000_0000; BLOCK]);
 const LSB: usize = usize::from_ne_bytes([0b0000_0001; BLOCK]);
 
-pub const fn find_byte<const B: u8>(bytes: &[u8]) -> Option<usize> {
+/// Returns the line without the delimiter.
+pub const fn find_byte<const B: u8>(bytes: &[u8]) -> Option<&[u8]> {
     const { assert!(B < 128) };
 
-    let lf_ptr = 'swar: {
-        let ch = usize::from_ne_bytes([B; BLOCK]);
-        let mut state = bytes;
+    let ch = usize::from_ne_bytes([B; BLOCK]);
+    let mut state = bytes;
 
-        while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
-            let block = usize::from_ne_bytes(*chunk);
-            let is_ch = (block ^ ch).wrapping_sub(LSB) & MSB;
-            if is_ch != 0 {
+    while let Some((chunk, rest)) = state.split_first_chunk::<BLOCK>() {
+        let block = usize::from_ne_bytes(*chunk);
+        let is_ch = (block ^ ch).wrapping_sub(LSB) & MSB;
+        if is_ch != 0 {
+            unsafe {
                 let nth = (is_ch.trailing_zeros() / 8) as usize;
-                break 'swar unsafe { chunk.as_ptr().add(nth) };
-            }
-            state = rest;
-        }
-
-        while let [byte, rest @ ..] = state {
-            if *byte == B {
-                break 'swar byte as *const u8;
-            } else {
-                state = rest;
+                let end_ptr = state.as_ptr().add(nth);
+                let len = end_ptr.offset_from_unsigned(bytes.as_ptr());
+                return Some(std::slice::from_raw_parts(bytes.as_ptr(), len));
             }
         }
+        state = rest;
+    }
 
-        return None;
-    };
-
-    let lf = unsafe { lf_ptr.offset_from_unsigned(bytes.as_ptr()) };
-    // helps BytesMut::split* bounds checking
-    unsafe { std::hint::assert_unchecked(lf < bytes.len()) };
-    Some(lf)
+    loop {
+        let [byte, rest @ ..] = state else {
+            return None;
+        };
+        if *byte != B {
+            unsafe {
+                let end_ptr = state.as_ptr();
+                let len = end_ptr.offset_from_unsigned(bytes.as_ptr());
+                return Some(std::slice::from_raw_parts(bytes.as_ptr(), len));
+            };
+        }
+        state = rest;
+    }
 }
 
 // ===== hash =====
