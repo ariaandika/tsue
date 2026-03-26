@@ -6,6 +6,7 @@ mod status;
 mod version;
 mod date;
 mod host;
+mod target;
 pub mod request;
 pub mod response;
 
@@ -14,6 +15,7 @@ pub use version::Version;
 pub use status::StatusCode;
 pub use date::{httpdate, httpdate_now};
 pub use host::Host;
+pub use target::Target;
 pub use request::Request;
 pub use response::Response;
 

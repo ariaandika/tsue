@@ -25,7 +25,7 @@ fn main() -> io::Result<()> {
 }
 
 async fn handle(req: Request<Incoming>) -> Response<Full<Bytes>> {
-    if req.parts().uri.path() != "/null" {
+    if req.parts().target.path() != "/null" {
         // tokio::spawn(async move {
         //     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // });

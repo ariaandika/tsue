@@ -1,30 +1,16 @@
 //! HTTP Request
 use crate::headers::HeaderMap;
-use crate::http::{Method, Version};
-use crate::uri::{Host, HttpScheme, HttpUri, Path};
+use crate::http::{Method, Target, Version};
+use crate::uri::HttpScheme;
 
 /// HTTP Request Parts.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Parts {
     pub method: Method,
-    pub uri: HttpUri,
+    pub scheme: HttpScheme,
+    pub target: Target,
     pub version: Version,
     pub headers: HeaderMap,
-}
-
-impl Default for Parts {
-    fn default() -> Self {
-        Self {
-            method: <_>::default(),
-            uri: HttpUri::from_parts(
-                HttpScheme::HTTP,
-                Host::from_static(b""),
-                Path::from_static(b"/"),
-            ),
-            version: <_>::default(),
-            headers: <_>::default(),
-        }
-    }
 }
 
 /// HTTP Request.
@@ -62,10 +48,10 @@ impl<T> Request<T> {
         /// Returns mutable reference to [`Method`].
         method_mut() -> Method;
 
-        /// Returns shared reference to [`HttpUri`].
-        uri(),
-        /// Returns mutable reference to [`HttpUri`].
-        uri_mut() -> HttpUri;
+        /// Returns shared reference to [`Target`].
+        target(),
+        /// Returns mutable reference to [`Target`].
+        target_mut() -> Target;
 
         /// Returns shared reference to [`Version`].
         version(),

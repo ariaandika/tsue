@@ -4,7 +4,7 @@ use tcio::bytes::{Buf, Bytes};
 use crate::uri::{Host, Path, UriError, matches};
 
 /// HTTP/HTTPS Scheme.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 #[repr(transparent)]
 pub struct HttpScheme(bool);
 

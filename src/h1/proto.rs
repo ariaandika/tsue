@@ -7,10 +7,9 @@ use crate::body::{Body, Incoming};
 use crate::h1::body::{BodyDecoder, BodyEncoder, ContentKind};
 use crate::h1::states::Session;
 use crate::headers::{HeaderField, HeaderName, HeaderValue, lookup};
-use crate::http::{Method, Request, Response, httpdate_now, request, response};
+use crate::http::{Host, Method, Request, Response, Target, httpdate_now, request, response};
 use crate::matches;
 use crate::proto::error::{ParseError, ProtoError, UserError};
-use crate::uri::{Host, HttpUri, Path};
 
 use ParseError as P;
 use ProtoError as E;
@@ -220,23 +219,11 @@ pub fn poll_request(
 
     // ===== Target URI =====
 
-    let Some(host) = host else {
+    let Some(_host) = host else {
         return Ready(Err(E::InvalidHost));
     };
-    // - authority form are prohibited
-    // - asterisk form handled separately with OPTIONS method
-    let uri = if target.first() == Some(&b'/') {
-        // origin-form
-        let path = Path::from_bytes(target)?;
-        HttpUri::from_parts(session.scheme, host, path)
-    } else {
-        // absolute-form
-        let uri = HttpUri::from_bytes(target)?;
-        if uri.host() == host.as_str() {
-            return Ready(Err(P::MissmatchHost.into()));
-        }
-        uri
-    };
+    // - origin-form only
+    let target = Target::from_bytes(target.freeze())?;
 
     // ===== Message Body =====
 
@@ -250,7 +237,8 @@ pub fn poll_request(
 
     let parts = request::Parts {
         method,
-        uri,
+        scheme: session.scheme,
+        target,
         version: crate::http::Version::HTTP_11,
         headers: mem::take(&mut session.headers),
     };
