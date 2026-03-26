@@ -1,38 +1,7 @@
 use std::slice::from_raw_parts;
-use tcio::bytes::{Buf, Bytes};
+use tcio::bytes::Bytes;
 
-use crate::uri::{Host, Path, UriError, matches};
-
-/// HTTP/HTTPS Scheme.
-#[derive(Copy, Clone, Default)]
-#[repr(transparent)]
-pub struct HttpScheme(bool);
-
-impl HttpScheme {
-    /// "http" scheme.
-    pub const HTTP: Self = Self(false);
-    /// "https" scheme.
-    pub const HTTPS: Self = Self(true);
-
-    /// Returns `true` if this is an HTTP scheme.
-    #[inline]
-    pub const fn is_http(&self) -> bool {
-        !self.0
-    }
-
-    /// Returns `true` if this is an HTTPS scheme.
-    #[inline]
-    pub const fn is_https(&self) -> bool {
-        self.0
-    }
-
-    /// Extracts a string slice containing http scheme.
-    #[inline]
-    pub const fn as_str(&self) -> &'static str {
-        const HTTPS: &str = "https";
-        unsafe { str::from_utf8_unchecked(from_raw_parts(HTTPS.as_ptr(), 4 + self.0 as usize)) }
-    }
-}
+use crate::uri::{Host, Path, UriError};
 
 /// HTTP URI.
 ///
@@ -102,17 +71,6 @@ impl HttpUri {
 }
 
 impl HttpUri {
-    /// Creates [`HttpUri`] from [`HttpScheme`], [`Host`], and [`Path`].
-    #[inline]
-    #[allow(unused)]
-    pub fn from_parts(scheme: HttpScheme, host: Host, path: Path) -> Self {
-        // let Path { value: path, query } = path;
-        // const { assert!(Path::MAX_LEN < QUERY_MASK) };
-        // let query = ((scheme.0 as u16) << 15) | (query & QUERY_MASK);
-        // Self { host, path, query }
-        todo!()
-    }
-
     /// Returns `true` if the scheme is HTTP.
     #[inline]
     pub const fn is_http(&self) -> bool {
@@ -172,20 +130,6 @@ impl HttpUri {
         unsafe { str_from!(self.path.as_ptr(), self.path.len()) }
     }
 
-    /// Consume `HttpUri` into each components.
-    #[inline]
-    pub fn into_parts(self) -> (HttpScheme, Host, Path) {
-        // (
-        //     HttpScheme(self.is_https()),
-        //     self.host,
-        //     Path {
-        //         value: self.path,
-        //         query: self.query & QUERY_MASK,
-        //     },
-        // )
-        todo!()
-    }
-
     /// Returns the HTTP port or its default value if it does not exists.
     #[inline]
     pub const fn port(&self) -> u16 {
@@ -205,13 +149,6 @@ impl HttpUri {
 
 // ===== std traits =====
 
-impl From<HttpUri> for HttpScheme {
-    #[inline]
-    fn from(value: HttpUri) -> Self {
-        HttpScheme(value.is_https())
-    }
-}
-
 impl From<HttpUri> for Host {
     #[inline]
     fn from(value: HttpUri) -> Self {
@@ -230,12 +167,6 @@ impl From<HttpUri> for Path {
     }
 }
 
-impl std::fmt::Debug for HttpScheme {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 macro_rules! str_from {
     ($data:expr, $len:expr $(,)?) => {
         str::from_utf8_unchecked(from_raw_parts($data, $len))
@@ -248,29 +179,30 @@ use {str_from};
 /// http-URI = "http" "://" authority path-abempty [ "?" query ]
 /// https-URI = "https" "://" authority path-abempty [ "?" query ]
 /// ```
-fn parse_http(mut bytes: Bytes) -> Result<HttpUri, UriError> {
-    let scheme = if bytes.starts_with(b"http://") {
-        HttpScheme::HTTP
-    } else if bytes.starts_with(b"https://") {
-        HttpScheme::HTTPS
-    } else {
-        return Err(UriError::InvalidScheme);
-    };
-
-    bytes.advance(5 + 2 + scheme.is_https() as usize);
-
-    let host = match matches::find_path_delim(bytes.as_slice()) {
-        Some(at) => unsafe { bytes.split_to_unchecked(at) },
-        None => std::mem::take(&mut bytes),
-    };
-
-    // > A sender MUST NOT generate an "http" URI with an empty host identifier.
-    if host.is_empty() {
-        return Err(UriError::InvalidAuthority);
-    }
-
-    let host = Host::from_bytes(host)?;
-    let path = Path::from_slice(bytes)?;
-
-    Ok(HttpUri::from_parts(scheme, host, path))
+fn parse_http(_bytes: Bytes) -> Result<HttpUri, UriError> {
+    // let scheme = if bytes.starts_with(b"http://") {
+    //     HttpScheme::HTTP
+    // } else if bytes.starts_with(b"https://") {
+    //     HttpScheme::HTTPS
+    // } else {
+    //     return Err(UriError::InvalidScheme);
+    // };
+    //
+    // bytes.advance(5 + 2 + scheme.is_https() as usize);
+    //
+    // let host = match matches::find_path_delim(bytes.as_slice()) {
+    //     Some(at) => unsafe { bytes.split_to_unchecked(at) },
+    //     None => std::mem::take(&mut bytes),
+    // };
+    //
+    // // > A sender MUST NOT generate an "http" URI with an empty host identifier.
+    // if host.is_empty() {
+    //     return Err(UriError::InvalidAuthority);
+    // }
+    //
+    // let host = Host::from_bytes(host)?;
+    // let path = Path::from_slice(bytes)?;
+    //
+    // Ok(HttpUri::from_parts(scheme, host, path))
+    todo!()
 }

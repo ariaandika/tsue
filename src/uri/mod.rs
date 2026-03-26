@@ -58,7 +58,7 @@ pub use scheme::Scheme;
 pub use authority::{Authority, Host};
 pub use path::Path;
 pub use uri::Uri;
-pub use http::{HttpScheme, HttpUri};
+pub use http::HttpUri;
 pub use error::UriError;
 
 #[cfg(test)]

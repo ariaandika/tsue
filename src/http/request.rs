@@ -1,13 +1,12 @@
 //! HTTP Request
 use crate::headers::HeaderMap;
-use crate::http::{Method, Target, Version};
-use crate::uri::HttpScheme;
+use crate::http::{Method, Scheme, Target, Version};
 
 /// HTTP Request Parts.
 #[derive(Debug, Default, Clone)]
 pub struct Parts {
     pub method: Method,
-    pub scheme: HttpScheme,
+    pub scheme: Scheme,
     pub target: Target,
     pub version: Version,
     pub headers: HeaderMap,

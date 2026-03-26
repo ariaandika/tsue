@@ -7,8 +7,8 @@ use crate::h2::hpack::Decoder;
 use crate::h2::settings::{self, Settings};
 use crate::h2::stream::{self, StreamList};
 use crate::headers::{HeaderField, HeaderMap};
-use crate::http::Method;
-use crate::uri::{Authority, Host, HttpScheme, HttpUri, Path};
+use crate::http::{Method, Scheme};
+use crate::uri::{Authority, Path};
 
 const PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
@@ -310,7 +310,7 @@ fn split_exact<const S: usize, const M: usize, const N: usize>(bytes: &[u8; S]) 
 struct ReqlineBuilder {
     method: Option<Method>,
     path: Option<Path>,
-    scheme: Option<HttpScheme>,
+    scheme: Option<Scheme>,
     authority: Option<Authority>,
 }
 
@@ -330,8 +330,8 @@ impl ReqlineBuilder {
             P::Scheme => match self.scheme.as_mut() {
                 None => {
                     self.scheme = match field.value().as_bytes() {
-                        b"http" => Some(HttpScheme::HTTP),
-                        b"https" => Some(HttpScheme::HTTPS),
+                        b"http" => Some(Scheme::HTTP),
+                        b"https" => Some(Scheme::HTTPS),
                         _ => return Err(E::Malformed),
                     }
                 }
@@ -358,24 +358,24 @@ impl ReqlineBuilder {
     }
 
     fn build(self) -> Result<(Method, BytesMut), ConnectionError> {
-        use ConnectionError as E;
-
-        let Self {
-            method: Some(_method),
-            path: Some(path),
-            scheme: Some(scheme),
-            authority: Some(authority),
-        } = self
-        else {
-            return Err(E::Malformed);
-        };
-        let _target = HttpUri::from_parts(
-            scheme,
-            Host::from_slice(authority.host()).map_err(|_| E::Malformed)?,
-            path,
-        );
-        todo!("continue h2")
+        // use ConnectionError as E;
+        //
+        // let Self {
+        //     method: Some(_method),
+        //     path: Some(path),
+        //     scheme: Some(scheme),
+        //     authority: Some(authority),
+        // } = self
+        // else {
+        //     return Err(E::Malformed);
+        // };
+        // let _target = HttpUri::from_parts(
+        //     scheme,
+        //     Host::from_slice(authority.host()).map_err(|_| E::Malformed)?,
+        //     path,
+        // );
         // Ok(Reqline { method, target, version: crate::http::Version::HTTP_2 })
+        todo!("continue h2")
     }
 }
 
