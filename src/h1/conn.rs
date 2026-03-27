@@ -10,7 +10,7 @@ use crate::h1::body::{BodyEncoder, LengthEncoder};
 use crate::h1::chunked::{ChunkedCoder, EncodedChunk};
 use crate::h1::proto::{RequestContext, poll_request};
 use crate::h1::states::Session;
-use crate::proto::error::UserError;
+use crate::http::error::UserError;
 use crate::service::HttpService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;

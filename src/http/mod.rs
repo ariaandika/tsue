@@ -11,6 +11,8 @@ mod target;
 pub mod request;
 pub mod response;
 
+pub mod error;
+
 pub use method::Method;
 pub use version::Version;
 pub use status::StatusCode;
@@ -20,9 +22,4 @@ pub use host::Host;
 pub use target::Target;
 pub use request::Request;
 pub use response::Response;
-
-pub mod error {
-    //! Error types.
-    pub use super::method::UnknownMethod;
-}
 

@@ -7,9 +7,9 @@ use crate::body::{Body, Incoming};
 use crate::h1::body::{BodyDecoder, BodyEncoder, ContentKind};
 use crate::h1::states::Session;
 use crate::headers::{HeaderField, HeaderName, HeaderValue, lookup};
+use crate::http::error::{ParseError, ProtoError, UserError};
 use crate::http::{Host, Method, Request, Response, Target, httpdate_now, request, response};
 use crate::matches;
-use crate::proto::error::{ParseError, ProtoError, UserError};
 
 use ParseError as P;
 use ProtoError as E;

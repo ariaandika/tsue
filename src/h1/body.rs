@@ -12,7 +12,7 @@ use crate::body::Incoming;
 use crate::body::error::BodyError;
 use crate::body::shared::{BodyDecode, SendHandle};
 use crate::h1::chunked::ChunkedCoder;
-use crate::proto::error::UserError;
+use crate::http::error::UserError;
 
 const MIN_BODY_DRAIN: u64 = 64 * 1024;
 

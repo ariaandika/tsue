@@ -53,7 +53,6 @@ pub mod http;
 pub mod body;
 
 // HTTP protocol
-pub mod proto;
 pub mod h1;
 pub mod h2;
 
