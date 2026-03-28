@@ -8,7 +8,7 @@ use crate::h1::body::{BodyDecoder, BodyEncoder, ContentKind};
 use crate::h1::states::Session;
 use crate::headers::{HeaderField, HeaderName, HeaderValue, lookup};
 use crate::http::error::{ParseError, ProtoError, UserError};
-use crate::http::{Host, Method, Request, Response, Target, httpdate_now, request, response};
+use crate::http::{Authority, Method, Request, Response, Target, httpdate_now, request, response};
 use crate::matches;
 
 use ParseError as P;
@@ -175,7 +175,7 @@ pub fn poll_request(
                 if host.is_some() {
                     return Ready(Err(E::InvalidRepresentation));
                 }
-                host = Some(Host::from_bytes(value.clone())?);
+                host = Some(Authority::from_bytes(value.clone())?);
             }
             CONTENT_LENGTH => {
                 if content.is_some() {

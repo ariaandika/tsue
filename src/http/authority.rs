@@ -2,43 +2,44 @@ use tcio::bytes::Bytes;
 
 use crate::uri::{UriError, authority};
 
-/// HTTP `Host` header or `:authority` pseudo-header.
+/// HTTP Authority.
 ///
-/// `Host` contains [host] and optional [port] component from URI.
+/// In `HTTP/1.1`, this is the value of the `Host` header.
 ///
-/// Note that this is different from the URI [`uri::Host`] struct.
+/// In `HTTP/2.0`, this is the value of the `:authority` pseudo-header.
 ///
-/// [`uri::Host`]: crate::uri::Host
+/// `Authority` contains [host] and optional [port] component.
+///
 /// [host]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2.2>
 /// [port]: <https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2.3>
 ///
 /// # Example
 ///
-/// To create `Host` use one of the `Host::from_*` method:
+/// To create `Authority` use one of the `Authority::from_*` method:
 ///
 /// ```
-/// use tsue::http::Host;
-/// let host = Host::from_bytes("example.com:80").unwrap();
-/// assert_eq!(host.as_str(), "example.com:80");
-/// assert_eq!(host.host(), "example.com");
-/// assert_eq!(host.port(), Some("80"));
+/// use tsue::http::Authority;
+/// let auth = Authority::from_bytes("example.com:80").unwrap();
+/// assert_eq!(auth.as_str(), "example.com:80");
+/// assert_eq!(auth.host(), "example.com");
+/// assert_eq!(auth.port(), Some("80"));
 /// ```
 #[derive(Clone)]
-pub struct Host {
+pub struct Authority {
     /// is valid ASCII
     value: Bytes,
     port: u32,
 }
 
-impl Host {
-    /// Validate host from static bytes.
+impl Authority {
+    /// Validate authority from static bytes.
     ///
     /// # Panics
     ///
-    /// Panics if the input is not a valid host.
+    /// Panics if the input is not a valid authority.
     #[inline]
     pub const fn from_static(bytes: &'static [u8]) -> Self {
-        match validate_host(bytes) {
+        match validate_authority(bytes) {
             Ok(port) => Self {
                 value: Bytes::from_static(bytes),
                 port,
@@ -47,28 +48,28 @@ impl Host {
         }
     }
 
-    /// Validate host from [`Bytes`].
+    /// Validate authority from [`Bytes`].
     ///
     /// # Errors
     ///
-    /// Returns [`Err`] if the input is not a valid host.
+    /// Returns [`Err`] if the input is not a valid authority.
     #[inline]
     pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
         let value = bytes.into();
-        match validate_host(value.as_slice()) {
+        match validate_authority(value.as_slice()) {
             Ok(port) => Ok(Self { value, port }),
             Err(err) => Err(err),
         }
     }
 
-    /// Validate host by copying from slice of bytes.
+    /// Validate authority by copying from slice of bytes.
     ///
     /// # Errors
     ///
-    /// Returns [`Err`] if the input is not a valid host.
+    /// Returns [`Err`] if the input is not a valid authority.
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
-        match validate_host(bytes.as_ref()) {
+        match validate_authority(bytes.as_ref()) {
             Ok(port) => Ok(Self {
                 value: Bytes::copy_from_slice(bytes.as_ref()),
                 port,
@@ -78,8 +79,8 @@ impl Host {
     }
 }
 
-impl Host {
-    /// Returns the host and port as string.
+impl Authority {
+    /// Returns the authority as string.
     #[inline]
     pub const fn as_str(&self) -> &str {
         // SAFETY: precondition `value` is valid ASCII
@@ -127,13 +128,13 @@ impl Host {
 
 // ===== std traits =====
 
-impl std::fmt::Debug for Host {
+impl std::fmt::Debug for Authority {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.as_str().fmt(f)
     }
 }
 
-impl std::fmt::Display for Host {
+impl std::fmt::Display for Authority {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.as_str().fmt(f)
     }
@@ -150,10 +151,10 @@ macro_rules! str_from_parts {
 use str_from_parts;
 
 /// ```not_rust
-/// http-host   = host [ ":" port ]
+/// http-auth   = host [ ":" port ]
 /// host        = IP-literal / IPv4address / reg-name
 /// ```
-const fn validate_host(bytes: &[u8]) -> Result<u32, UriError> {
+const fn validate_authority(bytes: &[u8]) -> Result<u32, UriError> {
     if bytes.len() > u16::MAX as usize {
         return Err(UriError::ExcessiveBytes);
     }
