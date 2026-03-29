@@ -1,6 +1,6 @@
 use tcio::bytes::Bytes;
 
-use crate::uri::{UriError, authority};
+use crate::uri::{UriError, matches};
 
 /// HTTP Authority.
 ///
@@ -26,7 +26,9 @@ use crate::uri::{UriError, authority};
 /// ```
 #[derive(Clone)]
 pub struct Authority {
-    /// is valid ASCII
+    /// ```not_rust
+    /// Host = uri-host [ ":" port ] ; Section 4
+    /// ```
     value: Bytes,
     port: u32,
 }
@@ -80,13 +82,6 @@ impl Authority {
 }
 
 impl Authority {
-    /// Returns the authority as string.
-    #[inline]
-    pub const fn as_str(&self) -> &str {
-        // SAFETY: precondition `value` is valid ASCII
-        unsafe { str::from_utf8_unchecked(self.value.as_slice()) }
-    }
-
     /// Returns the host component.
     ///
     /// ```not_rust
@@ -111,10 +106,10 @@ impl Authority {
     /// ```
     #[inline]
     pub const fn port(&self) -> Option<&str> {
-        if self.port as usize != self.value.len() {
+        let offset = (self.port + 1) as usize;
+        if offset < self.value.len() {
             // SAFETY: precondition `value` is valid ASCII
             unsafe {
-                let offset = (self.port + 1) as usize;
                 Some(str_from_parts!(
                     self.value.as_ptr().add(offset),
                     self.value.len() - offset
@@ -123,6 +118,13 @@ impl Authority {
         } else {
             None
         }
+    }
+
+    /// Returns the authority as string.
+    #[inline]
+    pub const fn as_str(&self) -> &str {
+        // SAFETY: precondition `value` is valid ASCII
+        unsafe { str::from_utf8_unchecked(self.value.as_slice()) }
     }
 }
 
@@ -151,14 +153,13 @@ macro_rules! str_from_parts {
 use str_from_parts;
 
 /// ```not_rust
-/// http-auth   = host [ ":" port ]
-/// host        = IP-literal / IPv4address / reg-name
+/// Host = uri-host [ ":" port ] ; Section 4
 /// ```
 const fn validate_authority(bytes: &[u8]) -> Result<u32, UriError> {
-    if bytes.len() > u16::MAX as usize {
+    if bytes.len() > u32::MAX as usize {
         return Err(UriError::ExcessiveBytes);
     }
-    let Some(rest) = authority::validate_host(bytes) else {
+    let Some(rest) = validate_host(bytes) else {
         return Err(UriError::InvalidHost);
     };
     let Some((delim, mut port)) = rest.split_first() else {
@@ -177,5 +178,69 @@ const fn validate_authority(bytes: &[u8]) -> Result<u32, UriError> {
             return Err(UriError::InvalidPort);
         }
         port = rest;
+    }
+}
+
+matches::ascii_lookup_table! {
+    /// `reg-name = *( unreserved / pct-encoded / sub-delims )`
+    const fn is_regname(byte: u8) -> bool {
+        matches::unreserved(byte)
+        || matches::pct_encoded(byte)
+        || matches::sub_delims(byte)
+    }
+}
+
+/// A sender MUST NOT generate an "http" URI with an empty host identifier
+///
+/// ```not_rust
+/// uri-host      = IP-literal / IPv4address / reg-name
+/// IP-literal    = "[" ( IPv6address / IPvFuture  ) "]"
+/// IPv4address   = dec-octet "." dec-octet "." dec-octet "." dec-octet
+/// IPvFuture     = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" )
+/// reg-name      = *( unreserved / pct-encoded / sub-delims )
+///
+/// dec-octet     = DIGIT                 ; 0-9
+///               / %x31-39 DIGIT         ; 10-99
+///               / "1" 2DIGIT            ; 100-199
+///               / "2" %x30-34 DIGIT     ; 200-249
+///               / "25" %x30-35          ; 250-255
+/// IPv6address   =                            6( h16 ":" ) ls32
+///               /                       "::" 5( h16 ":" ) ls32
+///               / [               h16 ] "::" 4( h16 ":" ) ls32
+///               / [ *1( h16 ":" ) h16 ] "::" 3( h16 ":" ) ls32
+///               / [ *2( h16 ":" ) h16 ] "::" 2( h16 ":" ) ls32
+///               / [ *3( h16 ":" ) h16 ] "::"    h16 ":"   ls32
+///               / [ *4( h16 ":" ) h16 ] "::"              ls32
+///               / [ *5( h16 ":" ) h16 ] "::"              h16
+///               / [ *6( h16 ":" ) h16 ] "::"
+/// h16           = 1*4HEXDIG
+/// ls32          = ( h16 ":" h16 ) / IPv4address
+/// ```
+const fn validate_host(bytes: &[u8]) -> Option<&[u8]> {
+    let Some((prefix, mut state)) = bytes.split_first() else {
+        return None;
+    };
+    if *prefix != b'[' {
+        state = bytes;
+        loop {
+            let [byte, rest @ ..] = state else {
+                return Some(state);
+            };
+            if !is_regname(*byte) {
+                return Some(state);
+            }
+            state = rest;
+        }
+    } else {
+        loop {
+            let [byte, rest @ ..] = state else {
+                // unclosed ip-literal bracket
+                return None;
+            };
+            if !(is_regname(*byte) | (*byte == b':')) {
+                return if *byte == b']' { Some(state) } else { None };
+            }
+            state = rest;
+        }
     }
 }

@@ -1,5 +1,5 @@
 /// HTTP/HTTPS Scheme.
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Scheme(bool);
 

@@ -35,7 +35,7 @@ impl Target {
         }
     }
 
-    pub fn from_bytes(bytes: Bytes) -> Result<Self, UriError> {
+    pub(crate) fn from_bytes(bytes: Bytes) -> Result<Self, UriError> {
         match validate_path(bytes.as_slice()) {
             Ok(query) => Ok(Self {
                 value: bytes,
@@ -56,7 +56,8 @@ impl Target {
     /// Returns the query component.
     #[inline]
     pub const fn query(&self) -> Option<&str> {
-        if self.query as usize == self.value.len() {
+        let offset = (self.query + 1) as usize;
+        if offset == self.value.len() {
             None
         } else {
             // SAFETY: precondition `value` is valid ASCII

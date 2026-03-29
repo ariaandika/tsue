@@ -1,5 +1,6 @@
 use crate::headers::error::HeaderError;
-use crate::uri::UriError;
+
+pub use crate::uri::UriError;
 
 // ===== Parsing Error =====W
 
@@ -43,14 +44,14 @@ impl std::fmt::Display for ParseError {
 
 impl From<UriError> for ParseError {
     fn from(value: UriError) -> Self {
-        use crate::uri::UriError as Error;
+        use crate::uri::UriError as U;
         match value {
-            Error::ExcessiveBytes => Self::TooLong,
-            Error::InvalidScheme
-            | Error::InvalidAuthority
-            | Error::InvalidPath
-            | Error::InvalidHost
-            | Error::InvalidPort => Self::InvalidTarget,
+            U::ExcessiveBytes => Self::TooLong,
+            U::InvalidScheme
+            | U::InvalidAuthority
+            | U::InvalidPath
+            | U::InvalidHost
+            | U::InvalidPort => Self::InvalidTarget,
         }
     }
 }

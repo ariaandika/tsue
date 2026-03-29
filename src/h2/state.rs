@@ -7,8 +7,7 @@ use crate::h2::hpack::Decoder;
 use crate::h2::settings::{self, Settings};
 use crate::h2::stream::{self, StreamList};
 use crate::headers::{HeaderField, HeaderMap};
-use crate::http::{Method, Scheme};
-use crate::uri::{Authority, Path};
+use crate::http::{Authority, Target, Method, Scheme};
 
 const PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
@@ -309,7 +308,7 @@ fn split_exact<const S: usize, const M: usize, const N: usize>(bytes: &[u8; S]) 
 #[derive(Default)]
 struct ReqlineBuilder {
     method: Option<Method>,
-    path: Option<Path>,
+    path: Option<Target>,
     scheme: Option<Scheme>,
     authority: Option<Authority>,
 }
@@ -339,8 +338,11 @@ impl ReqlineBuilder {
             },
             P::Path => match self.path.as_mut() {
                 None => {
-                    self.path =
-                        Some(Path::from_bytes(field.value().clone()).map_err(|_| E::Malformed)?)
+                    self.path = Some(
+                        Target::from_bytes(
+                            field.value().clone().into()
+                        ).map_err(|_| E::Malformed)?
+                    )
                 }
                 Some(_) => return Err(E::Malformed),
             },

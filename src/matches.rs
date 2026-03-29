@@ -10,26 +10,37 @@ macro_rules! ascii_lookup_table {
     } => {
         $(#[$meta])*
         $vis const fn $fn_id($byte: $u8) -> bool {
-            const TABLE: [bool; 128] = {
-                let mut bytes = [false; 128];
-                let mut $byte = 0u8;
-                const fn filter($byte: $u8) -> bool {
-                    $e
-                }
-                loop {
-                    bytes[$byte as usize] = filter($byte);
-                    if $byte == 127 {
-                        break;
-                    }
-                    $byte += 1;
-                }
-                bytes
-            };
+            crate::matches::ascii_lookup_table! {
+                const TABLE: [bool; 128] = fn($byte:$u8) -> bool { $e }
+            }
             $byte.is_ascii() &
             // SAFETY: index masked by 127
             unsafe { *TABLE.as_ptr().add(($byte & 127) as usize) }
         }
     };
+    {
+        $(#[$meta:meta])*
+        $vis:vis const $const_id:ident: [$t:ty; 128] = fn($byte:ident:$u8:ty) -> $t2:ty {
+            $e:expr
+        }
+    } => {
+        $(#[$meta])*
+        $vis const $const_id: [$t; 128] = {
+            let mut bytes = [false as $t; 128];
+            let mut $byte = 0u8;
+            const fn filter($byte: $u8) -> $t2 {
+                $e
+            }
+            loop {
+                bytes[$byte as usize] = filter($byte);
+                if $byte == 127 {
+                    break;
+                }
+                $byte += 1;
+            }
+            bytes
+        };
+    }
 }
 
 pub(crate) use ascii_lookup_table;
