@@ -35,10 +35,46 @@ impl Target {
         }
     }
 
-    pub(crate) fn from_bytes(bytes: Bytes) -> Result<Self, UriError> {
-        match validate_path(bytes.as_slice()) {
+    /// Validate request target from static bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input is not a valid target.
+    #[inline]
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
+        match validate_path(bytes) {
+            Ok(query) => Self {
+                value: Bytes::from_static(bytes),
+                query,
+            },
+            Err(err) => err.panic_const(),
+        }
+    }
+
+    /// Validate request target from [`Bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid target.
+    #[inline]
+    pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
+        let value = bytes.into();
+        match validate_path(value.as_slice()) {
+            Ok(query) => Ok(Self { value, query }),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Validate request by copying from slice of bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if the input is not a valid target.
+    #[inline]
+    pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
+        match validate_path(bytes.as_ref()) {
             Ok(query) => Ok(Self {
-                value: bytes,
+                value: Bytes::copy_from_slice(bytes.as_ref()),
                 query,
             }),
             Err(err) => Err(err),
@@ -103,19 +139,21 @@ macro_rules! str_from_parts {
 use str_from_parts;
 
 matches::ascii_lookup_table! {
-    /// `pchar = unreserved / pct-encoded / sub-delims / ":" / "@"`
-    const fn is_pchar(byte: u8) -> bool {
+    /// `pchar            = unreserved / pct-encoded / sub-delims / ":" / "@"`
+    /// `pchar-and-slash  = pchar / "/"`
+    const fn is_pchar_and_slash(byte: u8) -> bool {
         matches::unreserved(byte)
         || matches::pct_encoded(byte)
         || matches::sub_delims(byte)
         || matches!(byte, b':' | b'@')
+        || matches!(byte, b'/')
     }
 }
 
 matches::ascii_lookup_table! {
     /// `query = *( pchar / "/" / "?" )`
     const fn is_query(byte: u8) -> bool {
-        is_pchar(byte)
+        is_pchar_and_slash(byte)
         || matches!(byte, b'/' | b'?')
     }
 }
@@ -141,7 +179,9 @@ pub(crate) const fn match_path(bytes: &mut &[u8]) -> Result<u32, UriError> {
         return Err(UriError::ExcessiveBytes);
     }
 
-    let Some((prefix, mut state)) = bytes.split_first() else {
+    let base = bytes.as_ptr();
+
+    let Some((prefix, state)) = bytes.split_first() else {
         return Err(UriError::InvalidPath);
     };
 
@@ -152,36 +192,52 @@ pub(crate) const fn match_path(bytes: &mut &[u8]) -> Result<u32, UriError> {
     if state.is_empty() {
         return Ok(1);
     }
+    *bytes = state;
 
-    let mut query = bytes.len();
-
-    while let [byte, rest @ ..] = state {
-        state = rest;
-        if !is_pchar(*byte) {
-            if *byte != b'?' {
-                return Err(UriError::InvalidPath);
-            }
-            query = unsafe { state.as_ptr().offset_from_unsigned(bytes.as_ptr()) };
+    while let [byte, rest @ ..] = bytes {
+        if !is_pchar_and_slash(*byte) {
             break;
         }
+        *bytes = rest;
     }
 
-    match_query(&mut state);
-    if state.is_empty() {
-        Ok(query as u32)
-    } else {
-        Err(UriError::InvalidPath)
+    let Some((delim, rest)) = bytes.split_first() else {
+        return unsafe {
+            Ok(bytes.as_ptr().offset_from_unsigned(base) as u32)
+        }
+    };
+
+    let query = unsafe { bytes.as_ptr().offset_from_unsigned(base) };
+    if *delim != b'?' {
+        return Err(UriError::InvalidPath);
+    }
+    *bytes = rest;
+
+    loop {
+        let [byte, rest @ ..] = bytes else {
+            return Ok(query as u32);
+        };
+        if !is_query(*byte) {
+            return Err(UriError::InvalidPath);
+        }
+        *bytes = rest;
     }
 }
 
-pub(crate) const fn match_query(bytes: &mut &[u8]) {
-    loop {
-        let [byte, rest @ ..] = bytes else {
-            return;
-        };
-        if !is_query(*byte) {
-            return;
-        }
-        *bytes= rest;
-    }
+#[test]
+fn test_path() {
+    let target = Target::from_slice(b"/users/all").unwrap();
+    assert_eq!(target.as_str(), "/users/all");
+    assert_eq!(target.path(), "/users/all");
+    assert_eq!(target.query(), None);
+
+    let target = Target::from_slice(b"/users/all?").unwrap();
+    assert_eq!(target.as_str(), "/users/all?");
+    assert_eq!(target.path(), "/users/all");
+    assert_eq!(target.query(), None);
+
+    let target = Target::from_slice(b"/users/all?page=420").unwrap();
+    assert_eq!(target.as_str(), "/users/all?page=420");
+    assert_eq!(target.path(), "/users/all");
+    assert_eq!(target.query(), Some("page=420"));
 }
