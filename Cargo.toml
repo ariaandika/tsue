@@ -16,4 +16,4 @@ log = { version = "0.4.26", optional = true }
 log = ["dep:log"]
 
 [workspace]
-members = [".", "codegen", "example"]
+members = [".", "codegen"]
