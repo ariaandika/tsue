@@ -15,7 +15,7 @@ use crate::uri::{UriError, matches};
 pub struct Target {
     /// is valid ASCII
     value: Bytes,
-    query: u16,
+    query: u32,
 }
 
 impl Default for Target {
@@ -57,17 +57,16 @@ impl Target {
     #[inline]
     pub const fn query(&self) -> Option<&str> {
         let offset = (self.query + 1) as usize;
-        if offset == self.value.len() {
-            None
-        } else {
+        if offset < self.value.len() {
             // SAFETY: precondition `value` is valid ASCII
             unsafe {
-                let query = self.query as usize;
                 Some(str_from_parts!(
-                    self.value.as_ptr().add(query + 1),
-                    self.value.len() - query - 1
+                    self.value.as_ptr().add(offset),
+                    self.value.len() - offset
                 ))
             }
+        } else {
+            None
         }
     }
 
@@ -121,12 +120,27 @@ matches::ascii_lookup_table! {
     }
 }
 
+const fn validate_path(mut bytes: &[u8]) -> Result<u32, UriError> {
+    match match_path(&mut bytes) {
+        Ok(query) => if bytes.is_empty() {
+            Ok(query)
+        } else {
+            Err(UriError::InvalidPath)
+        },
+        Err(err) => Err(err),
+    }
+}
+
 /// ```not_rust
 /// origin-form     = absolute-path [ "?" query ]
 /// absolute-path   = 1*( "/" segment )
 /// segment         = *pchar
 /// ```
-const fn validate_path(bytes: &[u8]) -> Result<u16, UriError> {
+pub(crate) const fn match_path(bytes: &mut &[u8]) -> Result<u32, UriError> {
+    if bytes.len() > u32::MAX as usize {
+        return Err(UriError::ExcessiveBytes);
+    }
+
     let Some((prefix, mut state)) = bytes.split_first() else {
         return Err(UriError::InvalidPath);
     };
@@ -152,17 +166,22 @@ const fn validate_path(bytes: &[u8]) -> Result<u16, UriError> {
         }
     }
 
+    match_query(&mut state);
+    if state.is_empty() {
+        Ok(query as u32)
+    } else {
+        Err(UriError::InvalidPath)
+    }
+}
+
+pub(crate) const fn match_query(bytes: &mut &[u8]) {
     loop {
-        let [byte, rest @ ..] = state else {
-            return if query <= (u16::MAX as usize) {
-                Ok(query as u16)
-            } else {
-                Err(UriError::ExcessiveBytes)
-            };
+        let [byte, rest @ ..] = bytes else {
+            return;
         };
         if !is_query(*byte) {
-            return Err(UriError::InvalidPath);
+            return;
         }
-        state = rest;
+        *bytes= rest;
     }
 }

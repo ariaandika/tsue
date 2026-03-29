@@ -152,24 +152,40 @@ macro_rules! str_from_parts {
 
 use str_from_parts;
 
+const fn validate_authority(bytes: &[u8]) -> Result<u32, UriError> {
+    let mut state = bytes;
+    match match_authority(&mut state) {
+        Ok(port) => {
+            if state.is_empty() {
+                Ok(port)
+            } else {
+                Err(UriError::InvalidAuthority)
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
+
 /// ```not_rust
 /// Host = uri-host [ ":" port ] ; Section 4
 /// ```
-const fn validate_authority(bytes: &[u8]) -> Result<u32, UriError> {
+pub(crate) const fn match_authority(bytes: &mut &[u8]) -> Result<u32, UriError> {
     if bytes.len() > u32::MAX as usize {
         return Err(UriError::ExcessiveBytes);
     }
     let Some(rest) = validate_host(bytes) else {
         return Err(UriError::InvalidHost);
     };
-    let Some((delim, mut port)) = rest.split_first() else {
+    let Some((delim, port)) = rest.split_first() else {
+        *bytes = rest;
         return Ok(bytes.len() as u32);
     };
+    *bytes = port;
     if *delim != b':' {
         return Err(UriError::InvalidHost);
     }
     loop {
-        let Some((digit, rest)) = port.split_first() else {
+        let Some((digit, rest)) = bytes.split_first() else {
             return unsafe {
                 Ok((delim as *const u8).offset_from_unsigned(bytes.as_ptr()) as u32)
             }
@@ -177,7 +193,7 @@ const fn validate_authority(bytes: &[u8]) -> Result<u32, UriError> {
         if !digit.is_ascii_digit() {
             return Err(UriError::InvalidPort);
         }
-        port = rest;
+        *bytes = rest;
     }
 }
 

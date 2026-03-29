@@ -48,7 +48,6 @@ pub(crate) mod matches;
 mod scheme;
 pub(crate) mod authority;
 mod path;
-mod http;
 mod error;
 
 #[allow(clippy::module_inception)]
@@ -58,7 +57,6 @@ pub use scheme::Scheme;
 pub use authority::{Authority, Host};
 pub use path::Path;
 pub use uri::Uri;
-pub use http::HttpUri;
 pub use error::UriError;
 
 #[cfg(test)]
