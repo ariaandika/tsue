@@ -26,7 +26,7 @@ use crate::http::{authority, target};
 /// ```
 ///
 /// ```rust
-/// use tsue::uri::HttpUri;
+/// use tsue::http::HttpUri;
 ///
 /// let uri = HttpUri::from_bytes("https://example.com:80/over/there?name=ferret").unwrap();
 /// assert!(uri.is_https());
@@ -145,7 +145,7 @@ impl HttpUri {
     /// Returns the port component.
     #[inline]
     pub const fn port(&self) -> Option<&str> {
-        let offset = SCHEME_OFF + self.is_https as u16 + self.host_len;
+        let offset = SCHEME_OFF + self.is_https as u16 + self.host_len + 1;
         if offset < self.path {
             unsafe {
                 Some(str_from!(

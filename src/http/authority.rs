@@ -245,14 +245,16 @@ pub(crate) const fn match_authority(bytes: &mut &[u8]) -> Result<u32, UriError> 
     *bytes = port;
     loop {
         let Some((digit, rest)) = bytes.split_first() else {
-            return unsafe {
-                Ok((delim as *const u8).offset_from_unsigned(base) as u32)
-            }
+            break;
         };
         if !digit.is_ascii_digit() {
-            return Err(UriError::InvalidPort);
+            break;
         }
         *bytes = rest;
+    }
+
+    unsafe {
+        Ok((delim as *const u8).offset_from_unsigned(base) as u32)
     }
 }
 
