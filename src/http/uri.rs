@@ -238,10 +238,10 @@ const fn parse_http(bytes: &[u8]) -> Result<(bool, u16, u16, u16), UriError> {
     let Some(delim) = state.first() else {
         return Ok((is_https, host_len, bytes.len() as u16, 0));
     };
-    if *delim != b'/' {
+    if !matches!(delim, b'/' | b'?') {
         return Err(UriError::InvalidAuthority);
     }
-    let path_len = match target::match_path(&mut state) {
+    let path_len = match target::match_path_abempty_and_query(&mut state) {
         Ok(ok) => ok as u16,
         Err(err) => return Err(err),
     };

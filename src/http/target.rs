@@ -43,7 +43,7 @@ impl Target {
     /// Panics if the input is not a valid target.
     #[inline]
     pub const fn from_static(bytes: &'static [u8]) -> Self {
-        match validate_path(bytes) {
+        match validate_origin_path(bytes) {
             Ok(query) => Self {
                 value: Bytes::from_static(bytes),
                 query,
@@ -60,7 +60,7 @@ impl Target {
     #[inline]
     pub fn from_bytes<B: Into<Bytes>>(bytes: B) -> Result<Self, UriError> {
         let value = bytes.into();
-        match validate_path(value.as_slice()) {
+        match validate_origin_path(value.as_slice()) {
             Ok(query) => Ok(Self { value, query }),
             Err(err) => Err(err),
         }
@@ -73,7 +73,7 @@ impl Target {
     /// Returns [`Err`] if the input is not a valid target.
     #[inline]
     pub fn from_slice<A: AsRef<[u8]>>(bytes: A) -> Result<Self, UriError> {
-        match validate_path(bytes.as_ref()) {
+        match validate_origin_path(bytes.as_ref()) {
             Ok(query) => Ok(Self {
                 value: Bytes::copy_from_slice(bytes.as_ref()),
                 query,
@@ -159,8 +159,15 @@ matches::ascii_lookup_table! {
     }
 }
 
-const fn validate_path(mut bytes: &[u8]) -> Result<u32, UriError> {
-    match match_path(&mut bytes) {
+/// ```not_rust
+/// origin-form     = absolute-path [ "?" query ]
+/// absolute-path   = 1*( "/" segment )
+/// ```
+const fn validate_origin_path(mut bytes: &[u8]) -> Result<u32, UriError> {
+    let Some(b'/') = bytes.first() else {
+        return Err(UriError::InvalidPath);
+    };
+    match match_path_abempty_and_query(&mut bytes) {
         Ok(query) => if bytes.is_empty() {
             Ok(query)
         } else {
@@ -171,35 +178,30 @@ const fn validate_path(mut bytes: &[u8]) -> Result<u32, UriError> {
 }
 
 /// ```not_rust
-/// origin-form     = absolute-path [ "?" query ]
-/// absolute-path   = 1*( "/" segment )
+///                 = path-abempty [ "?" query ]
+/// path-abempty    = *( "/" segment )
 /// segment         = *pchar
 /// ```
-pub(crate) const fn match_path(bytes: &mut &[u8]) -> Result<u32, UriError> {
+pub(crate) const fn match_path_abempty_and_query(bytes: &mut &[u8]) -> Result<u32, UriError> {
     if bytes.len() > u32::MAX as usize {
         return Err(UriError::ExcessiveBytes);
     }
 
     let base = bytes.as_ptr();
 
-    let Some((prefix, state)) = bytes.split_first() else {
-        return Err(UriError::InvalidPath);
+    let Some((prefix, rest)) = bytes.split_first() else {
+        return Ok(0);
     };
 
-    if *prefix != b'/' {
-        return Err(UriError::InvalidPath);
-    }
-
-    if state.is_empty() {
-        return Ok(1);
-    }
-    *bytes = state;
-
-    while let [byte, rest @ ..] = bytes {
-        if !is_pchar_and_slash(*byte) {
-            break;
-        }
+    if *prefix == b'/' {
         *bytes = rest;
+
+        while let [byte, rest @ ..] = bytes {
+            if !is_pchar_and_slash(*byte) {
+                break;
+            }
+            *bytes = rest;
+        }
     }
 
     let Some((delim, rest)) = bytes.split_first() else {
@@ -207,11 +209,11 @@ pub(crate) const fn match_path(bytes: &mut &[u8]) -> Result<u32, UriError> {
             Ok(bytes.as_ptr().offset_from_unsigned(base) as u32)
         }
     };
-
-    let query = unsafe { bytes.as_ptr().offset_from_unsigned(base) };
     if *delim != b'?' {
         return Err(UriError::InvalidPath);
     }
+
+    let query = unsafe { bytes.as_ptr().offset_from_unsigned(base) };
     *bytes = rest;
 
     loop {
