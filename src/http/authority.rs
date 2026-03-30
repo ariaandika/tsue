@@ -197,19 +197,32 @@ pub(crate) const fn match_authority(bytes: &mut &[u8]) -> Result<u32, UriError> 
     }
 
     let base = bytes.as_ptr();
+    macro_rules! host_only {
+        () => {
+            unsafe { Ok(bytes.as_ptr().offset_from_unsigned(base) as u32) }
+        };
+    }
 
     // ===== host =====
     let Some((prefix, state)) = bytes.split_first() else {
         // empty host
         return Err(UriError::InvalidAuthority);
     };
-    if *prefix != b'[' {
+    let delim = if *prefix != b'[' {
         loop {
             let [byte, rest @ ..] = bytes else {
-                break;
+                return host_only!();
             };
             if !is_regname(*byte) {
-                break;
+                if *byte == *prefix {
+                    // empty host with port
+                    return Err(UriError::InvalidHost);
+                }
+                if *byte != b':' {
+                    return host_only!();
+                }
+                *bytes = rest;
+                break byte;
             }
             *bytes = rest;
         }
@@ -220,29 +233,23 @@ pub(crate) const fn match_authority(bytes: &mut &[u8]) -> Result<u32, UriError> 
                 // unclosed ip-literal bracket
                 return Err(UriError::InvalidAuthority);
             };
-            *bytes = rest;
             if !(is_regname(*byte) | (*byte == b':')) {
                 if *byte != b']' {
                     return Err(UriError::InvalidAuthority);
                 }
-                break;
+                *bytes = rest;
+                let [byte @ b':', rest @ ..] = bytes else {
+                    return host_only!();
+                };
+                *bytes = rest;
+                break byte;
             }
+            *bytes = rest;
         }
-    }
-    let [delim, port @ ..] = bytes else {
-        return unsafe {
-            Ok(bytes.as_ptr().offset_from_unsigned(base) as u32)
-        };
     };
 
     // ===== port =====
 
-    if *delim != b':' {
-        return unsafe {
-            Ok((delim as *const u8).offset_from_unsigned(base) as u32)
-        };
-    }
-    *bytes = port;
     loop {
         let Some((digit, rest)) = bytes.split_first() else {
             break;

@@ -188,6 +188,11 @@ pub(crate) const fn match_path_abempty_and_query(bytes: &mut &[u8]) -> Result<u3
     }
 
     let base = bytes.as_ptr();
+    macro_rules! host_only {
+        () => {
+            unsafe { Ok(bytes.as_ptr().offset_from_unsigned(base) as u32) }
+        };
+    }
 
     let Some((prefix, rest)) = bytes.split_first() else {
         return Ok(0);
@@ -196,7 +201,13 @@ pub(crate) const fn match_path_abempty_and_query(bytes: &mut &[u8]) -> Result<u3
     if *prefix == b'/' {
         *bytes = rest;
 
-        while let [byte, rest @ ..] = bytes {
+        if bytes.is_empty(){
+            return Ok(1);
+        }
+        loop {
+            let [byte, rest @ ..] = bytes else {
+                return host_only!();
+            };
             if !is_pchar_and_slash(*byte) {
                 break;
             }
@@ -205,9 +216,7 @@ pub(crate) const fn match_path_abempty_and_query(bytes: &mut &[u8]) -> Result<u3
     }
 
     let Some((delim, rest)) = bytes.split_first() else {
-        return unsafe {
-            Ok(bytes.as_ptr().offset_from_unsigned(base) as u32)
-        }
+        return host_only!();
     };
     if *delim != b'?' {
         return Err(UriError::InvalidPath);
