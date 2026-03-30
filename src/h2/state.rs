@@ -339,9 +339,8 @@ impl ReqlineBuilder {
             P::Path => match self.path.as_mut() {
                 None => {
                     self.path = Some(
-                        Target::from_bytes(
-                            field.value().clone().into()
-                        ).map_err(|_| E::Malformed)?
+                        Target::from_bytes(field.value().clone())
+                            .map_err(|_| E::Malformed)?
                     )
                 }
                 Some(_) => return Err(E::Malformed),

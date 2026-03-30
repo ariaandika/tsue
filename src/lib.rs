@@ -47,7 +47,6 @@ mod matches;
 pub use tcio::bytes;
 
 // definitions
-mod uri;
 pub mod headers;
 pub mod http;
 pub mod body;

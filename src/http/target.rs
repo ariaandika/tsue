@@ -1,7 +1,7 @@
 use tcio::bytes::Bytes;
 
 use crate::http::error::UriError;
-use crate::uri::matches;
+use crate::matches;
 
 /// HTTP Request Target.
 ///

@@ -147,6 +147,27 @@ pub(crate) use {byte_map};
 
 // ===== Blocks =====
 
+/// `pct-encoded = "%" HEXDIG HEXDIG`
+pub const fn pct_encoded(byte: u8) -> bool {
+    byte == b'%' || byte.is_ascii_hexdigit()
+}
+
+/// `unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"`
+pub const fn unreserved(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
+}
+
+/// ```not_rust
+/// sub-delims = "!" / "$" / "&" / "'" / "(" / ")"
+///            / "*" / "+" / "," / ";" / "="
+/// ```
+pub const fn sub_delims(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'='
+    ) || byte.is_ascii_alphanumeric()
+}
+
 ascii_lookup_table! {
     /// token   = 1*tchar
     /// tchar   = "!" / "#" / "$" / "%" / "&" / "'" / "*"
