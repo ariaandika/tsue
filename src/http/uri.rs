@@ -184,6 +184,13 @@ impl HttpUri {
             None
         }
     }
+
+    /// Extracts a string slice containing the uri.
+    #[inline]
+    pub const fn as_str(&self) -> &str {
+        // SAFETY: precondition `value` is valid ASCII
+        unsafe { str::from_utf8_unchecked(self.value.as_slice()) }
+    }
 }
 
 // ===== std traits =====
@@ -251,15 +258,94 @@ const fn parse_http(bytes: &[u8]) -> Result<(bool, u16, u16, u16), UriError> {
 
 #[test]
 fn test_http_uri() {
-    let http = HttpUri::from_slice("http://example.com/users/all?page=440").unwrap();
-    assert!(http.is_http());
-    assert_eq!(http.authority(), "example.com");
-    assert_eq!(http.host(), "example.com");
-    assert_eq!(http.port(), None);
-    assert_eq!(http.path(), "/users/all");
-    assert_eq!(http.query(), Some("page=440"));
+    macro_rules! test_me {
+        (#[error] $($uri:expr),* $(,)?) => {
+            $(assert!(HttpUri::from_slice($uri).is_err());)*
+        };
+        {
+            $uri:expr;
+            $is_http:ident;
+            $auth:expr; $host:expr, $port:expr;
+            $path:expr, $query:expr;
+        } => {
+            let uri = HttpUri::from_slice($uri).unwrap();
+            assert!(uri.$is_http());
+            assert_eq!(uri.as_str(), $uri);
+            assert_eq!(uri.authority(), $auth);
+            assert_eq!(uri.host(), $host);
+            assert_eq!(uri.port(), $port);
+            assert_eq!(uri.path(), $path);
+            assert_eq!(uri.query(), $query);
+        };
+    }
 
-    // authority required
-
-    assert!(HttpUri::from_slice("http:/users/all?page=440").is_err());
+    test_me! {
+        #[error]
+        "", "http", "http:", "http/", "http:/", "http://", "http:///"
+    }
+    // path is `path-abempty`, begins with `/` or is empty
+    test_me! {
+        "http://example.com";
+        is_http;
+        "example.com"; "example.com", None;
+        "", None;
+    }
+    // common form
+    test_me! {
+        "http://example.com/users/all";
+        is_http;
+        "example.com"; "example.com", None;
+        "/users/all", None;
+    }
+    // with query
+    test_me! {
+        "http://example.com/users/all?page=440";
+        is_http;
+        "example.com"; "example.com", None;
+        "/users/all", Some("page=440");
+    }
+    // empty query
+    test_me! {
+        "http://example.com/users/all?";
+        is_http;
+        "example.com"; "example.com", None;
+        "/users/all", None;
+    }
+    // empty path, with query
+    test_me! {
+        "http://example.com?page=440";
+        is_http;
+        "example.com"; "example.com", None;
+        "", Some("page=440");
+    }
+    // empty path and query
+    test_me! {
+        "http://example.com?";
+        is_http;
+        "example.com"; "example.com", None;
+        "", None;
+    }
+    // with port
+    test_me! {
+        "http://example.com:80/users/all";
+        is_http;
+        "example.com:80"; "example.com", Some("80");
+        "/users/all", None;
+    }
+    // with empty port
+    test_me! {
+        "http://example.com:/users/all";
+        is_http;
+        "example.com:"; "example.com", None;
+        "/users/all", None;
+    }
+    // host cannot be empty
+    test_me!(#[error] "http://:80/users/all");
+    // all component
+    test_me! {
+        "http://example.com:80/users/all?page=440";
+        is_http;
+        "example.com:80"; "example.com", Some("80");
+        "/users/all", Some("page=440");
+    }
 }

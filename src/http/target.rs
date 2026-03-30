@@ -237,19 +237,44 @@ pub(crate) const fn match_path_abempty_and_query(bytes: &mut &[u8]) -> Result<u3
 }
 
 #[test]
-fn test_path() {
-    let target = Target::from_slice(b"/users/all").unwrap();
-    assert_eq!(target.as_str(), "/users/all");
-    assert_eq!(target.path(), "/users/all");
-    assert_eq!(target.query(), None);
+fn test_target() {
+    macro_rules! test_me {
+        (#[error] $($target:expr),* $(,)?) => {
+            $(assert!(Target::from_slice($target).is_err());)*
+        };
+        {
+            $target:expr;
+            $path:expr, $query:expr;
+        } => {
+            let target = Target::from_slice($target).unwrap();
+            assert_eq!(target.as_str(), $target);
+            assert_eq!(target.path(), $path);
+            assert_eq!(target.query(), $query);
+        };
+    }
 
-    let target = Target::from_slice(b"/users/all?").unwrap();
-    assert_eq!(target.as_str(), "/users/all?");
-    assert_eq!(target.path(), "/users/all");
-    assert_eq!(target.query(), None);
-
-    let target = Target::from_slice(b"/users/all?page=420").unwrap();
-    assert_eq!(target.as_str(), "/users/all?page=420");
-    assert_eq!(target.path(), "/users/all");
-    assert_eq!(target.query(), Some("page=420"));
+    test_me!(#[error] "");
+    test_me! {
+        "/";
+        "/", None;
+    }
+    test_me! {
+        "/users/all";
+        "/users/all", None;
+    }
+    test_me!(#[error] "users/all");
+    test_me! {
+        "/users/all?";
+        "/users/all", None;
+    }
+    test_me! {
+        "/users/all?page=440";
+        "/users/all", Some("page=440");
+    }
+    test_me! {
+        "/?";
+        "/", None;
+    }
+    test_me!(#[error] "?");
+    test_me!(#[error] "?page=440");
 }

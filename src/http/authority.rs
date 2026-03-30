@@ -276,25 +276,51 @@ matches::ascii_lookup_table! {
 
 #[test]
 pub fn test_authority() {
-    let auth = Authority::from_slice("example.com").unwrap();
-    assert_eq!(auth.as_str(), "example.com");
-    assert_eq!(auth.host(), "example.com");
-    assert_eq!(auth.port(), None);
+    macro_rules! test_me {
+        (#[error] $($auth:expr),* $(,)?) => {
+            $(assert!(Authority::from_slice($auth).is_err());)*
+        };
+        {
+            $auth:expr;
+            $host:expr, $port:expr;
+        } => {
+            let auth = Authority::from_slice($auth).unwrap();
+            assert_eq!(auth.as_str(), $auth);
+            assert_eq!(auth.host(), $host);
+            assert_eq!(auth.port(), $port);
+        };
+    }
 
-    let auth = Authority::from_slice("example.com:443").unwrap();
-    assert_eq!(auth.as_str(), "example.com:443");
-    assert_eq!(auth.host(), "example.com");
-    assert_eq!(auth.port(), Some("443"));
+    test_me!(#[error] "");
+    test_me! {
+        "example.com";
+        "example.com", None;
+    }
+    test_me! {
+        "example.com:443";
+        "example.com", Some("443");
+    }
+    test_me! {
+        "example.com:";
+        "example.com", None;
+    }
+    test_me!(#[error] "example.com:home");
+    test_me!(#[error] ":443");
 
     // note that currently the exact syntax of ip address are not validated
-
-    let auth = Authority::from_slice("[a2f::1]").unwrap();
-    assert_eq!(auth.as_str(), "[a2f::1]",);
-    assert_eq!(auth.host(), "[a2f::1]",);
-    assert_eq!(auth.port(), None);
-
-    let auth = Authority::from_slice("[a2f::1]:443").unwrap();
-    assert_eq!(auth.as_str(), "[a2f::1]:443");
-    assert_eq!(auth.host(), "[a2f::1]");
-    assert_eq!(auth.port(), Some("443"));
+    test_me! {
+        "[a2f::1]";
+        "[a2f::1]", None;
+    }
+    test_me! {
+        "[a2f::1]:443";
+        "[a2f::1]", Some("443");
+    }
+    test_me! {
+        "[a2f::1]:";
+        "[a2f::1]", None;
+    }
+    test_me!(#[error] "[a2f::1");
+    test_me!(#[error] "a2f::1]:443");
+    test_me!(#[error] "a2f::1:443");
 }
