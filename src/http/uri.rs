@@ -55,16 +55,16 @@ impl HttpUri {
     ///
     /// Returns [`Err`] if the input is not a valid HTTP URI.
     #[inline]
-    pub const fn from_static(bytes: &'static [u8]) -> Result<Self, UriError> {
+    pub const fn from_static(bytes: &'static [u8]) -> Self {
         match parse_http(bytes) {
-            Ok((is_https, host_len, path, path_len)) => Ok(Self {
+            Ok((is_https, host_len, path, path_len)) => Self {
                 value: Bytes::from_static(bytes),
                 is_https,
                 host_len,
                 path,
                 path_len,
-            }),
-            Err(err) => Err(err),
+            },
+            Err(err) => err.panic_const(),
         }
     }
 
@@ -194,7 +194,7 @@ macro_rules! str_from {
     };
 }
 
-use {str_from};
+use str_from;
 
 /// Returns:
 ///
@@ -235,29 +235,31 @@ const fn parse_http(bytes: &[u8]) -> Result<(bool, u16, u16, u16), UriError> {
         return Err(UriError::InvalidAuthority);
     }
 
-    let Some((delim, mut rest)) = state.split_first() else {
+    let Some(delim) = state.first() else {
         return Ok((is_https, host_len, bytes.len() as u16, 0));
     };
-    let (path, path_len) = if *delim == b'/' {
-        let path_len = match target::match_path(&mut rest) {
-            Ok(ok) => ok,
-            Err(err) => return Err(err),
-        };
-        let path = unsafe { (delim as *const u8).offset_from_unsigned(bytes.as_ptr()) };
-        (path as u16, path_len as u16)
-    } else {
+    if *delim != b'/' {
         return Err(UriError::InvalidAuthority);
-    };
-
-    if let Some((delim, mut rest)) = state.split_first() {
-        if *delim != b'?' {
-            return Err(UriError::InvalidPath);
-        }
-        target::match_query(&mut rest);
-        if !rest.is_empty() {
-            return Err(UriError::InvalidPath);
-        }
     }
-
+    let path_len = match target::match_path(&mut state) {
+        Ok(ok) => ok as u16,
+        Err(err) => return Err(err),
+    };
+    let path = unsafe { (delim as *const u8).offset_from_unsigned(bytes.as_ptr()) as u16 };
     Ok((is_https, host_len, path, path_len))
+}
+
+#[test]
+fn test_http_uri() {
+    let http = HttpUri::from_slice("http://example.com/users/all?page=440").unwrap();
+    assert!(http.is_http());
+    assert_eq!(http.authority(), "example.com");
+    assert_eq!(http.host(), "example.com");
+    assert_eq!(http.port(), None);
+    assert_eq!(http.path(), "/users/all");
+    assert_eq!(http.query(), Some("page=440"));
+
+    // authority required
+
+    assert!(HttpUri::from_slice("http:/users/all?page=440").is_err());
 }
