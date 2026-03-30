@@ -26,9 +26,7 @@ use crate::uri::{UriError, matches};
 /// ```
 #[derive(Clone)]
 pub struct Authority {
-    /// ```not_rust
-    /// Host = uri-host [ ":" port ] ; Section 4
-    /// ```
+    /// `uri-host [ ":" port ] ; Section 4`
     value: Bytes,
     port: u32,
 }
@@ -152,11 +150,10 @@ macro_rules! str_from_parts {
 
 use str_from_parts;
 
-const fn validate_authority(bytes: &[u8]) -> Result<u32, UriError> {
-    let mut state = bytes;
-    match match_authority(&mut state) {
+const fn validate_authority(mut bytes: &[u8]) -> Result<u32, UriError> {
+    match match_authority(&mut bytes) {
         Ok(port) => {
-            if state.is_empty() {
+            if bytes.is_empty() {
                 Ok(port)
             } else {
                 Err(UriError::InvalidAuthority)
@@ -166,49 +163,10 @@ const fn validate_authority(bytes: &[u8]) -> Result<u32, UriError> {
     }
 }
 
-/// ```not_rust
-/// Host = uri-host [ ":" port ] ; Section 4
-/// ```
-pub(crate) const fn match_authority(bytes: &mut &[u8]) -> Result<u32, UriError> {
-    if bytes.len() > u32::MAX as usize {
-        return Err(UriError::ExcessiveBytes);
-    }
-    let Some(rest) = validate_host(bytes) else {
-        return Err(UriError::InvalidHost);
-    };
-    let Some((delim, port)) = rest.split_first() else {
-        *bytes = rest;
-        return Ok(bytes.len() as u32);
-    };
-    *bytes = port;
-    if *delim != b':' {
-        return Err(UriError::InvalidHost);
-    }
-    loop {
-        let Some((digit, rest)) = bytes.split_first() else {
-            return unsafe {
-                Ok((delim as *const u8).offset_from_unsigned(bytes.as_ptr()) as u32)
-            }
-        };
-        if !digit.is_ascii_digit() {
-            return Err(UriError::InvalidPort);
-        }
-        *bytes = rest;
-    }
-}
-
-matches::ascii_lookup_table! {
-    /// `reg-name = *( unreserved / pct-encoded / sub-delims )`
-    const fn is_regname(byte: u8) -> bool {
-        matches::unreserved(byte)
-        || matches::pct_encoded(byte)
-        || matches::sub_delims(byte)
-    }
-}
-
 /// A sender MUST NOT generate an "http" URI with an empty host identifier
 ///
 /// ```not_rust
+/// Host          = uri-host [ ":" port ] ; Section 4
 /// uri-host      = IP-literal / IPv4address / reg-name
 /// IP-literal    = "[" ( IPv6address / IPvFuture  ) "]"
 /// IPv4address   = dec-octet "." dec-octet "." dec-octet "." dec-octet
@@ -232,31 +190,101 @@ matches::ascii_lookup_table! {
 /// h16           = 1*4HEXDIG
 /// ls32          = ( h16 ":" h16 ) / IPv4address
 /// ```
-const fn validate_host(bytes: &[u8]) -> Option<&[u8]> {
-    let Some((prefix, mut state)) = bytes.split_first() else {
-        return None;
+pub(crate) const fn match_authority(bytes: &mut &[u8]) -> Result<u32, UriError> {
+    if bytes.len() > u32::MAX as usize {
+        return Err(UriError::ExcessiveBytes);
+    }
+
+    let base = bytes.as_ptr();
+
+    // ===== host =====
+    let Some((prefix, state)) = bytes.split_first() else {
+        // empty host
+        return Err(UriError::InvalidAuthority);
     };
     if *prefix != b'[' {
-        state = bytes;
         loop {
-            let [byte, rest @ ..] = state else {
-                return Some(state);
+            let [byte, rest @ ..] = bytes else {
+                break;
             };
             if !is_regname(*byte) {
-                return Some(state);
+                break;
             }
-            state = rest;
+            *bytes = rest;
         }
     } else {
+        *bytes = state;
         loop {
-            let [byte, rest @ ..] = state else {
+            let [byte, rest @ ..] = bytes else {
                 // unclosed ip-literal bracket
-                return None;
+                return Err(UriError::InvalidAuthority);
             };
+            *bytes = rest;
             if !(is_regname(*byte) | (*byte == b':')) {
-                return if *byte == b']' { Some(state) } else { None };
+                if *byte != b']' {
+                    return Err(UriError::InvalidAuthority);
+                }
+                break;
             }
-            state = rest;
         }
     }
+    let [delim, port @ ..] = bytes else {
+        return unsafe {
+            Ok(bytes.as_ptr().offset_from_unsigned(base) as u32)
+        };
+    };
+
+    // ===== port =====
+
+    if *delim != b':' {
+        return unsafe {
+            Ok((delim as *const u8).offset_from_unsigned(base) as u32)
+        };
+    }
+    *bytes = port;
+    loop {
+        let Some((digit, rest)) = bytes.split_first() else {
+            return unsafe {
+                Ok((delim as *const u8).offset_from_unsigned(base) as u32)
+            }
+        };
+        if !digit.is_ascii_digit() {
+            return Err(UriError::InvalidPort);
+        }
+        *bytes = rest;
+    }
+}
+
+matches::ascii_lookup_table! {
+    /// `reg-name = *( unreserved / pct-encoded / sub-delims )`
+    const fn is_regname(byte: u8) -> bool {
+        matches::unreserved(byte)
+        || matches::pct_encoded(byte)
+        || matches::sub_delims(byte)
+    }
+}
+
+#[test]
+pub fn test_authority() {
+    let auth = Authority::from_slice("example.com").unwrap();
+    assert_eq!(auth.as_str(), "example.com");
+    assert_eq!(auth.host(), "example.com");
+    assert_eq!(auth.port(), None);
+
+    let auth = Authority::from_slice("example.com:443").unwrap();
+    assert_eq!(auth.as_str(), "example.com:443");
+    assert_eq!(auth.host(), "example.com");
+    assert_eq!(auth.port(), Some("443"));
+
+    // note that currently the exact syntax of ip address are not validated
+
+    let auth = Authority::from_slice("[a2f::1]").unwrap();
+    assert_eq!(auth.as_str(), "[a2f::1]",);
+    assert_eq!(auth.host(), "[a2f::1]",);
+    assert_eq!(auth.port(), None);
+
+    let auth = Authority::from_slice("[a2f::1]:443").unwrap();
+    assert_eq!(auth.as_str(), "[a2f::1]:443");
+    assert_eq!(auth.host(), "[a2f::1]");
+    assert_eq!(auth.port(), Some("443"));
 }
