@@ -119,7 +119,7 @@ impl StatusCode {
     /// Informational means the request was received, continuing process.
     #[inline]
     pub const fn is_informational(&self) -> bool {
-        matches!(self.0.get(), 100..200)
+        self.0.get() / 100 == 1
     }
 
     /// Returns `true` is status code class is successful.
@@ -127,7 +127,7 @@ impl StatusCode {
     /// Successful means the request was successfully received, understood, and accepted.
     #[inline]
     pub const fn is_successful(&self) -> bool {
-        matches!(self.0.get(), 200..300)
+        self.0.get() / 100 == 2
     }
 
     /// Returns `true` is status code class is redirection.
@@ -135,7 +135,7 @@ impl StatusCode {
     /// Redirection means further action needs to be taken in order to complete the request.
     #[inline]
     pub const fn is_redirection(&self) -> bool {
-        matches!(self.0.get(), 300..400)
+        self.0.get() / 100 == 3
     }
 
     /// Returns `true` is status code class is client error.
@@ -143,7 +143,7 @@ impl StatusCode {
     /// Client error means the request contains bad syntax or cannot be fulfilled.
     #[inline]
     pub const fn is_client_error(&self) -> bool {
-        matches!(self.0.get(), 400..500)
+        self.0.get() / 100 == 4
     }
 
     /// Returns `true` is status code class is server error.
@@ -151,9 +151,7 @@ impl StatusCode {
     /// Server error means the server failed to fulfill an apparently valid request
     #[inline]
     pub const fn is_server_error(&self) -> bool {
-        // A client that receives a response with an invalid status code SHOULD process the
-        // response as if it had a 5xx (Server Error) status code.
-        self.0.get() > 499 || self.0.get() < 100
+        self.0.get() / 100 == 5
     }
 }
 
