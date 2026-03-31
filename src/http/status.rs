@@ -32,10 +32,10 @@ impl StatusCode {
     /// use tsue::http::StatusCode;
     ///
     /// let status = StatusCode::OK;
-    /// assert_eq!(status.status(), 200);
+    /// assert_eq!(status.as_u16(), 200);
     /// ```
     #[inline]
-    pub const fn status(&self) -> u16 {
+    pub const fn as_u16(&self) -> u16 {
         self.0.get()
     }
 
@@ -62,17 +62,17 @@ impl StatusCode {
     /// use tsue::http::StatusCode;
     ///
     /// let status = StatusCode::OK;
-    /// assert_eq!(status.status_str(), "200");
+    /// assert_eq!(status.code_str(), "200");
     /// ```
     #[inline]
-    pub const fn status_str(&self) -> &'static str {
+    pub const fn code_str(&self) -> &'static str {
         let (offset, _) = self.string();
         unsafe {
             str::from_utf8_unchecked(std::slice::from_raw_parts(REASONS.as_ptr().add(offset), 3))
         }
     }
 
-    /// Returns status code message as str.
+    /// Returns status code reason as str.
     ///
     /// # Examples
     ///
@@ -80,10 +80,10 @@ impl StatusCode {
     /// use tsue::http::StatusCode;
     ///
     /// let status = StatusCode::OK;
-    /// assert_eq!(status.message(), "OK");
+    /// assert_eq!(status.reason(), "OK");
     /// ```
     #[inline]
-    pub const fn message(&self) -> &'static str {
+    pub const fn reason(&self) -> &'static str {
         let (offset, end) = self.string();
         unsafe {
             str::from_utf8_unchecked(std::slice::from_raw_parts(
@@ -404,12 +404,12 @@ impl std::fmt::Debug for StatusCode {
 
 #[test]
 fn test_status_code() {
-    assert_eq!(StatusCode::SWITCHING_PROTOCOL.message(), "Switching Protocols");
+    assert_eq!(StatusCode::SWITCHING_PROTOCOL.reason(), "Switching Protocols");
     assert_eq!(StatusCode::SWITCHING_PROTOCOL.as_str(), "101 Switching Protocols");
 
     for (status, expected_reason) in TEST_STATUS {
-        assert_eq!(status.message(), expected_reason);
-        assert_eq!(status.status_str(), status.0.to_string());
+        assert_eq!(status.reason(), expected_reason);
+        assert_eq!(status.code_str(), status.0.to_string());
         assert_eq!(status.as_str(), format!("{} {expected_reason}", status.0));
     }
 }

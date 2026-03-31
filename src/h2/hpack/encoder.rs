@@ -53,7 +53,7 @@ impl Encoder {
     // }
 
     pub fn encode_status(&mut self, status: StatusCode, write_buffer: &mut BytesMut) {
-        let idx = match status.status() {
+        let idx = match status.as_u16() {
             200 => 8,
             204 => 9,
             206 => 10,
@@ -68,7 +68,7 @@ impl Encoder {
             return;
         }
         // SAFETY: `Status::status_str` is statically valid ASCII
-        let val = unsafe { HeaderValue::unvalidated_static(status.status_str().as_bytes()) };
+        let val = unsafe { HeaderValue::unvalidated_static(status.code_str().as_bytes()) };
         self.encode_header(standard::PSEUDO_STATUS, val, write_buffer);
     }
 
