@@ -47,7 +47,7 @@ impl From<HeaderError> for HpackError {
     fn from(err: HeaderError) -> Self {
         match err {
             HeaderError::Empty => Self::Incomplete,
-            HeaderError::TooLong => Self::TooLarge,
+            HeaderError::ExcessiveBytes => Self::TooLarge,
             HeaderError::Invalid => Self::InvalidHeader,
         }
     }

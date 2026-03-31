@@ -5,8 +5,8 @@
 pub enum HeaderError {
     /// Bytes is empty.
     Empty,
-    /// Bytes too long.
-    TooLong,
+    /// Excessive bytes length.
+    ExcessiveBytes,
     /// Bytes contains invalid character.
     Invalid,
 }
@@ -15,15 +15,15 @@ impl HeaderError {
     pub(crate) const fn invalid_len(len: usize) -> Self {
         match len {
             0 => Self::Empty,
-            _ => Self::TooLong,
+            _ => Self::ExcessiveBytes,
         }
     }
 
     pub(crate) const fn message(&self) -> &'static str {
         match self {
-            Self::Empty => "cannot be empty",
-            Self::TooLong => "too long",
-            Self::Invalid => "contains invalid byte",
+            Self::Empty => "empty header",
+            Self::ExcessiveBytes => "excessive bytes",
+            Self::Invalid => "invalid byte",
         }
     }
 

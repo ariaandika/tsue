@@ -100,7 +100,7 @@ const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderError> {
     }
     // too long
     if bytes.len() > HeaderValue::MAX_LENGTH {
-        return Err(E::TooLong);
+        return Err(E::ExcessiveBytes);
     }
     let mut error = false;
     while let [byte, rest @ ..] = bytes {

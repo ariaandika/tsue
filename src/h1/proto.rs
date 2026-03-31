@@ -270,10 +270,10 @@ impl Headers {
 
     fn insert(&mut self, line_len: usize) -> Result<(), ProtoError> {
         if self.len >= Self::MAX_HEADERS {
-            return Err(E::TooManyHeaders);
+            return Err(E::ExcessiveHeaders);
         }
         let Ok(value) = u16::try_from(line_len) else {
-            return Err(E::ParseError(P::TooLong));
+            return Err(E::ParseError(P::ExcessiveBytes));
         };
         self.headers[self.len as usize].write(value);
         self.len += 1;

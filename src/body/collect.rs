@@ -55,7 +55,7 @@ impl Future for Collect {
                     // the stream returns 2 chunk, a copy is required for concatenation
                     let (lo, up) = me.body.size_hint();
                     let Ok(hint) = usize::try_from(up.unwrap_or(lo)) else {
-                        return Poll::Ready(Err(BodyError::ChunkTooLarge.into()));
+                        return Poll::Ready(Err(BodyError::ExcessiveChunk.into()));
                     };
                     let mut bytesm = BytesMut::with_capacity(data.len() + hint);
                     bytesm.extend_from_slice(bytes);

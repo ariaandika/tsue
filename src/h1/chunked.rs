@@ -106,7 +106,7 @@ impl ChunkedCoder {
                 return Ready(Some(Err(E::InvalidChunked)));
             };
             if chunk_len > MAX_CHUNKED_SIZE {
-                return Ready(Some(Err(E::ChunkTooLarge)));
+                return Ready(Some(Err(E::ExcessiveChunk)));
             }
 
             // suffix

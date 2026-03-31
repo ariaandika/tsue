@@ -17,8 +17,8 @@ pub enum BodyError {
     InvalidSizeHint,
     /// Client error where chunked format is invalid.
     InvalidChunked,
-    /// Client error where chunked length is too large than the hard limit.
-    ChunkTooLarge,
+    /// Client error where excessive chunk length is received.
+    ExcessiveChunk,
 }
 
 impl BodyError {
@@ -30,7 +30,7 @@ impl BodyError {
             Self::Exhausted => "message body exhausted",
             Self::InvalidSizeHint => "invalid size hint",
             Self::InvalidChunked => "invalid chunked format",
-            Self::ChunkTooLarge => "chunk too large",
+            Self::ExcessiveChunk => "excessive chunk",
         }
     }
 }

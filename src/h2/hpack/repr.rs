@@ -188,7 +188,7 @@ fn continue_decode_int(bytes: &mut Bytes) -> Result<usize, HpackError> {
         shift += 7;
 
         if value > MAX {
-            return Err(crate::headers::error::HeaderError::TooLong.into());
+            return Err(crate::headers::error::HeaderError::ExcessiveBytes.into());
         }
         if bits & 128 == 0 {
             break;

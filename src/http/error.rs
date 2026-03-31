@@ -5,8 +5,8 @@ use crate::headers::error::HeaderError;
 /// HTTP Parsing error.
 #[derive(Debug)]
 pub enum ParseError {
-    /// Request line is too long.
-    TooLong,
+    /// Excessive bytes length.
+    ExcessiveBytes,
     /// Request line have invalid separator
     InvalidSeparator,
     /// Unknown Method.
@@ -28,7 +28,7 @@ impl std::error::Error for ParseError {}
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::TooLong => f.write_str("request line too long"),
+            Self::ExcessiveBytes => f.write_str("request line too long"),
             Self::InvalidSeparator => f.write_str("invalid separator"),
             Self::UnknownMethod => f.write_str("unknown method"),
             Self::InvalidMethod => f.write_str("invalid method"),
@@ -44,7 +44,7 @@ impl From<UriError> for ParseError {
     fn from(value: UriError) -> Self {
         use UriError as U;
         match value {
-            U::ExcessiveBytes => Self::TooLong,
+            U::ExcessiveBytes => Self::ExcessiveBytes,
             U::InvalidScheme
             | U::InvalidAuthority
             | U::InvalidPath
@@ -113,8 +113,8 @@ impl std::error::Error for UriError { }
 /// HTTP Semantic error.
 #[derive(Debug)]
 pub enum ProtoError {
-    /// Too many headers.
-    TooManyHeaders,
+    /// Excessive headers count.
+    ExcessiveHeaders,
     /// Missing, duplicate, or invalid host header.
     InvalidHost,
     /// Missing, duplicate, or invalid representation metadata.
@@ -140,7 +140,7 @@ impl std::error::Error for ProtoError {}
 impl std::fmt::Display for ProtoError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::TooManyHeaders => f.write_str("too many headers"),
+            Self::ExcessiveHeaders => f.write_str("excessive headers count"),
             Self::InvalidHost => f.write_str("invalid host"),
             Self::InvalidRepresentation => f.write_str("invalid representation metadata"),
             Self::InvalidContentLength => f.write_str("invalid content length"),
@@ -178,7 +178,7 @@ impl From<HeaderError> for ProtoError {
 impl From<crate::headers::error::TryReserveError> for ProtoError {
     #[inline]
     fn from(_: crate::headers::error::TryReserveError) -> Self {
-        Self::TooManyHeaders
+        Self::ExcessiveHeaders
     }
 }
 
