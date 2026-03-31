@@ -24,10 +24,94 @@ impl Default for StatusCode {
 }
 
 impl StatusCode {
-    /// Returns status code value, e.g: `200`.
+    /// Returns status code value as `u16`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tsue::http::StatusCode;
+    ///
+    /// let status = StatusCode::OK;
+    /// assert_eq!(status.status(), 200);
+    /// ```
     #[inline]
     pub const fn status(&self) -> u16 {
         self.0.get()
+    }
+
+    const fn string(&self) -> (usize, usize) {
+        unsafe {
+            let index = status_to_index(self.0.get()) as usize;
+
+            // SAFETY: valid status will always result in bounds index
+            let end = (*TABLE.as_ptr().add(index)).1 as usize;
+
+            // SAFETY: lowest status (100) will not resulting in index 0
+            // there always previous index
+            let offset = (*TABLE.as_ptr().add(index - 1)).1 as usize;
+
+            (offset, end)
+        }
+    }
+
+    /// Returns status code value as str.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tsue::http::StatusCode;
+    ///
+    /// let status = StatusCode::OK;
+    /// assert_eq!(status.status_str(), "200");
+    /// ```
+    #[inline]
+    pub const fn status_str(&self) -> &'static str {
+        let (offset, _) = self.string();
+        unsafe {
+            str::from_utf8_unchecked(std::slice::from_raw_parts(REASONS.as_ptr().add(offset), 3))
+        }
+    }
+
+    /// Returns status code message as str.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tsue::http::StatusCode;
+    ///
+    /// let status = StatusCode::OK;
+    /// assert_eq!(status.message(), "OK");
+    /// ```
+    #[inline]
+    pub const fn message(&self) -> &'static str {
+        let (offset, end) = self.string();
+        unsafe {
+            str::from_utf8_unchecked(std::slice::from_raw_parts(
+                REASONS.as_ptr().add(offset + 4),
+                end - offset - 4,
+            ))
+        }
+    }
+
+    /// Returns status code and message as string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tsue::http::StatusCode;
+    ///
+    /// let status = StatusCode::OK;
+    /// assert_eq!(status.as_str(), "200 OK");
+    /// ```
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        let (offset, end) = self.string();
+        unsafe {
+            str::from_utf8_unchecked(std::slice::from_raw_parts(
+                REASONS.as_ptr().add(offset),
+                end - offset,
+            ))
+        }
     }
 
     /// Returns `true` is status code class is informational.
@@ -73,7 +157,18 @@ impl StatusCode {
     }
 }
 
-macro_rules! status_code_v3 {
+const fn status_to_index(status: u16) -> u16 {
+    // 100 to 300 status have at most 9 elements each, divide the first `9 * 3` of the table
+    ((status / 100) * 9)
+    // but 400 status have 32 elements, so for 500 status shift forward the index more to make
+    // space for excess 400 status
+    + ((status / 500) * 23)
+    + (status % 100)
+    // 500 status have more than 9 elements, but its fine because there is no 600 status and still
+    // in bounds of the table
+}
+
+macro_rules! status_code_v4 {
     (
         $(
             $(#[$doc:meta])*
@@ -81,53 +176,48 @@ macro_rules! status_code_v3 {
         )*
     ) => {
         impl StatusCode {
-            /// Returns status code and message as string slice, e.g: `"200 OK"`.
-            #[inline]
-            pub const fn as_str(&self) -> &'static str {
-                match self.0.get() {
-                    $(
-                        $int => concat!(stringify!($int)," ",$msg),
-                    )*
-                    // SAFETY: StatusCode value is privately constructed and immutable
-                    _ => unsafe { std::hint::unreachable_unchecked() },
-                }
-            }
-
-            /// Returns status code as str, e.g: `"200"`.
-            #[inline]
-            pub const fn status_str(&self) -> &'static str {
-                match self.0.get() {
-                    $(
-                        $int => stringify!($int),
-                    )*
-                    // SAFETY: StatusCode value is privately constructed and immutable
-                    _ => unsafe { std::hint::unreachable_unchecked() },
-                }
-            }
-
-            /// Returns status message, e.g: `"OK"`.
-            #[inline]
-            pub const fn message(&self) -> &'static str {
-                match self.0.get() {
-                    $(
-                        $int => $msg,
-                    )*
-                    // SAFETY: StatusCode value is privately constructed and immutable
-                    _ => unsafe { std::hint::unreachable_unchecked() },
-                }
-            }
-        }
-
-        impl StatusCode {
             $(
                 $(#[$doc])*
                 pub const $id: Self = Self(NonZeroU16::new($int).unwrap());
             )*
         }
-    };
+
+        static REASONS: &[u8] = concat!($(concat!(stringify!($int)," ",$msg)),*).as_bytes();
+
+        /// `(status, reason_len)`
+        static TABLE: [(u16,u16); 80] = {
+            let values = [$(($int,$msg)),*];
+            let mut table = [(0,0); 80];
+            table[0] = (0,0);
+            let mut table_i = 1;
+            let mut values_i = 0;
+
+            while table_i < table.len() {
+                let (status, reason) = values[values_i];
+                let idx = status_to_index(status);
+
+                if table_i != idx as usize {
+                    // the padding filled with closest previous value
+                    table[table_i] = table[table_i - 1];
+                } else {
+                    let reason_len = table[table_i - 1].1 + reason.len() as u16 + 4;
+                    table[table_i] = (status, reason_len);
+                    values_i += 1;
+                }
+
+                table_i += 1;
+            }
+            table
+        };
+
+        #[cfg(test)]
+        static TEST_STATUS: [(StatusCode, &str); 48] = [
+            $((StatusCode(unsafe { NonZeroU16::new_unchecked($int) }), $msg)),*
+        ];
+    }
 }
 
-status_code_v3! {
+status_code_v4! {
     /// The 100 (Continue) status code indicates that the initial part of a request has been
     /// received and has not yet been rejected by the server. The server intends to send a final
     /// response after the request has been fully received and acted upon.
@@ -302,15 +392,25 @@ status_code_v3! {
     511 NETWORK_AUTHENTICATION_REQUIRED "Network Authentication Required";
 }
 
-impl std::fmt::Display for StatusCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.status_str().fmt(f)
-    }
-}
+// ===== std traits =====
 
 impl std::fmt::Debug for StatusCode {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_tuple("StatusCode").field(&self.as_str()).finish()
+    }
+}
+
+// ===== tests =====
+
+#[test]
+fn test_status_code() {
+    assert_eq!(StatusCode::SWITCHING_PROTOCOL.message(), "Switching Protocols");
+    assert_eq!(StatusCode::SWITCHING_PROTOCOL.as_str(), "101 Switching Protocols");
+
+    for (status, expected_reason) in TEST_STATUS {
+        assert_eq!(status.message(), expected_reason);
+        assert_eq!(status.status_str(), status.0.to_string());
+        assert_eq!(status.as_str(), format!("{} {expected_reason}", status.0));
     }
 }
 
