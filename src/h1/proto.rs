@@ -20,70 +20,31 @@ pub fn poll_request(
 ) -> Poll<Result<(request::Parts, RequestContext), ProtoError>> {
     // ===== Poll Reqline =====
 
-    const MIN_REQLINE_LEN: usize = b"GET / HTTP/1.1".len();
-
-    if read_buffer.len() < MIN_REQLINE_LEN {
-        return Pending;
-    }
     let Some(line) = matches::find_byte::<b'\n'>(read_buffer) else {
         return Pending;
     };
-    if line.len() < MIN_REQLINE_LEN {
-        return Ready(Err(P::InvalidSeparator.into()));
-    }
-
-    let (method, method_len) = if &line[..4] == b"GET " {
-        (Method::GET, 3)
-    } else if &line[..5] == b"POST " {
-        (Method::POST, 4)
-    } else {
-        let len = line
-            .iter()
-            .position(|&e| e == b' ')
-            .ok_or(P::InvalidSeparator)?;
-        let method = match &line[..len] {
-            b"HEAD" => Method::HEAD,
-            b"PUT" => Method::PUT,
-            b"DELETE" => Method::DELETE,
-            b"OPTIONS" => Method::OPTIONS,
-            b"TRACE" => Method::TRACE,
-            b"PATCH" => Method::PATCH,
-            // An origin server MAY accept a CONNECT request, but most origin servers do not
-            // implement CONNECT.
-            // b"CONNECT" => unimplemented!(),
-            _ => return Ready(Err(P::UnknownMethod.into())),
-        };
-        (method, len)
-    };
-
-    let Some(suffix) = line.last_chunk() else {
-        return Ready(Err(P::InvalidSeparator.into()));
-    };
-    const SUFFIX: &[u8; 10] = b" HTTP/1.1\r";
-    if suffix != SUFFIX {
-        return Ready(Err(P::UnsupportedVersion.into()));
-    }
-
-    // SAFETY: `line` is a subset of `read_buffer`, `+1` because `line` will always exclude the
-    // '\n' in the `read_buffer`
-    let mut state = unsafe { read_buffer.get_unchecked(..line.len() + 1) };
+    let method = match line.split_last() {
+        Some((&b'\r', line)) => parse_reqline(line),
+        _ => Err(P::InvalidSeparator),
+    }?;
+    let mut state = unsafe { read_buffer.get_unchecked(..line.len() + LF) };
 
     // ===== Poll Headers =====
 
     let mut headers = Headers::new();
     loop {
-        if state.first_chunk::<2>() == Some(b"\r\n") {
+        if state.first_chunk::<CRLF>() == Some(b"\r\n") {
             break;
         }
         let Some(line) = matches::find_byte::<b'\n'>(state) else {
             return Pending;
         };
-        if line.is_empty() {
+        if !matches!(line.last(), Some(b'\r')) {
             return Ready(Err(P::InvalidSeparator.into()));
         }
-        let line_len = line.len() + 1;
+        let line_len = line.len() + LF;
         headers.insert(line_len)?;
-        state = &state[line_len..];
+        state = unsafe { state.get_unchecked(line_len..) };
     }
 
     // polling complete, no more `Pending`
@@ -91,14 +52,14 @@ pub fn poll_request(
     let target = unsafe {
         // SAFETY: `line` is a subset of `read_buffer`, `+1` because `line` will always exclude the
         // '\n' in the `read_buffer`
-        let mut reqline = read_buffer.split_to_unchecked(line.len() + 1);
+        let mut line = read_buffer.split_to_unchecked(line.len() + LF);
         // remove reqline method
         // SAFETY: checked at the start of the function
-        reqline.advance_unchecked(method_len + 1);
+        line.advance_unchecked(method.as_str().len() + 1);
         // remove reqline version, `+1` the '\n'
         // SAFETY: the subtraction will not overflow, thus it always less than `reqline.len()`
-        reqline.set_len(reqline.len() - (SUFFIX.len() + 1));
-        reqline
+        line.set_len(line.len() - (SUFFIX.len() + CRLF));
+        line
     };
 
     // ===== Headers =====
@@ -251,7 +212,47 @@ pub fn poll_request(
     Ready(Ok((parts, context)))
 }
 
-// ===== Headers Index =====
+// ===== Parser =====
+
+const MIN_REQLINE_LEN: usize = b"GET / HTTP/1.1".len();
+const SUFFIX: &[u8; 9] = b" HTTP/1.1";
+const LF: usize = b"\n".len();
+const CRLF: usize = b"\r\n".len();
+
+fn parse_reqline(line: &[u8]) -> Result<Method, ParseError> {
+    if line.len() < MIN_REQLINE_LEN {
+        return Err(P::InvalidSeparator);
+    }
+
+    let Some(suffix) = line.last_chunk() else {
+        return Err(P::InvalidSeparator);
+    };
+    if suffix != SUFFIX {
+        return Err(P::UnsupportedVersion);
+    }
+
+    if &line[..4] == b"GET " {
+        Ok(Method::GET)
+    } else {
+        let len = line
+            .iter()
+            .position(|&e| e == b' ')
+            .ok_or(P::InvalidSeparator)?;
+        match &line[..len] {
+            b"POST" => Ok(Method::POST),
+            b"HEAD" => Ok(Method::HEAD),
+            b"PUT" => Ok(Method::PUT),
+            b"DELETE" => Ok(Method::DELETE),
+            b"OPTIONS" => Ok(Method::OPTIONS),
+            b"TRACE" => Ok(Method::TRACE),
+            b"PATCH" => Ok(Method::PATCH),
+            // An origin server MAY accept a CONNECT request, but most origin servers do not
+            // implement CONNECT.
+            // b"CONNECT" => unimplemented!(),
+            _ => Err(P::UnknownMethod),
+        }
+    }
+}
 
 struct Headers {
     headers: [mem::MaybeUninit<u16>; Self::MAX_HEADERS as usize],
@@ -269,13 +270,13 @@ impl Headers {
     }
 
     fn insert(&mut self, line_len: usize) -> Result<(), ProtoError> {
-        if self.len >= Self::MAX_HEADERS {
-            return Err(E::ExcessiveHeaders);
-        }
         let Ok(value) = u16::try_from(line_len) else {
-            return Err(E::ParseError(P::ExcessiveBytes));
+            return Err(P::ExcessiveBytes.into());
         };
-        self.headers[self.len as usize].write(value);
+        let Some(hmut) = self.headers.get_mut(self.len as usize) else {
+            return Err(E::ExcessiveHeaders);
+        };
+        hmut.write(value);
         self.len += 1;
         Ok(())
     }
