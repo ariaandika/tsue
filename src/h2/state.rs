@@ -322,7 +322,7 @@ impl ReqlineBuilder {
             P::Method => match self.method.as_mut() {
                 None => {
                     self.method =
-                        Some(Method::from_bytes(field.value().as_bytes()).ok_or(E::Malformed)?)
+                        Some(Method::from_bytes(field.value().as_bytes()).map_err(|_|E::Malformed)?)
                 }
                 Some(_) => return Err(E::Malformed),
             },

@@ -1,5 +1,22 @@
 use crate::headers::error::HeaderError;
 
+// ===== Unknown Method =====
+
+/// The error value when failed parsing [`Method`] with [`FromStr`].
+///
+/// [`Method`]: crate::http::Method
+/// [`FromStr`]: std::str::FromStr
+#[derive(Debug, Default)]
+pub struct UnknownMethod;
+
+impl std::error::Error for UnknownMethod {}
+
+impl std::fmt::Display for UnknownMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("unknown method")
+    }
+}
+
 // ===== Parsing Error =====W
 
 /// HTTP Parsing error.
