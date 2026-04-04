@@ -6,14 +6,14 @@ use std::num::NonZeroU16;
 /// request and the semantics of the response, including whether the request was successful and
 /// what content is enclosed (if any).
 ///
-/// This API supports status codes defined in [RFC9110] and [RFC6585], [451 (Unavailable For Legal
-/// Reasons)][RFC7725], and [103 (Early Hints)][RFC8297]
+/// This API implements status codes defined in [RFC9110] and [RFC6585], [451 (Unavailable For
+/// Legal Reasons)][RFC7725], and [103 (Early Hints)][RFC8297].
 ///
 /// [RFC9110]: <https://www.rfc-editor.org/rfc/rfc9110#name-status-codes>
 /// [RFC6585]: <https://www.rfc-editor.org/rfc/rfc6585>
 /// [RFC7725]: <https://www.rfc-editor.org/rfc/rfc7725>
 /// [RFC8297]: <https://www.rfc-editor.org/rfc/rfc8297>
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StatusCode(NonZeroU16);
 
 impl Default for StatusCode {
@@ -39,21 +39,6 @@ impl StatusCode {
         self.0.get()
     }
 
-    const fn string(&self) -> (usize, usize) {
-        unsafe {
-            let index = status_to_index(self.0.get()) as usize;
-
-            // SAFETY: valid status will always result in bounds index
-            let end = (*TABLE.as_ptr().add(index)).1 as usize;
-
-            // SAFETY: lowest status (100) will not resulting in index 0
-            // there always previous index
-            let offset = (*TABLE.as_ptr().add(index - 1)).1 as usize;
-
-            (offset, end)
-        }
-    }
-
     /// Returns status code value as str.
     ///
     /// # Examples
@@ -66,10 +51,7 @@ impl StatusCode {
     /// ```
     #[inline]
     pub const fn code_str(&self) -> &'static str {
-        let (offset, _) = self.string();
-        unsafe {
-            str::from_utf8_unchecked(std::slice::from_raw_parts(REASONS.as_ptr().add(offset), 3))
-        }
+        build_str!(self 3)
     }
 
     /// Returns status code reason as str.
@@ -84,13 +66,7 @@ impl StatusCode {
     /// ```
     #[inline]
     pub const fn reason(&self) -> &'static str {
-        let (offset, end) = self.string();
-        unsafe {
-            str::from_utf8_unchecked(std::slice::from_raw_parts(
-                REASONS.as_ptr().add(offset + 4),
-                end - offset - 4,
-            ))
-        }
+        build_str!(self,+ 4|len|)
     }
 
     /// Returns status code and message as string.
@@ -105,13 +81,7 @@ impl StatusCode {
     /// ```
     #[inline]
     pub const fn as_str(&self) -> &'static str {
-        let (offset, end) = self.string();
-        unsafe {
-            str::from_utf8_unchecked(std::slice::from_raw_parts(
-                REASONS.as_ptr().add(offset),
-                end - offset,
-            ))
-        }
+        build_str!(self|len|)
     }
 
     /// Returns `true` is status code class is informational.
@@ -148,72 +118,125 @@ impl StatusCode {
 
     /// Returns `true` is status code class is server error.
     ///
-    /// Server error means the server failed to fulfill an apparently valid request
+    /// Server error means the server failed to fulfill an apparently valid request.
     #[inline]
     pub const fn is_server_error(&self) -> bool {
         self.0.get() / 100 == 5
     }
 }
 
+/// 100, 200, 300, and 500 status codes have at most 12 elements each.
+///
+/// Divide the table into segments with that elements each.
+///
+/// Status code is modulused by 500 so that 500 status codes use the first segment of the table.
+///
+/// `400` status codes have at most 32 elements, this will overflow the segment, but its fine
+/// because it is the last segment, thus no overlap.
+///
+/// In the table, each entry stores an offset to the start of reason string, and the next entry
+/// can be used to get the length of the reason string.
+///
+/// Because 500 status codes wrapped to the first segment, it will result in wrong length when
+/// collided with 100 status code, therefore segment size should be most elements count plus one.
 const fn status_to_index(status: u16) -> u16 {
-    // 100 to 300 status have at most 9 elements each, divide the first `9 * 3` of the table
-    ((status / 100) * 9)
-    // but 400 status have 32 elements, so for 500 status shift forward the index more to make
-    // space for excess 400 status
-    + ((status / 500) * 23)
-    + (status % 100)
-    // 500 status have more than 9 elements, but its fine because there is no 600 status and still
-    // in bounds of the table
+    let status = status % 500;
+    ((status / 100) * 13) + (status % 100)
 }
 
-macro_rules! status_code_v4 {
-    (
-        $(
-            $(#[$doc:meta])*
-            $int:literal $id:ident $msg:literal;
-        )*
-    ) => {
-        impl StatusCode {
-            $(
-                $(#[$doc])*
-                pub const $id: Self = Self(NonZeroU16::new($int).unwrap());
-            )*
+/// `(status, reason_offset)`
+static TABLE: [(u16, u16); 88] = {
+    let mut table = [(0, 0); 88];
+    let mut table_i = 0;
+    let mut values_i = 0;
+
+    let table_len = table.len();
+
+    while table_i < table_len {
+        let (status, reason) = VALUES[values_i];
+        if status / 100 == 5 {
+            break;
         }
 
-        static REASONS: &[u8] = concat!($(concat!(stringify!($int)," ",$msg)),*).as_bytes();
+        let idx = status_to_index(status);
+        let current_mut = &mut table[table_i];
 
-        /// `(status, reason_len)`
-        static TABLE: [(u16,u16); 80] = {
-            let values = [$(($int,$msg)),*];
-            let mut table = [(0,0); 80];
-            table[0] = (0,0);
-            let mut table_i = 1;
-            let mut values_i = 0;
+        if table_i == idx as usize {
+            let offset = current_mut.1 + reason.len() as u16 + 4;
 
-            while table_i < table.len() {
-                let (status, reason) = values[values_i];
-                let idx = status_to_index(status);
+            current_mut.0 = status;
+            table[table_i + 1].1 = offset;
 
-                if table_i != idx as usize {
-                    // the padding filled with closest previous value
-                    table[table_i] = table[table_i - 1];
-                } else {
-                    let reason_len = table[table_i - 1].1 + reason.len() as u16 + 4;
-                    table[table_i] = (status, reason_len);
-                    values_i += 1;
-                }
+            values_i += 1;
+        } else {
+            // padding entry
+            table[table_i + 1].1 = current_mut.1;
+        }
 
-                table_i += 1;
-            }
-            table
-        };
-
-        #[cfg(test)]
-        static TEST_STATUS: [(StatusCode, &str); 48] = [
-            $((StatusCode(unsafe { NonZeroU16::new_unchecked($int) }), $msg)),*
-        ];
+        table_i += 1;
     }
+
+    table[0].1 = table[table_i].1;
+
+    // special case for 500 status codes that placed in the first segment
+    table_i = 0;
+    while values_i < VALUES.len() {
+        let (status, reason) = VALUES[values_i];
+        let idx = status_to_index(status);
+
+        let current_mut = &mut table[table_i];
+
+        if table_i == idx as usize {
+            let offset = current_mut.1 + reason.len() as u16 + 4;
+
+            current_mut.0 = status;
+            if table_i + 1 < table_len {
+                table[table_i + 1].1 = offset;
+            }
+
+            values_i += 1;
+        } else {
+            // padding entry
+            if table_i + 1 < table_len {
+                table[table_i + 1].1 = current_mut.1;
+            }
+        }
+
+        table_i += 1;
+    }
+
+    table
+};
+
+macro_rules! build_str {
+    (
+        $me:ident
+        $(,$off1:tt $off2:literal)?
+        $(|$len:ident|)?
+        $($len_lit:literal)?
+    ) => {
+        unsafe {
+            let index = status_to_index($me.0.get()) as usize;
+
+            // SAFETY: valid status will always result in bounds index
+            let offset = ((*TABLE.as_ptr().add(index)).1 $($off1 $off2)?);
+
+            // SAFETY: highest status will not resulting in last element, there is alwys
+            // next element
+            $(
+                let end = (*TABLE.as_ptr().add(index.unchecked_add(1))).1;
+                let $len = end.unchecked_sub(offset);
+            )?
+
+            str::from_utf8_unchecked(std::slice::from_raw_parts(
+                REASONS.as_ptr().add(offset as usize),
+                $($len as usize)? $($len_lit)?
+            ))
+        }
+    };
 }
+
+use build_str;
 
 status_code_v4! {
     /// The 100 (Continue) status code indicates that the initial part of a request has been
@@ -390,20 +413,45 @@ status_code_v4! {
     511 NETWORK_AUTHENTICATION_REQUIRED "Network Authentication Required";
 }
 
-// ===== std traits =====
+macro_rules! status_code_v4 {
+    (
+        $(
+            $(#[$doc:meta])*
+            $int:literal $id:ident $msg:literal;
+        )*
+    ) => {
+        impl StatusCode {
+            $(
+                $(#[$doc])*
+                pub const $id: Self = Self(NonZeroU16::new($int).unwrap());
+            )*
+        }
 
-impl std::fmt::Debug for StatusCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_tuple("StatusCode").field(&self.as_str()).finish()
+        const VALUES: [(u16, &str); 48] = [$(($int,$msg)),*];
+
+        static REASONS: &[u8] = concat!($(concat!(stringify!($int)," ",$msg)),*).as_bytes();
+
+        #[cfg(test)]
+        static TEST_STATUS: [(StatusCode, &str); 48] = [
+            $((StatusCode(unsafe { NonZeroU16::new_unchecked($int) }), $msg)),*
+        ];
     }
 }
+
+use status_code_v4;
 
 // ===== tests =====
 
 #[test]
 fn test_status_code() {
-    assert_eq!(StatusCode::SWITCHING_PROTOCOL.reason(), "Switching Protocols");
-    assert_eq!(StatusCode::SWITCHING_PROTOCOL.as_str(), "101 Switching Protocols");
+    assert_eq!(
+        StatusCode::SWITCHING_PROTOCOL.reason(),
+        "Switching Protocols"
+    );
+    assert_eq!(
+        StatusCode::SWITCHING_PROTOCOL.as_str(),
+        "101 Switching Protocols"
+    );
 
     for (status, expected_reason) in TEST_STATUS {
         assert_eq!(status.reason(), expected_reason);
