@@ -1,6 +1,6 @@
 pub(crate) use crate::matches::*;
 
-byte_map! {
+ascii_lookup_table! {
     /// Specialized `token` for lowercase only header name.
     ///
     /// token   = 1*tchar
@@ -8,7 +8,7 @@ byte_map! {
     ///         / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
     ///         / DIGIT / ALPHA
     #[inline(always)]
-    pub const fn is_token_lowercase(byte: u8) {
+    pub const fn is_token_lowercase(byte: u8) -> bool {
         matches!(
             byte,
             | b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*'
