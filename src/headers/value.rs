@@ -102,12 +102,15 @@ const fn validate_header_value(mut bytes: &[u8]) -> Result<(), HeaderError> {
     if bytes.len() > HeaderValue::MAX_LENGTH {
         return Err(E::ExcessiveBytes);
     }
-    let mut error = false;
-    while let [byte, rest @ ..] = bytes {
-        error |= !matches::is_header_value(*byte);
+    loop {
+        let [byte, rest @ ..] = bytes else {
+            return Ok(());
+        };
+        if !matches::is_header_value(*byte) {
+            return Err(E::Invalid);
+        }
         bytes = rest;
     }
-    if !error { Ok(()) } else { Err(E::Invalid) }
 }
 
 // ===== Traits =====

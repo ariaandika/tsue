@@ -13,41 +13,59 @@ ascii_lookup_table! {
             byte,
             | b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*'
             | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
+            // cannot use `is_ascii_alphanumeric()` because it includes uppercase
             | b'0'..=b'9' | b'a'..=b'z'
         )
+
     }
 }
 
-/// Returns `true` if byte is valid header name.
+ascii_lookup_table! {
+    /// Returns `true` if byte is valid header name.
+    ///
+    /// Note, `obs-text` is NOT supported.
+    ///
+    /// ```not_rust
+    /// field-value    = *field-content
+    /// field-content  = field-vchar
+    ///                  [ 1*( SP / HTAB / field-vchar ) field-vchar ]
+    /// field-vchar    = VCHAR / obs-text
+    /// obs-text       = %x80-FF
+    /// ```
+    #[inline(always)]
+    pub const fn is_header_value(byte: u8) -> bool {
+        // VCHAR                || SP / HTAB
+        byte.is_ascii_graphic() || matches!(byte, b' ' | b'\t')
+    }
+}
+
+/// Any invalid character will have it MSB set.
 ///
-/// field-value    = *field-content
-/// field-content  = field-vchar
-///                  [ 1*( SP / HTAB / field-vchar ) field-vchar ]
-/// field-vchar    = VCHAR / obs-text
-/// obs-text       = %x80-FF
-///
-/// Note, `obs-text` is NOT supported.
-#[inline(always)]
-pub const fn is_header_value(byte: u8) -> bool {
-    const fn valid(byte: u8) -> bool {
-        // VCHAR                    || SP / HTAB
-        matches!(byte, 0x21..=0x7E) || matches!(byte, b' ' | b'\t')
+/// Character is normalized to lowercase.
+pub const HEADER_NAME: [u8; 256] = {
+    /// token   = 1*tchar
+    /// tchar   = "!" / "#" / "$" / "%" / "&" / "'" / "*"
+    ///         / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
+    ///         / DIGIT / ALPHA
+    const fn is_token(byte: u8) -> bool {
+        matches!(
+            byte,
+            | b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*'
+            | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
+            | b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z'
+        )
     }
 
-    const PAT: [bool; 256] = {
-        let mut bytes = [false; 256];
-        let mut byte = 0u8;
-        loop {
-            bytes[byte as usize] = valid(byte);
-            // 127 > is non-ascii
-            if byte == 127 {
-                break;
-            }
-            byte += 1;
+    let mut bytes = [0b10000000; 256];
+    let mut i = 0u8;
+    loop {
+        if is_token(i) {
+            bytes[i as usize] = i.to_ascii_lowercase();
         }
-        bytes
-    };
-
-    PAT[byte as usize]
-}
-
+        if i == 127 {
+            break;
+        }
+        i += 1;
+    }
+    bytes
+};

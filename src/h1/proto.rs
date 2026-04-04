@@ -9,7 +9,7 @@ use crate::h1::states::Session;
 use crate::headers::{HeaderField, HeaderName, HeaderValue, lookup};
 use crate::http::error::{ParseError, ProtoError, UserError};
 use crate::http::{Authority, Method, Request, Response, Target, httpdate_now, request, response};
-use crate::matches;
+use crate::headers::matches;
 
 use ParseError as P;
 use ProtoError as E;

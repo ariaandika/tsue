@@ -64,45 +64,10 @@ pub const fn unreserved(byte: u8) -> bool {
 pub const fn sub_delims(byte: u8) -> bool {
     matches!(
         byte,
-        b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'='
-    ) || byte.is_ascii_alphanumeric()
+        | b'!' | b'$' | b'&' | b'\'' | b'(' | b')'
+        | b'*' | b'+' | b',' | b';' | b'='
+    )
 }
-
-ascii_lookup_table! {
-    /// token   = 1*tchar
-    /// tchar   = "!" / "#" / "$" / "%" / "&" / "'" / "*"
-    ///         / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
-    ///         / DIGIT / ALPHA
-    #[inline(always)]
-    pub const fn is_token(byte: u8) -> bool {
-        matches!(
-            byte,
-            | b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*'
-            | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
-        )
-        || byte.is_ascii_alphanumeric()
-    }
-}
-
-// ===== lookup table =====
-
-/// Any invalid character will have it MSB set.
-///
-/// Character is normalized to lowercase.
-pub const HEADER_NAME: [u8; 256] = {
-    let mut bytes = [0b10000000; 256];
-    let mut i = 0u8;
-    loop {
-        if is_token(i) {
-            bytes[i as usize] = i.to_ascii_lowercase();
-        }
-        if i == 127 {
-            break;
-        }
-        i += 1;
-    }
-    bytes
-};
 
 // ===== SWAR =====
 

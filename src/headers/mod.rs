@@ -63,7 +63,8 @@
 // NOTE: current it is not possible to provide generic for custom hasher because a const evaluation
 // is needed to compute a static header hash at compile time
 
-mod matches;
+pub(crate) mod matches;
+
 mod name;
 mod value;
 mod field;
