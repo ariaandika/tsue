@@ -61,11 +61,22 @@ unsafe impl Sync for HeaderMap {}
 
 impl Drop for HeaderMap {
     fn drop(&mut self) {
-        let cap = self.cap as usize;
-        let len = if self.is_empty() { 0 } else { cap };
-        // SAFETY: `self.len` represent fields that is some, all fields are initialized, len 0 if
-        // map empty is to prevent `Vec::drop` iterating what will be all `None` elements
-        unsafe { Vec::from_raw_parts(self.fields.as_ptr(), len, cap) };
+        // dangling ptr
+        if self.cap == 0 {
+            return;
+        }
+        // SAFETY: `self.len` represent fields that is `Some`, all fields are initialized,
+        //
+        // only drop if not empty is to prevent iterating what will be all `None` elements
+        if !self.is_empty() {
+            unsafe {
+                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
+                    self.fields.as_ptr(),
+                    self.cap as usize,
+                ))
+            };
+        }
+        alloc::deallocate(self.fields, self.cap);
     }
 }
 
@@ -165,10 +176,11 @@ impl HeaderMap {
         // it is required that capacity is power of two,
         // see `fn mask_by_capacity()`
         debug_assert!(cap.is_power_of_two());
-        let ptr = Vec::into_raw_parts(vec![None; cap as usize]).0;
-        let fields = ptr::NonNull::new(ptr).expect("Vec ptr is non null");
-        let len = 0;
-        Self { fields, len, cap }
+        Self {
+            fields: alloc::allocate_initialized(cap),
+            len: 0,
+            cap,
+        }
     }
 
     pub(crate) const fn len_size(&self) -> Size {
@@ -676,5 +688,38 @@ mod sealed {
         fn into_header_name(self) -> HeaderName {
             self
         }
+    }
+}
+
+mod alloc {
+    use std::alloc::{Layout, handle_alloc_error};
+    use std::ptr::NonNull;
+
+    use super::HeaderField;
+
+    const SIZE: usize = size_of::<Option<HeaderField>>();
+    const ALIGN: usize = align_of::<Option<HeaderField>>();
+
+    const fn layout(cap: u32) -> Layout {
+        // `u32::MAX * SIZE` is below `isize::MAX`
+        unsafe { Layout::from_size_align_unchecked(SIZE * cap as usize, ALIGN) }
+    }
+
+    pub fn allocate_initialized(cap: u32) -> NonNull<Option<HeaderField>> {
+        unsafe {
+            let layout = layout(cap);
+            let Some(ok) = NonNull::new(std::alloc::alloc(layout)) else {
+                handle_alloc_error(layout)
+            };
+            let ptr = ok.cast();
+            for i in 0..cap as usize {
+                std::ptr::write(ptr.add(i).as_ptr(), None);
+            }
+            ptr
+        }
+    }
+
+    pub fn deallocate(ptr: NonNull<Option<HeaderField>>, cap: u32) {
+        unsafe { std::alloc::dealloc(ptr.cast().as_ptr(), layout(cap)) };
     }
 }

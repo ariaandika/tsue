@@ -16,6 +16,9 @@ fn test_header_map() {
 
     const FOO: HeaderValue = HeaderValue::from_static(b"FOO");
 
+    // dangling ptr
+    drop(HeaderMap::new());
+
     let mut map = HeaderMap::new();
 
     assert!(map.insert(s::DATE, FOO).is_none());
