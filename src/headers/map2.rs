@@ -266,7 +266,7 @@ impl HeaderMap {
     #[inline]
     pub fn insert(&mut self, name: HeaderName, value: HeaderValue) -> Option<HeaderField> {
         self.reserve_one().expect("cannot insert header");
-        unsafe { self.insert_inner(HeaderField::new(name, value), false) }
+        unsafe { self.insert_inner(name.hash(), HeaderField::new(name, value), false) }
     }
 
     /// Append a header key and value into the map.
@@ -280,7 +280,7 @@ impl HeaderMap {
     #[inline]
     pub fn append(&mut self, name: HeaderName, value: HeaderValue) {
         self.reserve_one().expect("cannot append header");
-        unsafe { self.insert_inner(HeaderField::new(name, value), true) };
+        unsafe { self.insert_inner(name.hash(), HeaderField::new(name, value), true) };
     }
 
     // pub(crate) fn try_append_field(&mut self, field: HeaderField) -> Result<(), TryReserveError> {
@@ -371,10 +371,9 @@ impl HeaderMap {
     /// # Safety
     ///
     /// `self.len < self.cap`
-    unsafe fn insert_inner(&mut self, field: HeaderField, append: bool) -> Option<HeaderField> {
+    unsafe fn insert_inner(&mut self, hash: u32, field: HeaderField, append: bool) -> Option<HeaderField> {
         debug_assert!(self.len < self.cap);
 
-        let hash = field.name().hash();
         let ptr = self.fields.cast::<HashIdx>();
         let offset = alloc::offset(self.cap);
         let hash_field_cap = alloc::hash_field_cap(offset) as Size;
@@ -404,20 +403,17 @@ impl HeaderMap {
                 return None
             };
 
-            if hash == dup_hash_field.hash {
+            if !append && hash == dup_hash_field.hash {
                 // duplicate Header
 
-                if !append {
-                    // let dup_field = unsafe { self.fields.add(dup_hash_field.idx.get() as usize).as_mut() };
-                    let dup_field = dup_hash_field.field_mut(self);
-                    if dup_field.name() == field.name() {
-                        // replace and returns duplicate
-                        return Some(mem::replace(dup_field, field));
-                    }
+                let dup_field = dup_hash_field.field_mut(self);
+                if dup_field.name() == field.name() {
+                    // replace and returns duplicate
+                    return Some(mem::replace(dup_field, field));
                 }
-
-                // appending, look for the next empty slot
             }
+
+            // appending, look for the next empty slot
 
             // linear probing
             index += 1;
