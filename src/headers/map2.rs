@@ -3,7 +3,6 @@ use std::num::NonZeroU32;
 use std::{mem, ptr, slice};
 
 use crate::headers::error::TryReserveError;
-use crate::headers::matches;
 use crate::headers::{HeaderName, HeaderValue};
 
 // space-time tradeoff
@@ -15,19 +14,6 @@ const DEFAULT_MIN_ALLOC: Size = 4;
 
 /// HTTP Headers Multimap.
 ///
-/// # Header Name
-///
-/// All operations that requires header name as parameter, can accept either static `str` or
-/// [`HeaderName`] as the value.
-///
-/// When using static `str`, it must be valid header name in ASCII lowercase.
-///
-/// It is prefered to use `HeaderName`'s [provided constants] instead of static `str` as it can
-/// utilize the cached hash code as oppose to static `str` which calculate it on demand.
-///
-/// If there is no constant provided for wanted header, use [`HeaderName::from_static`] to validate
-/// and calculate hash code at compile time.
-///
 /// # Hash Function
 ///
 /// `HeaderMap` **DOES NOT** use hashing algorithm that provide resistance against HashDoS attacks.
@@ -38,8 +24,6 @@ const DEFAULT_MIN_ALLOC: Size = 4;
 ///
 /// This implementation has a maximum capacity that is lower than the system limit. The exact limit
 /// is sufficient for all HTTP headers use cases.
-///
-/// [provided constants]: crate::headers::standard
 pub struct HeaderMap {
     fields: ptr::NonNull<HeaderField>,
     len: Size,
@@ -236,27 +220,15 @@ impl HeaderMap {
     }
 
     /// Returns `true` if the map contains a header value for given header name.
-    ///
-    /// For header name it is prefered to use [provided constants] as oppose to static `str`, see
-    /// [`HeaderMap`] documentation for more details.
-    ///
-    /// # Panics
-    ///
-    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
-    ///
-    /// [provided constants]: crate::headers::standard
     #[inline]
-    pub fn contains_key<K: AsHeaderName>(&self, name: K) -> bool {
+    pub fn contains_key(&self, name: &HeaderName) -> bool {
         if self.is_empty() {
             return false
         }
-        self.field(name.as_lowercase_str(), name.hash()).is_some()
+        self.field(name.as_str(), name.hash()).is_some()
     }
 
     /// Returns a reference to the first header value corresponding to the given header name.
-    ///
-    /// For header name it is prefered to use [provided constants] as oppose to static `str`, see
-    /// [`HeaderMap`] documentation for more details.
     ///
     /// ```rust
     /// use tsue::headers::{standard::{CONTENT_TYPE, DATE}, HeaderMap, HeaderValue};
@@ -267,32 +239,17 @@ impl HeaderMap {
     ///
     /// let ctype = map.get(CONTENT_TYPE);
     /// ```
-    ///
-    /// # Panics
-    ///
-    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
-    ///
-    /// [provided constants]: crate::headers::standard
     #[inline]
-    pub fn get<K: AsHeaderName>(&self, name: K) -> Option<&HeaderValue> {
+    pub fn get(&self, name: &HeaderName) -> Option<&HeaderValue> {
         if self.is_empty() {
             return None;
         }
-        self.field(name.as_lowercase_str(), name.hash()).map(HeaderField::value)
+        self.field(name.as_str(), name.hash()).map(HeaderField::value)
     }
 
     // /// Returns an iterator to all header values corresponding to the given header name.
     // ///
     // /// Note that this is the result of duplicate header fields, *NOT* comma separated list.
-    // ///
-    // /// For header name it is prefered to use [provided constants] as oppose to static `str`, see
-    // /// [`HeaderMap`] documentation for more details.
-    // ///
-    // /// # Panics
-    // ///
-    // /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
-    // ///
-    // /// [provided constants]: crate::headers::standard
     // #[inline]
     // pub fn get_all<'a, K: AsHeaderName>(&'a self, name: &'a K) -> iter::GetAll<'a> {
     //     iter::GetAll::new(self, name.as_lowercase_str(), name.hash())
@@ -303,24 +260,13 @@ impl HeaderMap {
     /// If the map did have this key present, the value is updated, and the old value is returned
     /// as `Some`.
     ///
-    /// For header name it is prefered to use [provided constants] as oppose to static `str`, see
-    /// [`HeaderMap`] documentation for more details.
-    ///
     /// # Panics
     ///
     /// Panics if the new capacity exceeds the HeaderMap capacity limit.
-    ///
-    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
-    ///
-    /// [provided constants]: crate::headers::standard
     #[inline]
-    pub fn insert<K: IntoHeaderName>(
-        &mut self,
-        name: K,
-        value: HeaderValue,
-    ) -> Option<HeaderField> {
+    pub fn insert(&mut self, name: HeaderName, value: HeaderValue) -> Option<HeaderField> {
         self.reserve_one().expect("cannot insert header");
-        unsafe { self.insert_inner(HeaderField::new(name.into_header_name(), value), false) }
+        unsafe { self.insert_inner(HeaderField::new(name, value), false) }
     }
 
     /// Append a header key and value into the map.
@@ -328,20 +274,13 @@ impl HeaderMap {
     /// Unlike [`insert`][HeaderMap::insert], if header key is present, header value is still
     /// appended as extra value.
     ///
-    /// For header name it is prefered to use [provided constants] as oppose to static `str`, see
-    /// [`HeaderMap`] documentation for more details.
-    ///
     /// # Panics
     ///
     /// Panics if the new capacity exceeds the HeaderMap capacity limit.
-    ///
-    /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
-    ///
-    /// [provided constants]: crate::headers::standard
     #[inline]
-    pub fn append<K: IntoHeaderName>(&mut self, name: K, value: HeaderValue) {
+    pub fn append(&mut self, name: HeaderName, value: HeaderValue) {
         self.reserve_one().expect("cannot append header");
-        unsafe { self.insert_inner(HeaderField::new(name.into_header_name(), value), true) };
+        unsafe { self.insert_inner(HeaderField::new(name, value), true) };
     }
 
     // pub(crate) fn try_append_field(&mut self, field: HeaderField) -> Result<(), TryReserveError> {
@@ -351,15 +290,6 @@ impl HeaderMap {
     // }
 
     // /// Removes a header from the map, returning the first header value if it founds.
-    // ///
-    // /// For header name it is prefered to use [provided constants] as oppose to static `str`, see
-    // /// [`HeaderMap`] documentation for more details.
-    // ///
-    // /// # Panics
-    // ///
-    // /// When using static str, it must be valid header name and in lowercase, otherwise it panics.
-    // ///
-    // /// [provided constants]: crate::headers::standard
     // #[inline]
     // pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderField> {
     //     if self.is_empty() {
@@ -654,104 +584,6 @@ impl std::fmt::Debug for HeaderMap {
     }
 }
 
-// ===== Ref Traits =====
-
-/// A type that can be used for [`HeaderMap`]'s lookup operations.
-///
-/// It is prefered to use [provided constants] as oppose to static `str`, see [`HeaderMap`]
-/// documentation for more details.
-///
-/// [provided constants]: crate::headers::standard
-pub trait AsHeaderName: sealed_ref::SealedRef { }
-mod sealed_ref {
-    use super::*;
-
-    pub trait SealedRef {
-        fn hash(&self) -> Size;
-
-        /// Returns lowercase string
-        fn as_lowercase_str(&self) -> &str;
-    }
-
-    /// for str input, calculate hash
-    ///
-    /// will panics if it contains invalid header name character.
-    impl AsHeaderName for &'static str { }
-    impl SealedRef for &'static str {
-        #[inline]
-        fn hash(&self) -> Size {
-            matches::hash_32(self.as_bytes())
-        }
-
-        #[inline]
-        fn as_lowercase_str(&self) -> &str {
-            HeaderName::validate_lowercase(self.as_bytes());
-            self
-        }
-    }
-
-    /// for HeaderName, hash may be cached
-    impl AsHeaderName for HeaderName { }
-    impl SealedRef for HeaderName {
-        #[inline]
-        fn hash(&self) -> Size {
-            HeaderName::hash(self)
-        }
-
-        #[inline]
-        fn as_lowercase_str(&self) -> &str {
-            HeaderName::as_str(self)
-        }
-    }
-
-    // blanket implementation
-    impl<K: AsHeaderName> AsHeaderName for &K { }
-    impl<S: SealedRef> SealedRef for &S {
-        #[inline]
-        fn hash(&self) -> Size {
-            S::hash(self)
-        }
-
-        #[inline]
-        fn as_lowercase_str(&self) -> &str {
-            S::as_lowercase_str(self)
-        }
-    }
-}
-
-// ===== Owned Traits =====
-
-/// A type that can be used for [`HeaderMap`]'s `insert` or `append` operation.
-///
-/// It is prefered to use [provided constants] as oppose to static `str`, see [`HeaderMap`]
-/// documentation for more details.
-///
-/// [provided constants]: crate::headers::standard
-pub trait IntoHeaderName: sealed::Sealed {}
-mod sealed {
-    use super::*;
-
-    pub trait Sealed {
-        fn into_header_name(self) -> HeaderName;
-    }
-
-    impl IntoHeaderName for &'static str {}
-    impl Sealed for &'static str {
-        #[inline]
-        fn into_header_name(self) -> HeaderName {
-            HeaderName::from_static(self.as_bytes())
-        }
-    }
-
-    impl IntoHeaderName for HeaderName {}
-    impl Sealed for HeaderName {
-        #[inline]
-        fn into_header_name(self) -> HeaderName {
-            self
-        }
-    }
-}
-
 mod alloc {
     //! Allocation for the HeaderMap is divided into two region. The first region is used to store
     //! hash and index pair for lookups, then the rest is where the fields are stored.
@@ -759,26 +591,9 @@ mod alloc {
     //! ```not_rust
     //! SIZE = 48
     //! LOAD_FACTOR = 3/4
-    //! cap
     //! load = cap * LOAD_FACTOR
-    //! off = cap - load
+    //! off = cap * (1 - LOAD_FACTOR)
     //! [ off | load ]
-    //! ```
-    //!
-    //! # Example allocation
-    //!
-    //! ```not_rust
-    //! cap = 4
-    //! load = 3
-    //! off = 1
-    //! alloc = 192
-    //! [ 48 | 144 ]
-    //!
-    //! cap = 8
-    //! load = 6
-    //! off = 2
-    //! alloc = 384
-    //! [ 96 | 288 ]
     //! ```
 
     use std::alloc::{Layout, handle_alloc_error, alloc, dealloc};
@@ -804,14 +619,13 @@ mod alloc {
 
     /// Calculate offset to the first pointer of the fields.
     ///
-    /// ```ignore
-    /// let field_ptr = unsafe { self.fields.add(alloc::offset(self.cap)) };
-    /// ```
+    /// Returned `offset` is in [`SIZE`] bytes.
     pub const fn offset(cap: Size) -> usize {
         // cap * (1 - LOAD_FACTOR)
         cap as usize / 4
     }
 
+    /// Calculate capacity of hash field.
     pub const fn hash_field_cap(offset: usize) -> usize {
         offset * OFFSET_SCALE
     }
@@ -865,10 +679,10 @@ fn test_header_map() {
     let mut map = HeaderMap::new();
 
     assert!(map.insert(s::DATE, FOO).is_none());
-    assert!(map.contains_key(s::DATE));
+    assert!(map.contains_key(&s::DATE));
 
     let field = map.insert(s::DATE, FOO).unwrap();
-    assert!(map.contains_key(s::DATE));
+    assert!(map.contains_key(&s::DATE));
     assert_eq!(field.name(), &s::DATE);
     assert_eq!(field.value(), &FOO);
 
@@ -882,7 +696,7 @@ fn test_header_map() {
     let len = map.len();
 
     map.append(s::DATE, FOO);
-    assert!(map.contains_key(s::DATE));
+    assert!(map.contains_key(&s::DATE));
 
     assert_eq!(map.len(), len + 1);
 
