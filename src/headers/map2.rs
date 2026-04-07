@@ -469,20 +469,10 @@ impl HeaderMap {
 
     #[inline]
     fn reserve_one(&mut self) -> Result<(), TryReserveError> {
-        if alloc::is_load_factor_exceeded(self.len, self.cap) {
-            let cap = if self.cap == 0 {
-                DEFAULT_MIN_ALLOC
-            } else {
-                match self.cap.checked_shl(1) {
-                    Some(ok) => ok,
-                    None => return Err(TryReserveError {}),
-                }
-            };
-
-            self.reserve_size(cap);
+        if !alloc::is_load_factor_exceeded(self.len, self.cap) {
+            return Ok(());
         }
-
-        Ok(())
+        self.try_reserve_size(1)
     }
 
     /// Reserves capacity for at least `additional` more headers.
@@ -495,25 +485,26 @@ impl HeaderMap {
         let Ok(add) = Size::try_from(additional) else {
             return Err(TryReserveError {});
         };
-
         if self.cap - self.len > add {
             return Ok(());
         }
+        let Some(new_cap) = self.len.checked_add(add) else {
+            return Err(TryReserveError {});
+        };
+        self.try_reserve_size(new_cap)
+    }
 
-        let Some(required_cap) = self.len.checked_add(add) else {
+    fn try_reserve_size(&mut self, add: Size) -> Result<(), TryReserveError> {
+        let Some(cap) = self
+            .cap
+            .max(DEFAULT_MIN_ALLOC)
+            .checked_mul(2)
+            .max(self.len.checked_add(add))
+        else {
             return Err(TryReserveError {});
         };
 
-        let cap = (self.cap * 2).max(required_cap);
-        let cap = DEFAULT_MIN_ALLOC.max(cap);
-
-        self.reserve_size(cap);
-        Ok(())
-    }
-
-    /// Reserves capacity for exactly `new_cap` headers.
-    fn reserve_size(&mut self, new_cap: Size) {
-        let mut new_map = Self::with_capacity_size(new_cap);
+        let mut new_map = Self::with_capacity_size(cap);
 
         // copy to new map
         self.copy_to(&mut new_map);
@@ -523,6 +514,8 @@ impl HeaderMap {
             alloc::deallocate(self.fields, self.cap);
         }
         let _ = mem::ManuallyDrop::new(mem::replace(self, new_map));
+
+        Ok(())
     }
 
     fn copy_to(&self, new_map: &mut Self) {
