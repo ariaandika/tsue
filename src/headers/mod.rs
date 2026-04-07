@@ -71,6 +71,9 @@ mod field;
 mod map;
 pub mod iter;
 
+#[doc(hidden)] // experimental
+pub mod map2;
+
 #[cfg(test)]
 mod test;
 
