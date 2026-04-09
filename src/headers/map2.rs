@@ -10,8 +10,6 @@ use crate::headers::{HeaderName, HeaderValue};
 // this limit practically should never exceeded for header length
 type Size = u32;
 
-const DEFAULT_MIN_ALLOC: Size = 4;
-
 /// HTTP Headers Multimap.
 ///
 /// # Hash Function
@@ -507,6 +505,8 @@ impl HeaderMap {
     }
 
     fn try_reserve_size(&mut self, add: Size) -> Result<(), TryReserveError> {
+        const DEFAULT_MIN_ALLOC: Size = 2;
+
         let Some(cap) = self
             .cap
             .max(DEFAULT_MIN_ALLOC)
@@ -540,9 +540,12 @@ impl HeaderMap {
         let new_offset = alloc::offset(new_map.cap);
         let new_hash_field_cap = alloc::hash_field_cap(new_offset) as Size;
 
+        // when the hash table size changes, every index will also change
+        let offset_delta = (new_offset - offset) as u32;
+
         let mut i = 0;
 
-        while self.len < new_map.len {
+        while new_map.len < self.len {
             let hash_field = unsafe { ptr.add(i as usize).as_ref() };
             let Some(hash_field_ref) = hash_field.as_ref() else {
                 i += 1;
@@ -560,7 +563,10 @@ impl HeaderMap {
                         new_index += 1;
                     },
                     None => {
-                        *new_field = *hash_field;
+                        *new_field = Some(HashField {
+                            hash: hash_field_ref.hash,
+                            idx: unsafe { NonZeroU32::new_unchecked(hash_field_ref.idx.get() + offset_delta) },
+                        });
                         new_map.len += 1;
                         break;
                     }
@@ -576,6 +582,8 @@ impl HeaderMap {
                 .add(offset)
                 .copy_to_nonoverlapping(new_map.fields.add(new_offset), self.len as usize)
         };
+
+        debug_assert_eq!(new_map.len, self.len);
     }
 }
 
