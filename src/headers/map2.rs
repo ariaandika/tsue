@@ -71,6 +71,10 @@ impl HashField {
     fn field_mut<'a>(&self, map: &'a mut HeaderMap) -> &'a mut HeaderField {
         unsafe { map.fields.add(self.idx.get() as usize).as_mut() }
     }
+
+    fn field_ptr(&self, map: &mut HeaderMap) -> ptr::NonNull<HeaderField> {
+        unsafe { map.fields.add(self.idx.get() as usize) }
+    }
 }
 
 unsafe impl Send for HeaderMap {}
@@ -289,14 +293,14 @@ impl HeaderMap {
     //     Ok(())
     // }
 
-    // /// Removes a header from the map, returning the first header value if it founds.
-    // #[inline]
-    // pub fn remove<K: AsHeaderName>(&mut self, name: K) -> Option<HeaderField> {
-    //     if self.is_empty() {
-    //         return None;
-    //     }
-    //     self.remove_inner(name.as_lowercase_str(), name.hash())
-    // }
+    /// Removes a header from the map, returning the first header value if it founds.
+    #[inline]
+    pub fn remove(&mut self, name: &HeaderName) -> Option<HeaderField> {
+        if self.is_empty() {
+            return None;
+        }
+        self.remove_inner(name.as_str(), name.hash())
+    }
 
     /// Reserves capacity for at least `additional` more headers.
     ///
@@ -420,52 +424,60 @@ impl HeaderMap {
         }
     }
 
-    // /// Removing is not an O(1) operation if there is hash collision
-    // fn remove_inner(&mut self, name: &str, hash: Size) -> Option<HeaderField> {
-    //     let mut removed_index = hash;
-    //     let mut field_mut;
-    //
-    //     loop {
-    //         removed_index = mask_by_capacity(self.cap, removed_index);
-    //         // SAFETY: `removed_index` is masked by capacity
-    //         field_mut = unsafe { self.fields.add(removed_index as usize).as_mut() };
-    //         // `?` is the base case
-    //         let field_ref = field_mut.as_ref()?;
-    //
-    //         if hash == field_ref.cached_hash() && name == field_ref.name().as_str() {
-    //             break;
-    //         }
-    //
-    //         // linear probing
-    //         removed_index += 1;
-    //     };
-    //
-    //     let mut swap_candidate = &mut None;
-    //     let mut index = removed_index;
-    //
-    //     loop {
-    //         index = mask_by_capacity(self.cap, index + 1);
-    //         // SAFETY: `index` is masked by capacity
-    //         let next_field_mut = unsafe { self.fields.add(index as usize).as_mut() };
-    //         let Some(next_field) = next_field_mut.as_mut() else {
-    //             break;
-    //         };
-    //         let ideal_index = mask_by_capacity(self.cap, next_field.cached_hash());
-    //
-    //         // if the ideal index is same as the removed index, this field is a victim of hash
-    //         // collision, make it candidate for swapping
-    //         //
-    //         // this also make sure to not swap the field that is in its ideal index
-    //         if ideal_index == removed_index {
-    //             swap_candidate = next_field_mut;
-    //         }
-    //     }
-    //
-    //     debug_assert!(field_mut.is_some());
-    //
-    //     self.len -= 1;
-    //     mem::replace(field_mut, swap_candidate.take())
-    // }
+    fn remove_inner(&mut self, name: &str, hash: u32) -> Option<HeaderField> {
+        let ptr = self.fields.cast::<HashIdx>();
+        let offset = alloc::offset(self.cap);
+        let hash_field_cap = alloc::hash_field_cap(offset) as Size;
+
+        let mut index = hash;
+
+        let hash_field = loop {
+            index %= hash_field_cap;
+            // `?` is the base case of the loop, there is always `None` because the load
+            // factor is capped to less than capacity
+            let hash_field = unsafe { ptr.add(index as usize).as_mut().as_mut()? };
+            if hash_field.hash == hash {
+                let field = hash_field.field(self);
+                if field.name().as_str() == name {
+                    break hash_field;
+                }
+            }
+
+            // linear probing
+            index += 1;
+        };
+
+        // backward shifting, `n` elements are affected
+        let n = self.len - (hash_field.idx.get() - offset as u32);
+
+        // for each field affected, update the index in the hash table
+        let mut idx = hash_field.idx.get() + 1;
+        while idx < self.len {
+            let field = unsafe { self.fields.add(idx as usize).as_mut() };
+            let hash = field.name().hash();
+            let hash_idx = hash % hash_field_cap;
+            unsafe {
+                ptr.add(hash_idx as usize).write(Some(HashField {
+                    hash,
+                    idx: NonZeroU32::new_unchecked(idx - 1),
+                }))
+            };
+            idx += 1;
+        }
+
+        // remove the hash entry
+        let field_ptr = hash_field.field_ptr(self);
+        // zero bytes is valid because it represent `None`, see the the
+        // `alloc` module below and the test for it
+        #[allow(invalid_value)]
+        unsafe { ptr::write(hash_field as *mut HashField as *mut HashIdx, mem::zeroed()); };
+
+        // take the removed field out
+        let field = unsafe { field_ptr.read() };
+        // copy the fields backward
+        unsafe { field_ptr.copy_from(field_ptr.add(1), n as usize) };
+        Some(field)
+    }
 
     #[inline]
     fn reserve_one(&mut self) -> Result<(), TryReserveError> {
