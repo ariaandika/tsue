@@ -319,7 +319,7 @@ impl HeaderMap {
 
         let offset = alloc::offset(self.cap);
 
-        // zeroed the hash table
+        // clear the hash table
         unsafe { std::ptr::write_bytes(self.fields.as_ptr(), 0, offset) };
 
         // call drop on fields except the hash table
@@ -467,8 +467,7 @@ impl HeaderMap {
         let field_ptr = hash_field.field_ptr(self);
         // zero bytes is valid because it represent `None`, see the the
         // `alloc` module below and the test for it
-        #[allow(invalid_value)]
-        unsafe { ptr::write(hash_field as *mut HashField as *mut HashIdx, mem::zeroed()); };
+        unsafe { std::ptr::write_bytes(hash_field, 0, offset) };
 
         // take the removed field out
         let field = unsafe { field_ptr.read() };
