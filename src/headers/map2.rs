@@ -422,57 +422,101 @@ impl HeaderMap {
         }
     }
 
+    /// backward shifting removal
+    /// 1. find the target hash field, returns if not found
+    /// 2. replace the hash field with other entry that may be displaced by collision
+    /// 3. update hash fields indexes that will be shifted
+    /// 4. take out the removed field
+    /// 5. copy the fields backward
     fn remove_inner(&mut self, name: &str, hash: u32) -> Option<HeaderField> {
         let ptr = self.fields.cast::<HashIdx>();
         let offset = alloc::offset(self.cap);
         let hash_field_cap = alloc::hash_field_cap(offset) as Size;
 
-        let mut index = hash;
+        let mut index = hash % hash_field_cap;
 
-        let hash_field = loop {
-            index %= hash_field_cap;
+        // 1. find the target field
+        loop {
             // `?` is the base case of the loop, there is always `None` because the load
             // factor is capped to less than capacity
+            // SAFETY: `index` is masked by hash table capacity
             let hash_field = unsafe { ptr.add(index as usize).as_mut().as_mut()? };
             if hash_field.hash == hash {
                 let field = hash_field.field(self);
                 if field.name().as_str() == name {
-                    break hash_field;
+                    break;
                 }
             }
 
             // linear probing
-            index += 1;
+            index = (index + 1) % hash_field_cap;
+        }
+        let hash_field_idx = index;
+
+        // 2. replace the hash field with other entry that may be displaced by collision
+        let mut swap_candidate = &mut None;
+        loop {
+            index = (index + 1) % hash_field_cap;
+            // SAFETY: `index` is masked by hash table capacity
+            let hash_field_mut = unsafe { ptr.add(index as usize).as_mut() };
+            let Some(hash_field) = hash_field_mut.as_mut() else {
+                break;
+            };
+            // only hash field that is displaced that should be swapped, other field may just
+            // happens to be contiguous
+            if hash_field.hash % hash_field_cap == hash_field_idx {
+                swap_candidate = hash_field_mut;
+            }
+        }
+        // SAFETY:
+        // - `target_idx` is result of the search, its valid index
+        // - `unwrap_unchecked` is safe because if the target hash field is `None`, this function
+        // already returned
+        let hash_field = unsafe {
+            ptr.add(hash_field_idx as usize)
+                .replace(swap_candidate.take())
+                .unwrap_unchecked()
         };
 
-        // backward shifting, `n` elements are affected
-        let n = self.len - (hash_field.idx.get() - offset as u32);
+        // 3. update hash fields indexes that will be shifted
+        // `hash_field.idx` are index with `offset` applied, but `self.len` is not
+        let max_bounds = self.len + offset as u32;
+        let mut i = hash_field.idx.get() + 1;
+        while i < max_bounds {
+            let field_mut = unsafe { self.fields.add(i as usize).as_mut() };
+            let hash = field_mut.name().hash();
+            let mut hash_idx = hash % hash_field_cap;
 
-        // for each field affected, update the index in the hash table
-        let mut idx = hash_field.idx.get() + 1;
-        while idx < self.len {
-            let field = unsafe { self.fields.add(idx as usize).as_mut() };
-            let hash = field.name().hash();
-            let hash_idx = hash % hash_field_cap;
-            unsafe {
-                ptr.add(hash_idx as usize).write(Some(HashField {
-                    hash,
-                    idx: NonZeroU32::new_unchecked(idx - 1),
-                }))
-            };
-            idx += 1;
+            loop {
+                let hash_field = unsafe { ptr.add(hash_idx as usize).as_mut().as_mut() };
+                let Some(hash_field) = hash_field else {
+                    unreachable!("fields with no hash entry")
+                };
+                // check whether this is the correct hash fields, not displaced
+                if hash_field.hash == hash {
+                    // affected fields is backshifted
+                    hash_field.idx = unsafe { NonZeroU32::new_unchecked(i - 1) };
+                    break;
+                }
+                // displaced, search next entry
+                hash_idx = (hash_idx + 1) % hash_field_cap;
+            }
+
+            i += 1;
         }
 
-        // remove the hash entry
+        // 4. take out the removed field
         let field_ptr = hash_field.field_ptr(self);
-        // zero bytes is valid because it represent `None`, see the the
-        // `alloc` module below and the test for it
-        unsafe { std::ptr::write_bytes(hash_field, 0, offset) };
-
-        // take the removed field out
+        // the ptr here will be overwritten
         let field = unsafe { field_ptr.read() };
-        // copy the fields backward
+
+        // 5. copy the fields backward
+        // do this AFTER all hash tables updated
+        let n = self.len - (hash_field.idx.get() - offset as u32);
         unsafe { field_ptr.copy_from(field_ptr.add(1), n as usize) };
+
+        // update the length
+        self.len -= 1;
         Some(field)
     }
 
