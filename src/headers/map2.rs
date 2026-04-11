@@ -227,7 +227,7 @@ impl HeaderMap {
         if self.is_empty() {
             return false
         }
-        self.hash_field(name.as_str(), name.hash()).is_some()
+        self.field(name.as_str(), name.hash()).is_some()
     }
 
     /// Returns a reference to the first header value corresponding to the given header name.
@@ -246,11 +246,7 @@ impl HeaderMap {
         if self.is_empty() {
             return None;
         }
-        Some(
-            self.hash_field(name.as_str(), name.hash())?
-                .field(self)
-                .value(),
-        )
+        self.field(name.as_str(), name.hash()).map(HeaderField::value)
     }
 
     // /// Returns an iterator to all header values corresponding to the given header name.
@@ -350,29 +346,15 @@ impl HeaderMap {
 // ===== Implementation =====
 
 impl HeaderMap {
-    fn hash_field(&self, name: &str, hash: u32) -> Option<&HashField> {
-        let ptr = self.fields.cast::<HashIdx>();
-        let offset = alloc::offset(self.cap);
-        let hash_field_cap = alloc::hash_field_cap(offset) as Size;
-
-        let mut index = hash;
-
-        loop {
-            index %= hash_field_cap;
-            // `?` is the base case of the loop, there is always `None` because the load
-            // factor is capped to less than capacity
-            // SAFETY: `index` is masked by hash field capacity
-            let hash_field = unsafe { ptr.add(index as usize).as_ref().as_ref()? };
-            if hash_field.hash == hash {
-                let field = hash_field.field(self);
-                if field.name().as_str() == name {
-                    return Some(hash_field);
-                }
-            }
-
-            // linear probing
-            index += 1;
+    fn field(&self, name: &str, hash: u32) -> Option<&HeaderField> {
+        probe_search! {
+            let ptr;
+            let off;
+            let cap;
+            let index;
+            self, name, hash
         }
+        unsafe { ptr.add(index as usize).as_ref().as_ref().map(|e|e.field(self)) }
     }
 
     /// # Safety
@@ -434,27 +416,13 @@ impl HeaderMap {
     /// 4. take out the removed field
     /// 5. copy the fields backward
     fn remove_inner(&mut self, name: &str, hash: u32) -> Option<HeaderField> {
-        let ptr = self.fields.cast::<HashIdx>();
-        let offset = alloc::offset(self.cap);
-        let hash_field_cap = alloc::hash_field_cap(offset) as Size;
-
-        let mut index = hash % hash_field_cap;
-
-        // 1. find the target field
-        loop {
-            // `?` is the base case of the loop, there is always `None` because the load
-            // factor is capped to less than capacity
-            // SAFETY: `index` is masked by hash table capacity
-            let hash_field = unsafe { ptr.add(index as usize).as_mut().as_mut()? };
-            if hash_field.hash == hash {
-                let field = hash_field.field(self);
-                if field.name().as_str() == name {
-                    break;
-                }
-            }
-
-            // linear probing
-            index = (index + 1) % hash_field_cap;
+        // 1. find the target hash field
+        probe_search! {
+            let ptr;
+            let offset;
+            let hash_field_cap;
+            let index;
+            self, name, hash
         }
         let hash_field_idx = index;
 
@@ -634,6 +602,41 @@ impl HeaderMap {
         debug_assert_eq!(new_map.len, self.len);
     }
 }
+
+macro_rules! probe_search {
+    (
+        let $ptr:ident;
+        let $off:ident;
+        let $cap:ident;
+        let $index:ident;
+        $map:ident, $name:ident, $hash:ident
+    ) => {
+        let $ptr = $map.fields.cast::<HashIdx>();
+        let $off = alloc::offset($map.cap);
+        let $cap = alloc::hash_field_cap($off) as Size;
+
+        let mut $index = $hash % $cap;
+
+        // 1. find the target hash field
+        loop {
+            // `?` is the base case of the loop, there is always `None` because the load
+            // factor is capped to less than capacity
+            // SAFETY: `index` is masked by hash table capacity
+            let hash_field = unsafe { $ptr.add($index as usize).as_mut().as_mut()? };
+            if hash_field.hash == $hash {
+                let field = hash_field.field($map);
+                if field.name().as_str() == $name {
+                    break;
+                }
+            }
+
+            // linear probing
+            $index = ($index + 1) % $cap;
+        }
+    };
+}
+
+use probe_search;
 
 impl std::fmt::Debug for HeaderMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
