@@ -292,12 +292,34 @@ impl HeaderMap {
     // }
 
     /// Removes a header from the map, returning the first header value if it founds.
+    ///
+    /// Note: Because this shifts over the remaining fields, it has significantly worse performance
+    /// than other operations. If you don't need the order of fields to be preserved, use
+    /// [`swap_remove`] instead.
+    ///
+    /// [`swap_remove`]: Self::swap_remove
     #[inline]
     pub fn remove(&mut self, name: &HeaderName) -> Option<HeaderField> {
         if self.is_empty() {
             return None;
         }
         self.remove_inner(name.as_str(), name.hash())
+    }
+
+    /// Removes a header from the map, returning the first header value if it founds.
+    ///
+    /// The removed field is replaced by the last field of the map.
+    ///
+    /// This does not preserve ordering of the remaining fields. If you need to preserve the element
+    /// order, use [`remove`] instead.
+    ///
+    /// [`remove`]: Self::remove
+    #[inline]
+    pub fn swap_remove(&mut self, name: &HeaderName) -> Option<HeaderField> {
+        if self.is_empty() {
+            return None;
+        }
+        self.swap_remove_inner(name.as_str(), name.hash())
     }
 
     /// Reserves capacity for at least `additional` more headers.
@@ -493,6 +515,87 @@ impl HeaderMap {
         Some(field)
     }
 
+    /// backward shifting removal
+    /// 1. find the target hash field, returns if not found
+    /// 2. replace the hash field with other entry that may be displaced by collision
+    /// 3. update the last field's hash field index
+    /// 4. take out the removed field
+    /// 5. replace with the last field
+    fn swap_remove_inner(&mut self, name: &str, hash: u32) -> Option<HeaderField> {
+        // 1. find the target hash field
+        probe_search! {
+            let ptr;
+            let offset;
+            let hash_field_cap;
+            let index;
+            self, name, hash
+        }
+        let hash_field_idx = index;
+
+        // 2. replace the hash field with other entry that may be displaced by collision
+        let mut swap_candidate = &mut None;
+        loop {
+            index = (index + 1) % hash_field_cap;
+            // SAFETY: `index` is masked by hash table capacity
+            let hash_field_mut = unsafe { ptr.add(index as usize).as_mut() };
+            let Some(hash_field) = hash_field_mut.as_mut() else {
+                break;
+            };
+            // only hash field that is displaced that should be swapped, other field may just
+            // happens to be contiguous
+            if hash_field.hash % hash_field_cap == hash_field_idx {
+                swap_candidate = hash_field_mut;
+            }
+        }
+        // SAFETY:
+        // - `target_idx` is result of the search, its valid index
+        // - `unwrap_unchecked` is safe because if the target hash field is `None`, this function
+        // already returned
+        let hash_field = unsafe {
+            ptr.add(hash_field_idx as usize)
+                .replace(swap_candidate.take())
+                .unwrap_unchecked()
+        };
+
+        // 3. update the last field's hash field index
+        debug_assert!(!self.is_empty());
+        let last_field_idx = offset + (self.len - 1) as usize;
+        if self.len != 1 {
+            let last_field = unsafe { self.fields.add(last_field_idx).as_mut() };
+            let name = last_field.name().as_str();
+            let hash = last_field.name().hash();
+
+            index = hash % hash_field_cap;
+            probe_search! {
+                ptr;
+                offset;
+                hash_field_cap;
+                index;
+                self, name, hash
+            }
+            let swap_hash_field = unsafe { ptr.add(index as usize).as_mut() };
+            let Some(swap_hash_field) = swap_hash_field else {
+                unreachable!("fields with no hash entry")
+            };
+            swap_hash_field.idx = hash_field.idx;
+        }
+
+        // 4. take out the removed field
+        let field_ptr = hash_field.field_ptr(self);
+        // if there is last element, this will be overwritten,
+        // otherwise, the len will be 0, thus no drop will be called
+        let field = unsafe { field_ptr.read() };
+
+        // 5. replace with the last field
+        if self.len != 1 {
+            unsafe { self.fields.add(last_field_idx).copy_to(field_ptr, 1) }
+        }
+
+        // update the length
+        self.len -= 1;
+        Some(field)
+    }
+
     #[inline]
     fn reserve_one(&mut self) -> Result<(), TryReserveError> {
         if !alloc::is_load_factor_exceeded(self.len, self.cap) {
@@ -616,7 +719,21 @@ macro_rules! probe_search {
         let $cap = alloc::hash_field_cap($off) as Size;
 
         let mut $index = $hash % $cap;
-
+        probe_search! {
+            $ptr;
+            $off;
+            $cap;
+            $index;
+            $map, $name, $hash
+        }
+    };
+    (
+        $ptr:ident;
+        $off:ident;
+        $cap:ident;
+        $index:ident;
+        $map:ident, $name:ident, $hash:ident
+    ) => {
         // 1. find the target hash field
         loop {
             // `?` is the base case of the loop, there is always `None` because the load
