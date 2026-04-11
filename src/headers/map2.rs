@@ -227,7 +227,7 @@ impl HeaderMap {
         if self.is_empty() {
             return false
         }
-        self.field(name.as_str(), name.hash()).is_some()
+        self.hash_field(name.as_str(), name.hash()).is_some()
     }
 
     /// Returns a reference to the first header value corresponding to the given header name.
@@ -246,7 +246,11 @@ impl HeaderMap {
         if self.is_empty() {
             return None;
         }
-        self.field(name.as_str(), name.hash()).map(HeaderField::value)
+        Some(
+            self.hash_field(name.as_str(), name.hash())?
+                .field(self)
+                .value(),
+        )
     }
 
     // /// Returns an iterator to all header values corresponding to the given header name.
@@ -346,22 +350,23 @@ impl HeaderMap {
 // ===== Implementation =====
 
 impl HeaderMap {
-    fn field(&self, name: &str, hash: Size) -> Option<&HeaderField> {
-        let mut index = hash;
-
+    fn hash_field(&self, name: &str, hash: u32) -> Option<&HashField> {
         let ptr = self.fields.cast::<HashIdx>();
         let offset = alloc::offset(self.cap);
         let hash_field_cap = alloc::hash_field_cap(offset) as Size;
+
+        let mut index = hash;
 
         loop {
             index %= hash_field_cap;
             // `?` is the base case of the loop, there is always `None` because the load
             // factor is capped to less than capacity
+            // SAFETY: `index` is masked by hash field capacity
             let hash_field = unsafe { ptr.add(index as usize).as_ref().as_ref()? };
             if hash_field.hash == hash {
                 let field = hash_field.field(self);
                 if field.name().as_str() == name {
-                    return Some(field);
+                    return Some(hash_field);
                 }
             }
 
